@@ -95,8 +95,210 @@ class OllamaLLMClient(BaseLLMClient):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
-        # Crucial: trust_env=False prevents httpx from routing 127.0.0.1 through system proxies (e.g. v2ray/VPN)
         self.client = httpx.Client(timeout=timeout, follow_redirects=True, trust_env=False)
+
+
+class GroqLLMClient(BaseLLMClient):
+    """HTTP client for Groq's OpenAI-compatible API."""
+
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: float = 300.0,
+    ):
+        self.base_url = "https://api.groq.com/openai/v1"
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        self.client = httpx.Client(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+
+class OpenAICompatibleClient(BaseLLMClient):
+    """Generic OpenAI-compatible client for providers like Omniroute, Cloudflare, etc."""
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: float = 300.0,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        self.client = httpx.Client(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+    def _prepare_payload(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: Optional[int] = None,
+    ):
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": max_tokens or self.max_tokens,
+        }
+        return payload
+
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: Optional[int] = None,
+        timeout: Optional[float] = None,
+        images: Optional[List[str]] = None,
+    ) -> str:
+        if images:
+            logger.warning("This provider does not support image inputs. Ignoring images.")
+        url = f"{self.base_url}/chat/completions"
+        payload = self._prepare_payload(messages, max_tokens=max_tokens)
+        req_timeout = timeout if timeout is not None else self.timeout
+
+        try:
+            resp = self.client.post(url, json=payload, timeout=req_timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            if "choices" in data and len(data["choices"]) > 0:
+                return data["choices"][0]["message"]["content"]
+            else:
+                logger.warning("Unexpected response format: %s", data)
+                return ""
+        except httpx.TimeoutException:
+            logger.warning("Request timed out after %ss.", req_timeout)
+            return ""
+        except Exception as e:
+            logger.warning(f"Request failed: {e}")
+            return ""
+
+    def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        images: Optional[List[str]] = None,
+    ) -> Generator[str, None, None]:
+        if images:
+            logger.warning("This provider does not support image inputs.")
+        url = f"{self.base_url}/chat/completions"
+        payload = self._prepare_payload(messages)
+        payload["stream"] = True
+
+        try:
+            with self.client.stream("POST", url, json=payload) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line or line == "data: [DONE]":
+                        continue
+                    if line.startswith("data: "):
+                        line = line[6:]
+                    try:
+                        chunk = json.loads(line)
+                        if "choices" in chunk and len(chunk["choices"]) > 0:
+                            content = chunk["choices"][0].get("delta", {}).get("content", "")
+                            if content:
+                                yield content
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            logger.warning(f"Streaming request failed: {e}")
+            yield f"خطا: {e}"
+
+    def _prepare_payload(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: Optional[int] = None,
+    ):
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": max_tokens or self.max_tokens,
+        }
+        return payload
+
+    def generate(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: Optional[int] = None,
+        timeout: Optional[float] = None,
+        images: Optional[List[str]] = None,
+    ) -> str:
+        """Send a non-streaming request to Groq."""
+        if images:
+            logger.warning("Groq does not support image inputs. Ignoring images.")
+        url = f"{self.base_url}/chat/completions"
+        payload = self._prepare_payload(messages, max_tokens=max_tokens)
+        req_timeout = timeout if timeout is not None else self.timeout
+
+        try:
+            resp = self.client.post(url, json=payload, timeout=req_timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            if "choices" in data and len(data["choices"]) > 0:
+                return data["choices"][0]["message"]["content"]
+            else:
+                logger.warning("Unexpected response format from Groq: %s", data)
+                return ""
+        except httpx.TimeoutException:
+            logger.warning("Groq request timed out after %ss.", req_timeout)
+            return ""
+        except Exception as e:
+            logger.warning(f"Groq request failed: {e}")
+            return ""
+
+    def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        images: Optional[List[str]] = None,
+    ) -> Generator[str, None, None]:
+        if images:
+            logger.warning("Groq does not support image inputs. Ignoring images.")
+        url = f"{self.base_url}/chat/completions"
+        payload = self._prepare_payload(messages)
+        payload["stream"] = True
+
+        try:
+            with self.client.stream("POST", url, json=payload) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line or line == "data: [DONE]":
+                        continue
+                    if line.startswith("data: "):
+                        line = line[6:]
+                    try:
+                        chunk = json.loads(line)
+                        if "choices" in chunk and len(chunk["choices"]) > 0:
+                            content = chunk["choices"][0].get("delta", {}).get("content", "")
+                            if content:
+                                yield content
+                    except json.JSONDecodeError:
+                        continue
+        except httpx.TimeoutException:
+            logger.warning("Groq streaming request timed out.")
+            yield "خطا: زمان پاسخدهی به پایان رسید."
+        except Exception as e:
+            logger.warning(f"Groq streaming request failed: {e}")
+            yield f"خطا: {e}"
 
     @staticmethod
     def _encode_images(image_paths: List[str]) -> List[str]:
@@ -212,8 +414,35 @@ def get_llm_client() -> BaseLLMClient:
     settings = get_settings()
     provider = settings.LLM_PROVIDER
 
-    if provider == "openai_compatible" or provider == "ollama":
-        # If base_url is Ollama's default, use the direct client.
+    if provider == "groq":
+        if not settings.LLM_API_KEY:
+            logger.warning("Groq selected but LLM_API_KEY is not set. Using mock.")
+            return MockLLMClient()
+        logger.info(f"Using GroqLLMClient with model={settings.LLM_MODEL_NAME}")
+        return GroqLLMClient(
+            api_key=settings.LLM_API_KEY,
+            model=settings.LLM_MODEL_NAME,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+        )
+
+    if provider == "openai" or provider == "omniroute":
+        if not settings.LLM_API_KEY:
+            logger.warning(f"{provider} selected but LLM_API_KEY is not set. Using mock.")
+            return MockLLMClient()
+        base_url = settings.LLM_BASE_URL
+        if not base_url or base_url == "http://localhost:11434/v1":
+            base_url = "https://api.omniroute.ai/v1"
+        logger.info(f"Using OpenAICompatibleClient ({provider}) with base_url={base_url}, model={settings.LLM_MODEL_NAME}")
+        return OpenAICompatibleClient(
+            api_key=settings.LLM_API_KEY,
+            base_url=base_url,
+            model=settings.LLM_MODEL_NAME,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+        )
+
+    if provider == "ollama":
         if "localhost:11434" in settings.LLM_BASE_URL or "127.0.0.1:11434" in settings.LLM_BASE_URL:
             logger.info(f"Using OllamaLLMClient with base_url={settings.LLM_BASE_URL}, model={settings.LLM_MODEL_NAME}")
             return OllamaLLMClient(
@@ -223,9 +452,7 @@ def get_llm_client() -> BaseLLMClient:
                 max_tokens=settings.LLM_MAX_TOKENS,
             )
         else:
-            # Fallback to the original OpenAI-compatible client if needed.
-            # But since we're removing openai, we'll just log and raise.
-            logger.warning("LLM_PROVIDER=openai_compatible but not Ollama; falling back to mock.")
+            logger.warning("Ollama selected but base_url is not local. Using mock.")
             return MockLLMClient()
 
     # Default mock
@@ -237,27 +464,28 @@ def get_llm_client() -> BaseLLMClient:
 def get_vision_llm_client() -> BaseLLMClient:
     """
     Separate client for the "page-as-image" pipeline, pointed at a
-    vision-capable model (settings.VISION_LLM_MODEL_NAME, e.g. qwen2.5vl:7b)
-    instead of the regular text LLM_MODEL_NAME. Kept independent of
-    get_llm_client() so the two models can differ and be swapped freely.
+    vision-capable model. Note: Groq doesn't support vision, so it falls back to mock.
     """
     settings = get_settings()
     provider = settings.LLM_PROVIDER
 
-    if provider in ("openai_compatible", "ollama") and (
-        "localhost:11434" in settings.LLM_BASE_URL or "127.0.0.1:11434" in settings.LLM_BASE_URL
-    ):
-        logger.info(
-            f"Using OllamaLLMClient (vision) with base_url={settings.LLM_BASE_URL}, "
-            f"model={settings.VISION_LLM_MODEL_NAME}"
-        )
-        return OllamaLLMClient(
-            base_url=settings.LLM_BASE_URL,
-            model=settings.VISION_LLM_MODEL_NAME,
-            temperature=settings.LLM_TEMPERATURE,
-            max_tokens=settings.LLM_MAX_TOKENS,
-            timeout=300.0,  # vision requests (multi-page, CPU) need headroom
-        )
+    if provider == "groq":
+        logger.warning("Groq does not support vision models. Using mock for vision.")
+        return MockLLMClient()
 
-    logger.info("Using MockLLMClient for vision (test mode without a real vision model).")
+    if provider == "ollama":
+        if "localhost:11434" in settings.LLM_BASE_URL or "127.0.0.1:11434" in settings.LLM_BASE_URL:
+            logger.info(
+                f"Using OllamaLLMClient (vision) with base_url={settings.LLM_BASE_URL}, "
+                f"model={settings.VISION_LLM_MODEL_NAME}"
+            )
+            return OllamaLLMClient(
+                base_url=settings.LLM_BASE_URL,
+                model=settings.VISION_LLM_MODEL_NAME,
+                temperature=settings.LLM_TEMPERATURE,
+                max_tokens=settings.LLM_MAX_TOKENS,
+                timeout=300.0,
+            )
+
+    logger.info("Using MockLLMClient for vision (test mode).")
     return MockLLMClient()

@@ -356,7 +356,9 @@ export default function Schedule({
   const [newBlock, setNewBlock] = useState<BlockDraft>(DEFAULT_DRAFT)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [generatingWeeks, setGeneratingWeeks] = useState<Set<string>>(new Set())
   const genBusyRef = useRef<Record<string, boolean>>({})
+  const genAbortRef = useRef<Record<string, AbortController>>({})
   const skipPersistRef = useRef(true)
 
   const gridRef = useRef<HTMLDivElement>(null)
@@ -454,11 +456,18 @@ export default function Schedule({
   // Ask the backend to build a standard weekly plan (study + test blocks
   // grounded in the retrieved Konkoor books), then store it as the week's
   // official blocks.  Auto-fills empty weeks and powers the "بازسازی" button.
+  // Runs in the background and continues even when switching weeks.
   async function generateWeekPlan(ws: Date) {
     const key = toISO(ws)
     if (genBusyRef.current[key]) return
     genBusyRef.current[key] = true
+    
+    const abortController = new AbortController()
+    genAbortRef.current[key] = abortController
+    
+    setGeneratingWeeks(prev => new Set(prev).add(key))
     setGenerating(true)
+    
     try {
       const resp = await fetch(apiUrl("/api/boom/weekly-plan"), {
         method: "POST",
@@ -469,6 +478,7 @@ export default function Schedule({
           student: userData ?? undefined,
           statics: statics,
         }),
+        signal: abortController.signal,
       })
       if (!resp.ok) return
       const data: any = await resp.json()
@@ -490,11 +500,35 @@ export default function Schedule({
         markWeekGenerated(key)
         if (toISO(weekStartRef.current) === key) setBlocks(list)
       }
-    } catch {
-      /* leave the week empty if the network call fails */
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.log(`Generation cancelled for week ${key}`)
+      }
     } finally {
       genBusyRef.current[key] = false
-      setGenerating(false)
+      delete genAbortRef.current[key]
+      setGeneratingWeeks(prev => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+      setGenerating(Object.keys(genBusyRef.current).some(k => genBusyRef.current[k]))
+    }
+  }
+
+  function stopGeneration(ws?: Date) {
+    const key = ws ? toISO(ws) : toISO(weekStart)
+    const controller = genAbortRef.current[key]
+    if (controller) {
+      controller.abort()
+      genBusyRef.current[key] = false
+      delete genAbortRef.current[key]
+      setGeneratingWeeks(prev => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+      setGenerating(Object.keys(genBusyRef.current).some(k => genBusyRef.current[k]))
     }
   }
 
@@ -727,6 +761,8 @@ export default function Schedule({
   const todayColumn = weekdayOf(today)
   const isCurrentWeek = currentOffset === 0
   const weekNumbers = MAX_WEEKS * 2 + 1
+  const currentWeekKey = toISO(weekStart)
+  const isCurrentWeekGenerating = generatingWeeks.has(currentWeekKey)
 
   return (
     <div className="h-full flex flex-col bg-[var(--surface)]">
@@ -739,10 +775,22 @@ export default function Schedule({
             →
           </button>
           <h1 className="flex-1 text-right font-bold text-lg">برنامه هفتگی</h1>
-          <button
-            onClick={() => void generateWeekPlan(weekStart)}
-            disabled={generating}
-            className="px-3 h-9 rounded-xl border border-[var(--border-strong)] text-[11px] font-bold text-[var(--muted)] disabled:opacity-40 hover:text-[var(--accent)] transition-colors"
+          {isCurrentWeekGenerating ? (
+            <button
+              onClick={() => stopGeneration(weekStart)}
+              className="px-3 h-9 rounded-xl border border-red-500 bg-red-50 text-[11px] font-bold text-red-600 hover:bg-red-100 transition-colors"
+            >
+              توقف
+            </button>
+          ) : (
+            <button
+              onClick={() => void generateWeekPlan(weekStart)}
+              disabled={generating && !isCurrentWeekGenerating}
+              className="px-3 h-9 rounded-xl border border-[var(--border-strong)] text-[11px] font-bold text-[var(--muted)] disabled:opacity-40 hover:text-[var(--accent)] transition-colors"
+            >
+              {generating && !isCurrentWeekGenerating ? "در حال ساخت..." : "بازسازی"}
+            </button>
+          )}
           >
             {generating ? "در حال ساخت..." : "بازسازی"}
           </button>

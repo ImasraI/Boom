@@ -1,0 +1,10 @@
+{
+  "description": "Designed for Iranian Konkoor students, this AI study planner helps users manage their study schedules, track tasks, and optimize performance with personalized insights.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

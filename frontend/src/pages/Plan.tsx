@@ -33,7 +33,13 @@ export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupDa
 
   useEffect(() => {
     async function fetchPlan() {
-      if (studyPlan || !userData || loading) return;
+      // Check if we already have a plan in localStorage
+      const cached = localStorage.getItem("boom-study-plan");
+      if (cached) {
+        setStudyPlan(cached);
+        return;
+      }
+      if (!userData || loading) return;
       setLoading(true);
       try {
         const body = {
@@ -66,7 +72,7 @@ export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupDa
       }
     }
     fetchPlan();
-  }, [userData]);
+  }, [userData]); 
 
   const today = new Date();
   const [viewMonth, setViewMonth] = useState(today.getMonth());

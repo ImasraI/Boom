@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # Application settings
-    APP_NAME: str = "KNTU RAG Assistant"
+    APP_NAME: str = "RAG-LLM"
     APP_ENV: str = "development"
     DEMO_USER_ID: int = 1
 
@@ -16,14 +16,17 @@ class Settings(BaseSettings):
     CHROMA_DIR: str = "data/chroma_db"
 
     # Vector database collection name
-    CHROMA_COLLECTION: str = "kntu_documents"
+    CHROMA_COLLECTION: str = "documents"
 
     # Embedding model configuration
+    EMBEDDING_PROVIDER: str = "ollama"  # Options: "ollama", "openai" (Groq, Omniroute, etc.)
+    EMBEDDING_API_KEY: str = ""
     EMBEDDING_MODEL_NAME: str = "nomic-embed-text"
+    EMBEDDING_BASE_URL: str = "http://localhost:11434"
     EMBEDDING_DEVICE: str = "cpu"
 
     # LLM provider configuration
-    LLM_PROVIDER: str = "openai_compatible"
+    LLM_PROVIDER: str = "ollama"  # Options: "ollama", "groq", "mock"
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "http://localhost:11434/v1"
     LLM_MODEL_NAME: str = "aya-expanse:8b-q4_K_S"
@@ -79,7 +82,7 @@ class Settings(BaseSettings):
 
     # Separate Chroma collection for image embeddings (kept apart from the
     # text-chunk collection so the two pipelines never mix).
-    CHROMA_IMAGE_COLLECTION: str = "kntu_document_images"
+    CHROMA_IMAGE_COLLECTION: str = "document_images"
 
     # Which embedding backend to use for page images: "clip" or "colpali".
     # This is a single switch — swap it any time without touching code.
