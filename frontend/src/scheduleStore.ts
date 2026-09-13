@@ -7,7 +7,7 @@
  *
  * Storage layout:
  *   boom-weekly-schedule:YYYY-MM-DD  -> JSON array of blocks (per week)
- *   boom-weekly-static              -> JSON array of yearly static templates
+ *   boom-weekly-static              -> JSON array of weekly-repeating templates
  *   boom-weekly-generated           -> JSON { "YYYY-MM-DD": true } markers
  */
 
@@ -31,12 +31,19 @@ export interface StoredBlock {
 
 export interface StoredStatic {
   id?: string
-  date: string
+  day?: number
+  date?: string
   startHour: number
   duration: number
   title: string
   type: BlockType
   color?: string
+}
+
+export function staticWeekday(t: StoredStatic): number {
+  if (typeof t.day === "number" && t.day >= 0 && t.day <= 6) return t.day
+  if (t.date) return weekdayOf(fromISO(t.date))
+  return 0
 }
 
 export function pad2(n: number) {
@@ -122,16 +129,18 @@ export function unmarkWeekGenerated(weekISO: string) {
  * Compact context blob shipped to the backend with chat/plan requests so the
  * agent always sees the user's current weekly plan + yearly static blocks.
  */
-export function weeklyScheduleContext(): {
+export function weeklyScheduleContext(weekISO?: string): {
   week_start: string
   blocks: StoredBlock[]
   statics: StoredStatic[]
 } {
-  const weekStart = startOfWeek(new Date())
-  const weekISO = toISO(weekStart)
+  const iso = weekISO ?? toISO(startOfWeek(new Date()))
   return {
-    week_start: weekISO,
-    blocks: loadWeekBlocks(weekISO),
-    statics: loadStaticTemplates(),
+    week_start: iso,
+    blocks: loadWeekBlocks(iso),
+    statics: loadStaticTemplates().map((t) => ({
+      ...t,
+      day: staticWeekday(t),
+    })),
   }
 }

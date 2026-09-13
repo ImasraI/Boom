@@ -21,3 +21,11 @@ Thumbs.db
 # Local data
 *.sqlite3
 *.db
+.kilo/
+# Runtime logs
+*.log
+backend/server_*.log
+
+# Generated app data (vector store, rendered page images, mock cache, raw uploads)
+backend/data/
+backend/data/**

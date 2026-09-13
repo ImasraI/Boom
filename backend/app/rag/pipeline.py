@@ -110,10 +110,16 @@ def _schedule_context(schedule: Optional[dict]) -> str:
 
     statics = schedule.get("statics") or []
     if statics:
-        parts.append("بلوک‌های ثابت سالانه (تکرار هر سال در همان تاریخ):")
+        parts.append("بلوکهای ثابت هفتگی (هر هفته در همین روز و ساعت تکرار میشوند؛ روی این ساعتها برنامه نگذار):")
         for s in statics:
+            day = s.get("day")
+            try:
+                day_i = int(day)
+            except (TypeError, ValueError):
+                day_i = -1
+            label = _DAY_LABELS[day_i] if 0 <= day_i <= 6 else str(s.get("date") or day)
             parts.append(
-                f"- {s.get('date', '')} | {_fmt_range(s.get('startHour'), s.get('duration'))} "
+                f"- {label}: {_fmt_range(s.get('startHour'), s.get('duration'))} "
                 f"| {s.get('title', '')} | نوع: {s.get('type', '')}"
             )
 

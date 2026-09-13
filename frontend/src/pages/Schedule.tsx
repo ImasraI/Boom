@@ -79,7 +79,8 @@ interface ScheduleBlock {
 // automatically repeats every year on the same month/day.
 interface StaticBlock {
   id: string
-  date: string
+  date?: string
+  day?: number
   startHour: number
   duration: number
   title: string
@@ -98,6 +99,8 @@ interface BlockDraft {
   duration: number
   type: BlockType
   color: string
+  day?: number
+  date?: string
 }
 
 type DragMode = "move" | "resize"
@@ -250,6 +253,7 @@ function loadStatics(): StaticBlock[] {
   return loadStaticTemplates().map((t) => ({
     id: t.id ?? newId(),
     date: t.date,
+    day: t.day,
     startHour: t.startHour,
     duration: t.duration,
     title: t.title,
@@ -275,40 +279,56 @@ function isStaticInstance(
   return typeof (b as StaticInstance).templateId === "string"
 }
 
-// Compute which static (yearly) blocks land inside the displayed week.
+// Compute which static (yearly or weekly) blocks land inside the displayed week.
 function staticInstancesForWeek(
   statics: StaticBlock[],
   weekStart: Date,
 ): StaticInstance[] {
   const out: StaticInstance[] = []
   const weekEnd = addDays(weekStart, 6)
-  const years = [
-    weekStart.getFullYear() - 1,
-    weekStart.getFullYear(),
-    weekStart.getFullYear() + 1,
-  ]
 
   for (const t of statics) {
-    const [, m, d] = t.date.split("-").map(Number)
-    for (const y of years) {
-      const dt = new Date(y, m - 1, d)
-      if (dt.getMonth() !== m - 1 || dt.getDate() !== d) continue // overflow day (e.g. 31 in a 30-day month)
-      if (
-        dt.getTime() >= weekStart.getTime() &&
-        dt.getTime() <= weekEnd.getTime()
-      ) {
-        out.push({
-          id: t.id,
-          static: true,
-          templateId: t.id,
-          day: weekdayOf(dt),
-          startHour: t.startHour,
-          duration: t.duration,
-          title: t.title,
-          type: t.type,
-          color: t.color,
-        })
-        break
+    if (typeof t.day === "number") {
+      // Weekly repeating: appears every week.
+      out.push({
+        id: t.id,
+        static: true,
+        templateId: t.id,
+        day: t.day,
+        startHour: t.startHour,
+        duration: t.duration,
+        title: t.title,
+        type: t.type,
+        color: t.color,
+      })
+    } else if (t.date) {
+      // Yearly repeating: anchored to a specific date.
+      const [, m, d] = t.date.split("-").map(Number)
+      const years = [
+        weekStart.getFullYear() - 1,
+        weekStart.getFullYear(),
+        weekStart.getFullYear() + 1,
+      ]
+      for (const y of years) {
+        const dt = new Date(y, m - 1, d)
+        if (dt.getMonth() !== m - 1 || dt.getDate() !== d) continue
+        if (
+          dt.getTime() >= weekStart.getTime() &&
+          dt.getTime() <= weekEnd.getTime()
+        ) {
+          out.push({
+            id: t.id,
+            static: true,
+            templateId: t.id,
+            day: weekdayOf(dt),
+            startHour: t.startHour,
+            duration: t.duration,
+            title: t.title,
+            type: t.type,
+            color: t.color,
+          })
+          break
+        }
       }
     }
   }
@@ -326,7 +346,7 @@ export default function Schedule({
   const todayWeekStart = useMemo(() => startOfWeek(today), [today])
 
   const [weekStart, setWeekStart] = useState<Date>(todayWeekStart)
-  const [blocks, setBlocks] = useState<ScheduleBlock[]>([])
+  const [blocks, setBlocks] = useState<ScheduleBlock[]>(() => loadBlocks(todayWeekStart))
   const [statics, setStatics] = useState<StaticBlock[]>(loadStatics)
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null)
   const [editingStatic, setEditingStatic] = useState<StaticBlock | null>(null)
@@ -337,6 +357,7 @@ export default function Schedule({
   const [drag, setDrag] = useState<DragState | null>(null)
   const [generating, setGenerating] = useState(false)
   const genBusyRef = useRef<Record<string, boolean>>({})
+  const skipPersistRef = useRef(true)
 
   const gridRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
@@ -392,8 +413,13 @@ export default function Schedule({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekStart])
 
-  // Persist blocks to the currently displayed week's key.
+  // Persist blocks to the currently displayed week's key. Skip the first
+  // run so a mount cannot overwrite a previously saved week with [].
   useEffect(() => {
+    if (skipPersistRef.current) {
+      skipPersistRef.current = false
+      return
+    }
     const key = STORAGE_PREFIX + toISO(weekStartRef.current)
     localStorage.setItem(key, JSON.stringify(blocks))
   }, [blocks])
@@ -441,6 +467,7 @@ export default function Schedule({
           week_start: key,
           daily_hours: 4,
           student: userData ?? undefined,
+          statics: statics,
         }),
       })
       if (!resp.ok) return
@@ -532,19 +559,16 @@ export default function Schedule({
     }
 
     if (recurring) {
-      // Static (yearly-repeating) block: anchored to a concrete date.
-      const anchorWeekStart = editingStatic
-        ? startOfWeek(fromISO(editingStatic.date))
-        : startOfWeek(weekStartRef.current)
-      const date = toISO(addDays(anchorWeekStart, selectedDay))
+      const day = newBlock.day !== undefined ? newBlock.day : selectedDay
+      const date = newBlock.date ?? (newBlock.day === undefined ? toISO(addDays(startOfWeek(weekStartRef.current), selectedDay)) : undefined)
       if (editingStatic) {
         setStatics((prev) =>
           prev.map((t) =>
-            t.id === editingStatic.id ? { ...t, ...base, date } : t,
+            t.id === editingStatic.id ? { ...t, ...base, day, date } : t,
           ),
         )
       } else {
-        setStatics((prev) => [...prev, { id: newId(), date, ...base }])
+        setStatics((prev) => [...prev, { id: newId(), day, date, ...base }])
       }
     } else if (editingBlock) {
       setBlocks((prev) =>
@@ -1074,35 +1098,53 @@ export default function Schedule({
 
               {/* Static (yearly repeating) toggle */}
               {!editingBlock && (
-                <button
-                  type="button"
-                  onClick={() => toggleRecurring(!recurring)}
-                  className={`w-full flex items-center gap-2 rounded-xl border px-3 py-2.5 text-right text-xs font-bold transition-colors ${
-                    recurring
-                      ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-                      : "border-[var(--border-strong)] text-[var(--muted)]"
-                  }`}
-                >
-                  <span style={{ opacity: recurring ? 1 : 0.4 }}>↻</span>
-                  <span className="flex-1">
-                    بلاک ثابت (هر سال تکرار خودکار)
-                  </span>
-                  <span
-                    className={`w-8 h-4.5 rounded-full relative transition-colors ${
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleRecurring(!recurring)}
+                    className={`w-full flex items-center gap-2 rounded-xl border px-3 py-2.5 text-right text-xs font-bold transition-colors ${
                       recurring
-                        ? "bg-[var(--accent)]"
-                        : "bg-[var(--toggle-off)]"
+                        ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
+                        : "border-[var(--border-strong)] text-[var(--muted)]"
                     }`}
-                    style={{ height: 18 }}
                   >
+                    <span style={{ opacity: recurring ? 1 : 0.4 }}>↻</span>
+                    <span className="flex-1">
+                      بلاک ثابت (تکرارشونده)
+                    </span>
                     <span
-                      className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all ${
-                        recurring ? "right-0.5" : "right-[16px]"
+                      className={`w-8 h-4.5 rounded-full relative transition-colors ${
+                        recurring
+                          ? "bg-[var(--accent)]"
+                          : "bg-[var(--toggle-off)]"
                       }`}
-                      style={{ top: 2, width: 14, height: 14 }}
-                    />
-                  </span>
-                </button>
+                      style={{ height: 18 }}
+                    >
+                      <span
+                        className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all ${
+                          recurring ? "right-0.5" : "right-[16px]"
+                        }`}
+                        style={{ top: 2, width: 14, height: 14 }}
+                      />
+                    </span>
+                  </button>
+                  {recurring && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setNewBlock(b => ({ ...b, date: undefined, day: selectedDay }))}
+                        className={`flex-1 py-1 rounded-lg text-xs font-bold border ${newBlock.day !== undefined ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border-strong)] text-[var(--muted)]"}`}
+                      >
+                        هفتگی
+                      </button>
+                      <button
+                        onClick={() => setNewBlock(b => ({ ...b, day: undefined, date: toISO(addDays(startOfWeek(weekStartRef.current), selectedDay)) }))}
+                        className={`flex-1 py-1 rounded-lg text-xs font-bold border ${newBlock.date !== undefined ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border-strong)] text-[var(--muted)]"}`}
+                      >
+                        سالانه
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
               {recurring && (
                 <p className="text-[10px] text-[var(--muted-2)] text-right leading-relaxed">

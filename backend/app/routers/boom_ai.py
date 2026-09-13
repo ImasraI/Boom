@@ -51,7 +51,9 @@ class WeeklyPlanRequest(BaseModel):
     student: Optional[dict] = None
     daily_hours: float = Field(default=4, ge=0.5, le=16)
     week_start: Optional[str] = None
+    statics: List[dict] = []
     schedule: Optional[dict] = None
+    history: Optional[List[dict]] = None
 
 
 _BLOCK_COLORS = {
@@ -84,8 +86,22 @@ _TYPE_MAP = {
 
 def _student_context(student: Optional[dict]) -> str:
     if not student:
-        return "اطلاعات پروفایل دانش‌آموز در دسترس نیست."
+        return "اطلاعات پروفایل دانشآموز در دسترس نیست."
     return "\n".join(f"- {k}: {v}" for k, v in student.items())
+
+
+def _history_context(history: Optional[List[dict]]) -> str:
+    if not history:
+        return "سابقه گفتگوی قبلی وجود ندارد."
+    lines = ["سابقه گفتگوهای قبلی با دانشآموز (برای درک بهتر شرایط و پیشرفت):"]
+    for msg in history[-16:]:
+        role = msg.get("role", "")
+        content = str(msg.get("content", ""))[:500]
+        if role == "user":
+            lines.append(f"[کاربر]: {content}")
+        elif role == "assistant":
+            lines.append(f"[بوم]: {content}")
+    return "\n".join(lines) if len(lines) > 1 else "سابقه گفتگوی قبلی وجود ندارد."
 
 
 def _parse_json_from_text(text: str):
@@ -162,6 +178,97 @@ def _plan_blocks(data) -> List[dict]:
     if not isinstance(blocks, list):
         return []
     return [_normalize_block(b, i) for i, b in enumerate(blocks) if isinstance(b, dict)]
+
+
+_DAY_LABELS = [
+    "شنبه", "یکشنبه", "دوشنبه", "سهشنبه", "چهارشنبه", "پنجشنبه", "جمعه",
+]
+
+
+def _hours_overlap(a0, ad, b0, bd) -> bool:
+    try:
+        return float(a0) < float(b0) + float(bd) and float(b0) < float(a0) + float(ad)
+    except (TypeError, ValueError):
+        return False
+
+
+def _static_weekday(s: dict) -> Optional[int]:
+    day = s.get("day")
+    if isinstance(day, int) and 0 <= day <= 6:
+        return day
+    try:
+        day_i = int(day)
+        if 0 <= day_i <= 6:
+            return day_i
+    except (TypeError, ValueError):
+        pass
+    date_s = s.get("date")
+    if date_s:
+        try:
+            d = date.fromisoformat(str(date_s)[:10])
+            return (d.weekday() + 2) % 7
+        except ValueError:
+            return None
+    return None
+
+
+def _occupied_slots(statics: Optional[List[dict]]) -> List[dict]:
+    out: List[dict] = []
+    for s in statics or []:
+        if not isinstance(s, dict):
+            continue
+        day = _static_weekday(s)
+        if day is None:
+            continue
+        try:
+            start = float(s.get("startHour", 0))
+            dur = float(s.get("duration", 1))
+        except (TypeError, ValueError):
+            continue
+        out.append({
+            "day": day,
+            "startHour": start,
+            "duration": max(0.5, dur),
+            "title": str(s.get("title") or "بلاک ثابت"),
+            "type": s.get("type") or "class",
+        })
+    return out
+
+
+def _overlaps_occupied(day, start, dur, occupied: List[dict]) -> bool:
+    for o in occupied:
+        if int(o["day"]) != int(day):
+            continue
+        if _hours_overlap(start, dur, o["startHour"], o["duration"]):
+            return True
+    return False
+
+
+def _find_free_start(day, duration, occupied: List[dict], preferred: float = 6.0):
+    lo, hi = 6.0, 24.0
+    hour = float(preferred)
+    while hour + duration <= hi:
+        if not _overlaps_occupied(day, hour, duration, occupied):
+            return hour
+        hour += 0.5
+    hour = lo
+    while hour < preferred and hour + duration <= hi:
+        if not _overlaps_occupied(day, hour, duration, occupied):
+            return hour
+        hour += 0.5
+    return None
+
+
+def _occupied_prompt(occupied: List[dict]) -> str:
+    if not occupied:
+        return "هیچ بلوک ثابتی ثبت نشده است."
+    lines = ["این ساعتها هر هفته اشغالاند (کلاس/بلاک ثابت). روی آنها هیچ بلوکی نگذار:"]
+    for o in occupied:
+        label = _DAY_LABELS[int(o["day"])]
+        start = float(o["startHour"])
+        end = start + float(o["duration"])
+        lines.append(f"- {label}: {start:g} تا {end:g} «{o['title']}»")
+    return "\n".join(lines)
 
 
 PLAN_UPDATE_MARKER = "###UPDATE_PLAN###"
@@ -601,12 +708,19 @@ def _mock_cache_write(key: str, summary: str) -> None:
         logger.warning("Mock extraction cache write failed: %s", exc)
 
 
-def _default_week_plan(books: List[str], daily_hours: float, student: Optional[dict] = None) -> List[dict]:
+def _default_week_plan(
+    books: List[str],
+    daily_hours: float,
+    student: Optional[dict] = None,
+    occupied: Optional[List[dict]] = None,
+) -> List[dict]:
     """Deterministic standard week used when the LLM output is not parseable.
 
     Each day gets a reading/learning block, a book-grounded test block and a
     short review block, sized so totals never exceed the daily study hours.
+    Occupied (static/class) slots are skipped.
     """
+    occupied = occupied or []
     main_book = books[0] if books else "کتاب منبع کنکور"
     weak = (student or {}).get("weakSubjects") or (student or {}).get("weak_subjects") or []
     weak_line = f" (اولویت: {'، '.join(weak)})" if weak else ""
@@ -620,23 +734,29 @@ def _default_week_plan(books: List[str], daily_hours: float, student: Optional[d
     blocks = []
     idx = 0
     for day in range(7):
-        blocks.append(_normalize_block({
-            "day": day, "startHour": 6.0, "duration": read_dur, "count": None,
-            "title": f"مطالعه و یادگیری{weak_line}",
-        }, idx))
-        idx += 1
-        blocks.append(_normalize_block({
-            "day": day, "startHour": 9.0, "duration": test_dur, "count": test_count,
-            "type": "test",
-            "title": f"{test_count} تست از {main_book}",
-        }, idx))
-        idx += 1
-        if review_dur >= 0.5:
+        start = _find_free_start(day, read_dur, occupied, 6.0)
+        if start is not None:
             blocks.append(_normalize_block({
-                "day": day, "startHour": 16.0, "duration": review_dur, "count": None,
-                "title": "مرور و جمع‌بندی",
+                "day": day, "startHour": start, "duration": read_dur, "count": None,
+                "title": f"مطالعه و یادگیری{weak_line}",
             }, idx))
             idx += 1
+        start = _find_free_start(day, test_dur, occupied, 9.0)
+        if start is not None:
+            blocks.append(_normalize_block({
+                "day": day, "startHour": start, "duration": test_dur, "count": test_count,
+                "type": "test",
+                "title": f"{test_count} تست از {main_book}",
+            }, idx))
+            idx += 1
+        if review_dur >= 0.5:
+            start = _find_free_start(day, review_dur, occupied, 16.0)
+            if start is not None:
+                blocks.append(_normalize_block({
+                    "day": day, "startHour": start, "duration": review_dur, "count": None,
+                    "title": "مرور و جمعبندی",
+                }, idx))
+                idx += 1
     return blocks
 
 
@@ -645,16 +765,23 @@ def _complete_week_plan(
     books: List[str],
     daily_hours: float,
     student: Optional[dict],
+    statics: Optional[List[dict]] = None,
 ) -> List[dict]:
     """Ensure the weekly plan covers all 7 days with study + test blocks each.
 
     LLM JSON output is sometimes partial (a few days or one block type).
     Missing days and missing study/test blocks are backfilled from the
     deterministic default plan, then every block gets a stable generated id.
+    Blocks that overlap weekly-static (class) slots are dropped.
     """
-    default = _default_week_plan(books, daily_hours, student)
+    occupied = _occupied_slots(statics)
+    kept = [
+        dict(b) for b in blocks
+        if not _overlaps_occupied(b.get("day", 0), b.get("startHour", 0), b.get("duration", 1), occupied)
+    ]
+    default = _default_week_plan(books, daily_hours, student, occupied)
     by_day: dict[int, List[dict]] = {}
-    for b in blocks:
+    for b in kept:
         by_day.setdefault(int(b.get("day", 0)), []).append(dict(b))
 
     out: List[dict] = []
@@ -670,6 +797,10 @@ def _complete_week_plan(
                 continue
             if db["type"] == "test" and has_test:
                 continue
+            if _overlaps_occupied(db["day"], db["startHour"], db["duration"], occupied):
+                continue
+            if any(_hours_overlap(db["startHour"], db["duration"], b["startHour"], b["duration"]) for b in day_blocks):
+                continue
             day_blocks.append(dict(db))
         day_blocks.sort(key=lambda b: b["startHour"])
         for b in day_blocks:
@@ -680,30 +811,45 @@ def _complete_week_plan(
 
 
 WEEKLY_PLAN_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنکور.
-یک برنامه هفتگی استاندارد بساز که در آن هر روز هم بلوک «مطالعه/یادگیری» داشته باشد و هم بلوک «تست/آزمون». تبدیل فوری کنکور: تست‌ها باید بر اساس کتاب‌های «متن‌های مرجع» باشد؛ مثلاً عنوان بلوک تست: «۲۰ تست فیزیک از [نام کتاب]» (۲۰ را بر اساس زمانی که داریم تنظیم کن، بین ۱۰ تا ۴۰).
+برنامه هفتگی میسازی که دانشآموز را برای آزمونهای آزمایشی (ماک) آماده میکند.
+
+روند اصلی برنامهریزی:
+۱. تاریخ و محتوای آزمون بعدی را از بخش «آزمون بعدی» ببین.
+۲. دروس و مباحثی که در آزمون میآید را مشخص کن.
+۳. از «متنهای مرجع» ببین که هر مبحث در کدام کتاب و فصل است و چه تستهایی مناسباند.
+۴. برنامه را به دو هفته تقسیم کن:
+   - هفته اول: مطالعه + درک مطلب + تست پایه
+   - هفته دوم: تست متمرکز و شبیهساز آزمون
+۵. در توضیح برنامه بنویس که آزمون چه مباحثی دارد و چگونه آنها را بین دو هفته تقسیم کردی.
+۶. روی ساعتهای اشغالشده (کلاس، کار، خانواده و...) هیچ بلوکی نگذار.
 
 قوانین:
-- مجموع ساعت هر روز نباید از {daily_hours} ساعت بیشتر شود.
-- درس‌های ضعیف {weak} را با تست بیشتر در اولویت قرار بده.
-- روزها با index شروع از ۰ برای شنبه تا ۶ برای جمعه.
-- startHour بین ۶ تا ۲۳.۵ با گام ۰.۵؛ duration بین ۰.۵ تا ۶ ساعت.
-- نوع بلوک فقط یکی از: study, test, class, break.
-- اگر «آزمون این هفته» داده شده است، کل هفته را طوری طراحی کن که دانش‌آموز برای همان مباحث و دروس آماده شود و در روز آزمون یک بلوک از نوع test با عنوان مثل «آزمون آزمایشی ماز» قرار بده.
-- فقط و فقط یک JSON خروجی بده و هیچ متن یا توضیح دیگری ننویس (بدون markdown، بدون کامنت).
+- مجموع ساعت هر روز حداکثر {daily_hours} ساعت.
+- درسهای ضعیف: {weak} را اولویت بده.
+- روزها: ۰=شنبه تا ۶=جمعه.
+- startHour: ۶ تا ۲۳.۵ با گام ۰.۵؛ duration: ۰.۵ تا ۶ ساعت.
+- type فقط: study, test, class, break.
+- فقط یک JSON خروجی بده (بدون markdown، بدون کامنت).
 
 قالب خروجی:
-{{"blocks":[{{"day":0,"startHour":6,"duration":2,"title":"مطالعه فیزیک حرکت‌شناسی","type":"study","count":null}},{{"day":0,"startHour":9,"duration":1,"title":"۲۰ تست فیزیک از [نام کتاب]","type":"test","count":20}}],"note":"توضیح کوتاه درباره منطق برنامه"}}
+{{"blocks":[{{"day":0,"startHour":6,"duration":2,"title":"مطالعه فیزیک حرکتشناسی","type":"study","count":null}},{{"day":0,"startHour":9,"duration":1,"title":"۲۰ تست فیزیک از [نام کتاب]","type":"test","count":20}}],"note":"توضیح کوتاه درباره منطق برنامه و توزیع مباحث"}}
 
-اطلاعات دانش‌آموز:
+اطلاعات دانشآموز:
 {student}
+
+سابقه گفتگوها:
+{history}
 
 هفته جاری:
 {week_range}
 
-آزمون این هفته:
+آزمون بعدی:
 {mock}
 
-متن‌های مرجع (برای انتخاب کتاب تست):
+ساعتهای اشغالشده (بلاک ثابت هر هفته):
+{occupied}
+
+متنهای مرجع (برای انتخاب کتاب تست):
 {context}
 """
 
@@ -766,13 +912,16 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
         f" (تاریخ میلادی: {week_start.isoformat()} تا {week_end.isoformat()})"
     )
     mock = _extract_week_mock(settings.DEMO_USER_ID, week_start)
+    occupied = _occupied_slots(request.statics)
 
     prompt = WEEKLY_PLAN_PROMPT.format(
         daily_hours=daily,
         weak="، ".join(weak) if weak else "نامشخص",
         student=_student_context({**student, "ساعات مطالعه روزانه": daily}),
+        history=_history_context(request.history),
         week_range=week_range,
-        mock=(mock["summary"] if mock else "آزمون هفتگی‌ای این هفته برنامه‌ریزی نشده است."),
+        mock=(mock["summary"] if mock else "آزمون هفتگیای این هفته برنامهریزی نشده است."),
+        occupied=_occupied_prompt(occupied),
         context=book_line + ("\n\n" + context if context else ""),
     )
     answer = get_llm_client().generate([{"role": "user", "content": prompt}], max_tokens=1600)
@@ -787,7 +936,7 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
         note = "برنامه استاندارد پیش‌فرض (خروجی مدل قابل تفسیر نبود). llm_used=false"
         llm_used = False
 
-    blocks = _complete_week_plan(blocks, books, daily, student)
+    blocks = _complete_week_plan(blocks, books, daily, student, request.statics)
     if books:
         main = books[0]
         for b in blocks:
