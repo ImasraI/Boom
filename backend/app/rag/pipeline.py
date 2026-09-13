@@ -15,6 +15,11 @@ from app.rag.hybrid_search import get_hybrid_search, HybridSearch
 logger = get_logger(__name__)
 
 
+# filename -> source-category resolver (filled lazily from the raw folder
+# tree so retrieval can scope by category even for pre-category documents).
+_image_category_map: Dict[str, str] = {}
+
+
 # System instructions for the LLM
 SYSTEM_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنکور و دستیار مطالعاتی دانش‌آموز.
 قوانین پاسخ‌دهی:
@@ -23,7 +28,13 @@ SYSTEM_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنکور �
 ۳. اگر پاسخ در منابع موجود نیست، صادقانه بگو که در منابع فعلی اطلاعات کافی وجود ندارد؛ حدس نزن.
 ۴. برای برنامه‌ریزی، محدودیت‌های دانش‌آموز مثل زمان روزانه، درس‌های ضعیف، هدف و موعد آزمون را رعایت کن.
 ۵. پاسخ را به فارسی روان، کوتاه و ساختاریافته بنویس.
-۶. اگر کاربر درخواست برنامه چندماهه کرد، برنامه را به ماه، هفته و الگوی روزانه تقسیم کن و امکان جبران عقب‌افتادگی را هم توضیح بده."""
+۶. اگر کاربر درخواست برنامه چندماهه کرد، برنامه را به ماه، هفته و الگوی روزانه تقسیم کن و امکان جبران عقب‌افتادگی را هم توضیح بده.
+۷. «برنامه مطالعه کاربر» که در سوال آمده را مبنا بگیر؛ دانش‌آموز ممکن است آن را دستی تغییر داده باشد، پس همیشه با آخرین نسخه‌ی اعلام‌شده کار کن.
+۸. اگر کاربر خواست بخشی از برنامه هفتگی (یک روز یا چند بلوک) را لغو، کم یا جابه‌جا کند، ساعت‌های لغوشده را روی بقیه روزهای همان هفته توزیع کن تا حجم مطالعه و تعداد تست‌ها جبران شود.
+۹. اگر کاربر تغییر برنامه هفتگی خواست، اول پاسخ کوتاه فارسی بده و سپس بلوک‌های روزهای مربوطه را طبق همین قالب خروجی بده و بعد از آن هیچ متن دیگری ننویس:
+###UPDATE_PLAN###
+{"blocks":[{"day":0,"startHour":6,"duration":2,"title":"مطالعه فیزیک","type":"study","count":null},{"day":1,"startHour":9,"duration":1,"title":"۲۰ تست فیزیک از کتاب منبع","type":"test","count":20}],"note":"توضیح کوتاه"}
+type فقط یکی از: study, test, class, break. بلوک‌های تست باید با [منبع N] یا نام کتاب مشخص شوند."""
 
 
 # System instructions for the vision LLM (page-as-image pipeline)
@@ -50,12 +61,72 @@ def _build_context_block(chunks: List[dict]) -> str:
     return "\n\n".join(parts)
 
 
+# Persian day labels matching the frontend schedule (0 = شنبه).
+_DAY_LABELS = [
+    "شنبه",
+    "یکشنبه",
+    "دوشنبه",
+    "سه‌شنبه",
+    "چهارشنبه",
+    "پنجشنبه",
+    "جمعه",
+]
+
+
+def _fmt_range(start: float, duration: float) -> str:
+    try:
+        s = float(start)
+        d = float(duration)
+        fmt = lambda v: f"{int(v):02d}:{int(round((v - int(v)) * 60)):02d}"
+        return f"{fmt(s)}–{fmt(s + d)}"
+    except (TypeError, ValueError):
+        return f"{start}–{start + duration if isinstance(start, (int, float)) and isinstance(duration, (int, float)) else ''}"
+
+
+# Build a compact Persian summary of the user's weekly plan so the LLM
+# always plans against the latest official version of the schedule.
+def _schedule_context(schedule: Optional[dict]) -> str:
+    if not schedule:
+        return "برنامه مطالعه کاربر در دسترس نیست."
+
+    parts = ["--- برنامه مطالعه کاربر (این هفته) ---"]
+    week_start = schedule.get("week_start", "نامشخص")
+    parts.append(f"هفته (تاریخ شروع): {week_start}")
+
+    blocks = schedule.get("blocks") or []
+    if not blocks:
+        parts.append("* هیچ بلوک زمانی در این هفته ثبت نشده است.")
+    else:
+        for b in blocks:
+            day = b.get("day")
+            start = b.get("startHour")
+            dur = b.get("duration")
+            label = _DAY_LABELS[day] if isinstance(day, int) and 0 <= day <= 6 else str(day)
+            parts.append(
+                f"- {label}: {_fmt_range(start, dur)} | {b.get('title', '')} "
+                f"| نوع: {b.get('type', '')}"
+                + (f" | تعداد تست: {b.get('count')}" if b.get("count") else "")
+            )
+
+    statics = schedule.get("statics") or []
+    if statics:
+        parts.append("بلوک‌های ثابت سالانه (تکرار هر سال در همان تاریخ):")
+        for s in statics:
+            parts.append(
+                f"- {s.get('date', '')} | {_fmt_range(s.get('startHour'), s.get('duration'))} "
+                f"| {s.get('title', '')} | نوع: {s.get('type', '')}"
+            )
+
+    return "\n".join(parts)
+
+
 # Build the message list sent to the LLM
 def _build_messages(
     question: str,
     context_chunks: List[dict],
     history: Optional[List[ChatMessage]],
     student: Optional[dict] = None,
+    schedule: Optional[dict] = None,
 ) -> List[Dict[str, str]]:
 
     # Start with the system prompt
@@ -65,7 +136,7 @@ def _build_messages(
 
     # Add the last few conversation messages to preserve context
     if history:
-        for h in history[-6:]:
+        for h in history[-12:]:
             messages.append({
                 "role": h.role,
                 "content": h.content
@@ -76,12 +147,14 @@ def _build_messages(
 
     # Combine retrieved context and user's question
     student_block = "\n".join(f"- {k}: {v}" for k, v in (student or {}).items()) or "اطلاعات پروفایل موجود نیست."
+    plan_block = _schedule_context(schedule)
     user_content = (
         f"اطلاعات دانش‌آموز:\n{student_block}\n\n"
+        f"{plan_block}\n\n"
         f"متن‌های مرجع:\n{context_block}\n\n"
         f"سوال کاربر: {question}"
         if context_chunks
-        else f"هیچ متن مرجعی یافت نشد.\n\nسوال کاربر: {question}"
+        else f"{plan_block}\n\nهیچ متن مرجعی یافت نشد.\n\nسوال کاربر: {question}"
     )
 
     messages.append({
@@ -98,6 +171,7 @@ def _build_image_messages(
     image_hits: List[dict],
     text_chunks: Optional[List[dict]],
     history: Optional[List[ChatMessage]],
+    schedule: Optional[dict] = None,
 ) -> List[Dict[str, str]]:
 
     messages: List[Dict[str, str]] = [
@@ -105,7 +179,7 @@ def _build_image_messages(
     ]
 
     if history:
-        for h in history[-6:]:
+        for h in history[-12:]:
             messages.append({"role": h.role, "content": h.content})
 
     # Label each attached image so the model's citations ("[تصویر ۱]")
@@ -125,6 +199,7 @@ def _build_image_messages(
         text_context = _build_context_block(text_chunks)
         parts.append(f"متن‌های مرجع تکمیلی:\n{text_context}")
 
+    parts.append(f"برنامه مطالعه کاربر:\n{_schedule_context(schedule)}")
     parts.append(f"سوال کاربر: {question}")
 
     messages.append({
@@ -183,7 +258,12 @@ def rewrite_query(question: str) -> str:
         return question
 
 
-def _retrieve_image_hits(search_query: str, user_id: int, k: int) -> List[dict]:
+def _retrieve_image_hits(
+    search_query: str,
+    user_id: int,
+    k: int,
+    category: Optional[str] = None,
+) -> List[dict]:
     """Retrieve only *relevant* page images for a query.
 
     Chroma always returns the nearest neighbours when a collection contains
@@ -191,6 +271,11 @@ def _retrieve_image_hits(search_query: str, user_id: int, k: int) -> List[dict]:
     neighbours to the vision model makes unrelated PDFs/images hijack normal
     chat questions.  We therefore retrieve a few extra candidates and apply
     an explicit cosine-similarity cutoff before enabling the vision path.
+
+    When ``category`` is given, the search is scoped to that source category
+    (e.g. only the plan/mock documents) and the similarity cutoff is skipped:
+    within an already-topical category every candidate is useful, even at
+    the flat 0.20-0.30 CLIP band shared by small table-heavy PDFs.
     """
     from app.config import get_settings
     from app.rag.image_embeddings import get_image_embedding_model
@@ -204,21 +289,39 @@ def _retrieve_image_hits(search_query: str, user_id: int, k: int) -> List[dict]:
         image_embedder = get_image_embedding_model()
         query_embedding = image_embedder.embed_query(search_query)
 
+        # filename -> category map for documents embedded before categories
+        # existed (their metadata lacks the field, but their raw folder says it).
+        try:
+            from app.rag.ingest_raw import document_category_map
+            _image_category_map.update(document_category_map())
+        except Exception:
+            pass
+
         # Retrieve extra candidates, then filter by actual similarity.
         # A larger candidate pool improves recall without allowing unrelated
         # pages through to the vision model.
-        candidate_k = max(k * 3, 10)
+        candidate_k = max(k * 4, 20) if category else max(k * 3, 10)
         candidates = image_vector_store.similarity_search(
             query_embedding=query_embedding,
             top_k=candidate_k,
             user_id=user_id,
+            category=category,
         )
 
-        threshold = settings.IMAGE_RELEVANCE_THRESHOLD
-        relevant = [
-            hit for hit in candidates
-            if float(hit.get("score", 0.0)) >= threshold
-        ]
+        for hit in candidates:
+            hit["category"] = str(
+                hit.get("category") or _image_category_map.get(hit.get("document_name", ""), "")
+            )
+
+        if category:
+            relevant = [h for h in candidates if h.get("category") == category]
+            threshold = 0.0  # scoped category already guarantees topical fit
+        else:
+            threshold = settings.IMAGE_RELEVANCE_THRESHOLD
+            relevant = [
+                hit for hit in candidates
+                if float(hit.get("score", 0.0)) >= threshold
+            ]
 
         # Keep the requested number of best relevant pages only.
         relevant = relevant[:k]
@@ -241,6 +344,7 @@ def answer_question(
     history: Optional[List[ChatMessage]] = None,
     top_k: Optional[int] = None,
     student: Optional[dict] = None,
+    schedule: Optional[dict] = None,
 ) -> Dict:
 
     settings = get_settings()
@@ -274,7 +378,7 @@ def answer_question(
         vision_llm = get_vision_llm_client()
         image_paths = [hit["content"] for hit in image_hits]
 
-        messages = _build_image_messages(question, image_hits, retrieved_chunks, history)
+        messages = _build_image_messages(question, image_hits, retrieved_chunks, history, schedule)
         answer_text = vision_llm.generate(messages, images=image_paths)
 
         sources = [
@@ -299,7 +403,7 @@ def answer_question(
 
     # No relevant page images -> original text-only pipeline
     llm_client = get_llm_client()
-    messages = _build_messages(question, retrieved_chunks, history, student)
+    messages = _build_messages(question, retrieved_chunks, history, student, schedule)
     answer_text = llm_client.generate(messages)
 
     sources = [
@@ -456,14 +560,24 @@ def ingest_document(document_name: str, raw_text: str, user_id: int) -> int:
 
 
 # Process a PDF as page images and store their embeddings ("page-as-image" pipeline)
-def ingest_pdf_as_images(document_name: str, pdf_path: Path, user_id: int) -> int:
+def ingest_pdf_as_images(
+    document_name: str,
+    pdf_path: Path,
+    user_id: int,
+    dpi: Optional[int] = None,
+    batch_size: Optional[int] = None,
+    category: str = "",
+) -> int:
     from app.rag.image_loader import pdf_to_page_images
     from app.rag.image_embeddings import get_image_embedding_model
 
     settings = get_settings()
 
+    dpi = dpi or settings.IMAGE_DPI
+    batch_size = batch_size or settings.IMAGE_BATCH_SIZE
+
     output_dir = Path(settings.IMAGES_DIR) / str(user_id) / Path(document_name).stem
-    image_paths = pdf_to_page_images(pdf_path, output_dir, dpi=settings.IMAGE_DPI)
+    image_paths = pdf_to_page_images(pdf_path, output_dir, dpi=dpi)
 
     if not image_paths:
         logger.warning(f"No pages were rendered from document '{document_name}'.")
@@ -472,18 +586,32 @@ def ingest_pdf_as_images(document_name: str, pdf_path: Path, user_id: int) -> in
     image_embedder = get_image_embedding_model()
     image_vector_store = get_image_vector_store()
 
-    embeddings = image_embedder.embed_images(image_paths)
+    # Make ingestion idempotent: drop any previous page embeddings for this
+    # document before re-adding, so re-runs never duplicate chunks.
+    image_vector_store.delete_document(document_name, user_id)
 
-    result = image_vector_store.add_chunks(
-        document_name,
-        [str(p) for p in image_paths],  # stored as "content": the file path
-        embeddings,
-        user_id=user_id,
-    )
+    total = 0
+    for start in range(0, len(image_paths), batch_size):
+        batch = image_paths[start:start + batch_size]
+        embeddings = image_embedder.embed_images(batch)
+        total += image_vector_store.add_chunks(
+            document_name,
+            [str(p) for p in batch],  # stored as "content": the file path
+            embeddings,
+            user_id=user_id,
+            category=category,
+        )
+        logger.info(
+            "  '%s': embedded pages %d-%d of %d.",
+            document_name,
+            start + 1,
+            min(start + batch_size, len(image_paths)),
+            len(image_paths),
+        )
 
     logger.info(
-        f"Ingested {result} page image(s) from '{document_name}' for user {user_id} "
+        f"Ingested {total} page image(s) from '{document_name}' for user {user_id} "
         f"using the '{settings.IMAGE_EMBEDDING_BACKEND}' backend."
     )
 
-    return result
+    return total

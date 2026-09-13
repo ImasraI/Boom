@@ -10,14 +10,14 @@ export default function Landing({ nav }: { nav: NavFn }) {
             {/* Logo placeholder — replace with actual logo asset */}
             <span className="font-display text-4xl text-[#F8F6F2] leading-none">ب</span>
           </div>
-          <h1 className="font-display text-5xl text-[#1A1108] leading-none">بوم</h1>
+          <h1 className="font-display text-5xl text-[var(--text)] leading-none">بوم</h1>
           <p className="text-[11px] font-bold tracking-[0.25em] text-[#C4714A] mt-1">BOOM</p>
         </div>
 
-        <p className="text-[#7A6858] text-[15px] leading-relaxed max-w-[280px]">
+        <p className="text-[var(--muted)] text-[15px] leading-relaxed max-w-[280px]">
           برنامه‌ریز هوشمند شخصی‌سازی‌شده.
         </p>
-        <p className="mt-2 text-[#A89888] text-[13px] leading-relaxed max-w-[260px]">
+        <p className="mt-2 text-[var(--muted-2)] text-[13px] leading-relaxed max-w-[260px]">
           دستیاری که سبک مطالعه‌ات رو یاد می‌گیره.
         </p>
       </div>
@@ -31,7 +31,7 @@ export default function Landing({ nav }: { nav: NavFn }) {
         </button>
         <button
           onClick={() => nav("login")}
-          className="text-[13px] text-[#7A6858] font-semibold hover:text-[#1A1108] transition-colors"
+          className="text-[13px] text-[var(--muted)] font-semibold hover:text-[var(--text)] transition-colors"
         >
           قبلاً ثبت‌نام کردی؟{" "}
           <span className="text-[#C4714A] underline underline-offset-2">ورود به حساب</span>
@@ -40,3 +40,4 @@ export default function Landing({ nav }: { nav: NavFn }) {
     </div>
   );
 }
+

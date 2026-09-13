@@ -1,0 +1,110 @@
+2026-09-13 00:24:11,154 | INFO | app.rag.ingest_raw | Processing raw PDF: ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf (364.5 MB)
+2026-09-13 00:24:11,155 | INFO | app.rag.ingest_raw |   rendering + embedding each page...
+2026-09-13 00:26:24,469 | INFO | app.rag.image_loader | Rendered 692 page image(s) from 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' at 120 DPI.
+2026-09-13 00:26:30,154 | INFO | app.rag.image_embeddings | Loading CLIP image tower 'clip-ViT-B-32' and multilingual text tower 'clip-ViT-B-32-multilingual-v1'.
+2026-09-13 00:26:33,714 | INFO | app.rag.vector_store | Document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' was deleted from the vector store for user 1.
+2026-09-13 00:26:40,837 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:26:40,839 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 1-30 of 692.
+2026-09-13 00:26:42,269 | INFO | app.rag.embeddings | Loading Ollama embedding model: nomic-embed-text
+2026-09-13 00:26:42,312 | INFO | app.rag.llm | Using OllamaLLMClient with base_url=http://127.0.0.1:11434, model=aya-expanse:8b-q4_K_S
+2026-09-13 00:26:45,392 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:26:45,392 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 31-60 of 692.
+2026-09-13 00:26:45,934 | INFO | app.rag.pipeline | Original Query: 'چه کتاب هاییو الان بلدی؟' -> Rewritten Query: 'کدام کتاب‌ها را برای مطالعه در حال حاضر توصیه می‌کنید و چرا؟'
+2026-09-13 00:26:47,263 | INFO | app.rag.pipeline | Image retrieval: 10 candidate(s), 0 relevant page(s), threshold=0.350 for user 1.
+2026-09-13 00:26:47,263 | INFO | app.rag.pipeline | 0 text chunk(s) and 0 page image(s) retrieved for user 1.
+2026-09-13 00:26:48,145 | INFO | app.rag.pipeline | Original Query: 'چه کتاب هاییو الان بلدی؟' -> Rewritten Query: 'کدام کتاب‌ها را برای مطالعه در حال حاضر توصیه می‌کنید و چرا؟'
+2026-09-13 00:26:48,371 | INFO | app.rag.pipeline | Image retrieval: 10 candidate(s), 0 relevant page(s), threshold=0.350 for user 1.
+2026-09-13 00:26:48,371 | INFO | app.rag.pipeline | 0 text chunk(s) and 0 page image(s) retrieved for user 1.
+2026-09-13 00:26:49,980 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:26:49,984 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 61-90 of 692.
+2026-09-13 00:26:54,259 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:26:54,268 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 91-120 of 692.
+2026-09-13 00:26:58,135 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:26:58,137 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 121-150 of 692.
+2026-09-13 00:27:02,282 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:02,282 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 151-180 of 692.
+2026-09-13 00:27:05,907 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:05,915 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 181-210 of 692.
+2026-09-13 00:27:10,137 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:10,137 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 211-240 of 692.
+2026-09-13 00:27:13,237 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:13,243 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 241-270 of 692.
+2026-09-13 00:27:17,397 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:17,397 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 271-300 of 692.
+2026-09-13 00:27:20,511 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:20,514 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 301-330 of 692.
+INFO:     127.0.0.1:7879 - "POST /api/boom/chat HTTP/1.1" 200 OK
+2026-09-13 00:27:24,829 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:24,831 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 331-360 of 692.
+2026-09-13 00:27:28,701 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:28,701 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 361-390 of 692.
+2026-09-13 00:27:32,292 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:32,292 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 391-420 of 692.
+2026-09-13 00:27:35,438 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:35,438 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 421-450 of 692.
+2026-09-13 00:27:39,428 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:39,436 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 451-480 of 692.
+2026-09-13 00:27:42,787 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:42,787 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 481-510 of 692.
+2026-09-13 00:27:46,441 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:46,441 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 511-540 of 692.
+2026-09-13 00:27:49,712 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:49,712 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 541-570 of 692.
+2026-09-13 00:27:52,810 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:52,811 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 571-600 of 692.
+INFO:     127.0.0.1:10286 - "POST /api/boom/chat HTTP/1.1" 200 OK
+2026-09-13 00:27:55,379 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:55,387 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 601-630 of 692.
+2026-09-13 00:27:57,413 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:57,413 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 631-660 of 692.
+2026-09-13 00:27:59,366 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:59,366 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 661-690 of 692.
+2026-09-13 00:27:59,537 | INFO | app.rag.vector_store | 2 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' were stored for user 1.
+2026-09-13 00:27:59,537 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf': embedded pages 691-692 of 692.
+2026-09-13 00:27:59,537 | INFO | app.rag.pipeline | Ingested 692 page image(s) from 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf' for user 1 using the 'clip' backend.
+2026-09-13 00:27:59,537 | INFO | app.rag.ingest_raw |   done: 692 page image(s) stored for 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf'.
+2026-09-13 00:27:59,537 | INFO | app.rag.ingest_raw | Processing raw PDF: ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf (198.4 MB)
+2026-09-13 00:27:59,537 | INFO | app.rag.ingest_raw |   rendering + embedding each page...
+2026-09-13 00:29:00,048 | INFO | app.rag.image_loader | Rendered 360 page image(s) from 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' at 120 DPI.
+2026-09-13 00:29:00,057 | INFO | app.rag.vector_store | Document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' was deleted from the vector store for user 1.
+2026-09-13 00:29:03,251 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:03,257 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 1-30 of 360.
+2026-09-13 00:29:06,214 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:06,214 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 31-60 of 360.
+2026-09-13 00:29:09,057 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:09,057 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 61-90 of 360.
+2026-09-13 00:29:12,372 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:12,375 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 91-120 of 360.
+2026-09-13 00:29:15,622 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:15,622 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 121-150 of 360.
+2026-09-13 00:29:18,385 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:18,385 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 151-180 of 360.
+2026-09-13 00:29:21,249 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:21,250 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 181-210 of 360.
+2026-09-13 00:29:23,709 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:23,709 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 211-240 of 360.
+2026-09-13 00:29:26,352 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:26,352 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 241-270 of 360.
+2026-09-13 00:29:28,993 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:28,994 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 271-300 of 360.
+2026-09-13 00:29:31,699 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:31,700 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 301-330 of 360.
+2026-09-13 00:29:34,446 | INFO | app.rag.vector_store | 30 chunks from document 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' were stored for user 1.
+2026-09-13 00:29:34,447 | INFO | app.rag.pipeline |   'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf': embedded pages 331-360 of 360.
+2026-09-13 00:29:34,447 | INFO | app.rag.pipeline | Ingested 360 page image(s) from 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf' for user 1 using the 'clip' backend.
+2026-09-13 00:29:34,447 | INFO | app.rag.ingest_raw |   done: 360 page image(s) stored for 'ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf'.
+2026-09-13 00:29:34,447 | INFO | app.rag.ingest_raw | Raw PDF ingestion finished: 2 ingested, 0 skipped.
+2026-09-13 00:36:05,963 | WARNING | app.rag.llm | Ollama request timed out after 15s.
+2026-09-13 00:36:05,963 | WARNING | app.rag.pipeline | Query rewriting produced an invalid/empty result; falling back to original question.
+2026-09-13 00:36:07,406 | INFO | app.rag.pipeline | Image retrieval: 10 candidate(s), 0 relevant page(s), threshold=0.350 for user 1.
+2026-09-13 00:36:07,406 | INFO | app.rag.pipeline | 0 text chunk(s) and 0 page image(s) retrieved for user 1.
+INFO:     127.0.0.1:3014 - "POST /api/boom/chat HTTP/1.1" 200 OK
+2026-09-13 00:39:40,421 | INFO | app.rag.pipeline | Original Query: 'چنتا تست حسابان از نشر الگو به من بده' -> Rewritten Query: 'چندین تست حساب دیفرانسیل و انتگرال از منابع معتبر و الگوها برای تمرین و ارزیابی مهارت‌هایم در این زمینه ارائه دهید.'
+2026-09-13 00:39:40,589 | INFO | app.rag.pipeline | Image retrieval: 10 candidate(s), 0 relevant page(s), threshold=0.350 for user 1.
+2026-09-13 00:39:40,589 | INFO | app.rag.pipeline | 0 text chunk(s) and 0 page image(s) retrieved for user 1.
+INFO:     127.0.0.1:13856 - "POST /api/boom/chat HTTP/1.1" 200 OK
+2026-09-13 00:48:08,061 | WARNING | app.rag.llm | Ollama request timed out after 15s.
+2026-09-13 00:48:08,063 | WARNING | app.rag.pipeline | Query rewriting produced an invalid/empty result; falling back to original question.
+2026-09-13 00:48:09,373 | INFO | app.rag.pipeline | Image retrieval: 10 candidate(s), 0 relevant page(s), threshold=0.350 for user 1.
+2026-09-13 00:48:09,373 | INFO | app.rag.pipeline | 0 text chunk(s) and 0 page image(s) retrieved for user 1.
+INFO:     127.0.0.1:14990 - "POST /api/boom/chat HTTP/1.1" 200 OK

@@ -1,6 +1,58 @@
 @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&family=Lalezar&display=swap');
 @import 'tailwindcss';
 
+:root {
+  --page-bg: #E8E0D5;
+  --surface: #F8F6F2;
+  --surface-2: #F5F0EA;
+  --card: #FFFFFF;
+  --chip: #F0EBE3;
+  --chip-hover: #E5DDD4;
+  --field: #FAFAF8;
+  --text: #1A1108;
+  --text-strong: #3A2A1A;
+  --muted: #7A6858;
+  --muted-2: #A89888;
+  --placeholder: #C4B8A8;
+  --border: #F0EBE3;
+  --border-strong: #E5DDD4;
+  --accent: #C4714A;
+  --accent-soft: #FFF5F0;
+  --accent-soft-border: #FFDDCC;
+  --brown-text: #5A4030;
+  --toggle-off: #D5CCC3;
+  --success-bg: #EAF5EC;
+  --success-text: #6B9E7A;
+  --neutral-chip: #F5F5F5;
+  --block-shadow: #1b1c1a;
+}
+
+html.dark {
+  --page-bg: #0E0B08;
+  --surface: #16110D;
+  --surface-2: #1E1813;
+  --card: #1F1813;
+  --chip: #2A221C;
+  --chip-hover: #342A22;
+  --field: #1C1612;
+  --text: #F5EFE8;
+  --text-strong: #FFF8F2;
+  --muted: #C4B8A8;
+  --muted-2: #A89888;
+  --placeholder: #7A6858;
+  --border: #2C241C;
+  --border-strong: #3A3028;
+  --accent: #d4845c;
+  --accent-soft: #2A1A12;
+  --accent-soft-border: #4A3020;
+  --brown-text: #E5DDD4;
+  --toggle-off: #3A3028;
+  --success-bg: #1A2A1E;
+  --success-text: #8FCB9B;
+  --neutral-chip: #2A241E;
+  --block-shadow: #f5efe8;
+}
+
 .font-display { font-family: 'Lalezar', 'Vazirmatn', serif; }
 
 * { box-sizing: border-box; }
@@ -8,7 +60,103 @@ html, body, #root { height: 100%; margin: 0; direction: rtl; }
 body {
   font-family: 'Vazirmatn', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: #DDD6CC;
+  background: var(--page-bg);
+  color: var(--text);
+}
+
+/* Remap hardcoded light surfaces / text so dark mode covers the whole app */
+html.dark .bg-\[\#FFFFFF\],
+html.dark .bg-\[\#FFF\],
+html.dark .bg-\[\#fff\],
+html.dark .bg-white {
+  background-color: var(--card) !important;
+}
+html.dark .bg-\[\#F8F6F2\] {
+  background-color: var(--surface) !important;
+}
+html.dark .bg-\[\#FAFAF8\] {
+  background-color: var(--field) !important;
+}
+html.dark .bg-\[\#F5F0EA\],
+html.dark .bg-\[\#EFE8E0\] {
+  background-color: var(--surface-2) !important;
+}
+html.dark .bg-\[\#F0EBE3\],
+html.dark .bg-\[\#E5DDD4\],
+html.dark .bg-\[\#D5CCC3\] {
+  background-color: var(--chip) !important;
+}
+html.dark .bg-\[\#FFF5F0\],
+html.dark .bg-\[\#FFE8DC\],
+html.dark .bg-\[\#F8E8E4\],
+html.dark .bg-\[\#EDF5F0\],
+html.dark .bg-\[\#F0EBF5\],
+html.dark .bg-\[\#EBF0F5\] {
+  background-color: var(--accent-soft) !important;
+}
+html.dark .bg-\[\#EAF5EC\] {
+  background-color: var(--success-bg) !important;
+}
+html.dark .bg-\[\#F5F5F5\] {
+  background-color: var(--neutral-chip) !important;
+}
+html.dark .bg-\[\#1A1108\] {
+  background-color: var(--text) !important;
+}
+
+html.dark .text-\[\#1A1108\],
+html.dark .text-\[\#3A2A1A\],
+html.dark .text-black {
+  color: var(--text) !important;
+}
+html.dark .text-\[\#5A4030\] {
+  color: var(--brown-text) !important;
+}
+html.dark .text-\[\#7A6858\] {
+  color: var(--muted) !important;
+}
+html.dark .text-\[\#A89888\],
+html.dark .text-\[\#C4B8A8\] {
+  color: var(--muted-2) !important;
+}
+html.dark .text-\[\#6B9E7A\] {
+  color: var(--success-text) !important;
+}
+html.dark .text-\[\#F8F6F2\],
+html.dark .text-white {
+  color: var(--surface) !important;
+}
+
+html.dark .border-\[\#F0EBE3\],
+html.dark .border-\[\#E5DDD4\],
+html.dark .border-\[\#FFDDCC\],
+html.dark .border-\[\#F5DDD0\],
+html.dark .border-\[\#C8E8D0\] {
+  border-color: var(--border) !important;
+}
+html.dark .border-\[\#C4714A\] {
+  border-color: var(--accent) !important;
+}
+html.dark .ring-\[\#C4714A\] {
+  --tw-ring-color: var(--accent) !important;
+}
+
+html.dark .hover\:bg-\[\#E5DDD4\]:hover,
+html.dark .hover\:bg-\[\#F5F0EA\]:hover,
+html.dark .hover\:bg-\[\#FFE8DC\]:hover,
+html.dark .hover\:bg-\[\#EFE8E0\]:hover,
+html.dark .hover\:bg-\[\#F8E8E4\]:hover,
+html.dark .hover\:bg-\[\#F0EBE3\]:hover {
+  background-color: var(--chip-hover) !important;
+}
+
+/* Autofill override */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--text) !important;
+  -webkit-box-shadow: 0 0 0px 1000px var(--field) inset !important;
+  transition: background-color 5000s ease-in-out 0s;
 }
 
 ::-webkit-scrollbar { width: 0; height: 0; }
@@ -18,7 +166,7 @@ input[type="range"] {
   appearance: none;
   height: 6px;
   border-radius: 99px;
-  background: #E5DDD4;
+  background: var(--border-strong);
   outline: none;
 }
 input[type="range"]::-webkit-slider-thumb {
@@ -27,8 +175,74 @@ input[type="range"]::-webkit-slider-thumb {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #C4714A;
+  background: var(--accent);
   cursor: pointer;
   box-shadow: 0 1px 4px rgba(0,0,0,0.18);
 }
 input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; }
+
+.schedule-block {
+  background-color: var(--block-color, #e2c983);
+  color: #1b1c1a;
+  border: 1px solid #1b1c1a;
+  border-radius: 0;
+  box-shadow: 4px 4px 0 0 var(--block-shadow);
+  cursor: grab;
+  touch-action: none;
+  transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+}
+
+html.dark .schedule-block {
+  color: #f5efe8;
+  border-color: #f5efe8;
+  box-shadow: 4px 4px 0 0 #f5efe8;
+}
+
+.schedule-block:hover:not(.is-dragging) {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 0 var(--block-shadow);
+}
+
+.schedule-block:active:not(.is-dragging) {
+  transform: translate(1px, 1px);
+  box-shadow: 2px 2px 0 0 var(--block-shadow);
+}
+
+.schedule-block.is-dragging {
+  cursor: grabbing;
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 0 var(--block-shadow);
+}
+
+/* Yearly-repeating "static" timeblocks: dashed + slightly transparent so
+   they read as auto-generated instances, not per-week edits. */
+.schedule-block.schedule-static {
+  border-style: dashed;
+  border-width: 1.5px;
+  cursor: pointer;
+  opacity: 0.92;
+}
+
+.schedule-block.schedule-static:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 0 var(--block-shadow);
+}
+
+.schedule-block-resize-handle {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.schedule-block-resize-handle::after {
+  content: "▮";
+  display: block;
+  text-align: center;
+  font-size: 8px;
+  line-height: 6px;
+  opacity: 0.55;
+}

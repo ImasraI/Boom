@@ -1,0 +1,24 @@
+2026-09-13 09:30:22,388 | INFO | app.rag.ingest_raw | Processing raw PDF: maz-summer-mock-1405.pdf (2.7 MB, category='plan')
+2026-09-13 09:30:22,388 | INFO | app.rag.ingest_raw |   already ingested, skipping.
+2026-09-13 09:30:22,389 | INFO | app.rag.ingest_raw | Processing raw PDF: ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_اول_1402.pdf (364.5 MB, category='test_book')
+2026-09-13 09:30:22,389 | INFO | app.rag.ingest_raw |   already ingested, skipping.
+2026-09-13 09:30:22,389 | INFO | app.rag.ingest_raw | Processing raw PDF: ریاضی_تجربی_جامع_نشرالگو_+_موج_آزمون_جلد_دوم_1402.pdf (198.4 MB, category='test_book')
+2026-09-13 09:30:22,389 | INFO | app.rag.ingest_raw |   already ingested, skipping.
+2026-09-13 09:30:22,389 | INFO | app.rag.ingest_raw | Raw PDF ingestion finished: 0 ingested, 3 skipped.
+INFO:     127.0.0.1:14853 - "GET /api/health HTTP/1.1" 200 OK
+2026-09-13 09:38:26,426 | INFO | app.rag.embeddings | Loading Ollama embedding model: nomic-embed-text
+2026-09-13 09:38:31,641 | INFO | app.rag.image_embeddings | Loading CLIP image tower 'clip-ViT-B-32' and multilingual text tower 'clip-ViT-B-32-multilingual-v1'.
+2026-09-13 09:38:38,077 | INFO | app.rag.pipeline | Image retrieval: 12 candidate(s), 4 relevant page(s), threshold=0.240 for user 1.
+2026-09-13 09:38:38,153 | INFO | app.routers.boom_ai | Weekly mock: using cached normalized schedule for maz-summer-mock-1405.pdf.
+2026-09-13 09:38:38,154 | INFO | app.routers.boom_ai | Weekly mock: text plan 'maz-summer-mock-1405.pdf' pages [4, 5, 6] (1716 chars).
+2026-09-13 09:38:38,154 | INFO | app.rag.llm | Using OllamaLLMClient with base_url=http://127.0.0.1:11434, model=aya-expanse:8b-q4_K_S
+2026-09-13 09:40:12,431 | INFO | app.rag.pipeline | Image retrieval: 12 candidate(s), 4 relevant page(s), threshold=0.240 for user 1.
+2026-09-13 09:40:12,525 | INFO | app.routers.boom_ai | Weekly mock: using cached normalized schedule for maz-summer-mock-1405.pdf.
+2026-09-13 09:40:12,525 | INFO | app.routers.boom_ai | Weekly mock: text plan 'maz-summer-mock-1405.pdf' pages [4, 5, 6] (1574 chars).
+2026-09-13 09:40:12,537 | INFO | app.rag.pipeline | Image retrieval: 12 candidate(s), 4 relevant page(s), threshold=0.240 for user 1.
+2026-09-13 09:40:12,628 | INFO | app.routers.boom_ai | Weekly mock: using cached normalized schedule for maz-summer-mock-1405.pdf.
+2026-09-13 09:40:12,630 | INFO | app.routers.boom_ai | Weekly mock: text plan 'maz-summer-mock-1405.pdf' pages [4, 5, 6] (1716 chars).
+2026-09-13 09:40:13,642 | INFO | app.rag.pipeline | Image retrieval: 12 candidate(s), 4 relevant page(s), threshold=0.240 for user 1.
+2026-09-13 09:40:13,737 | INFO | app.routers.boom_ai | Weekly mock: using cached normalized schedule for maz-summer-mock-1405.pdf.
+2026-09-13 09:40:13,739 | INFO | app.routers.boom_ai | Weekly mock: text plan 'maz-summer-mock-1405.pdf' pages [4, 5, 6] (1578 chars).
+2026-09-13 09:45:13,747 | WARNING | app.rag.llm | Ollama request timed out after 300.0s.

@@ -5,6 +5,8 @@ This version returns the extracted text as a string.
 """
 
 from pathlib import Path
+from typing import Any, Protocol, cast
+
 import pymupdf
 import numpy as np
 import easyocr
@@ -12,6 +14,12 @@ import easyocr
 DPI = 150
 
 _reader = None
+
+
+class _PdfPage(Protocol):
+    def get_text(self, kind: str) -> str: ...
+
+    def get_pixmap(self, *, matrix: Any, alpha: bool) -> Any: ...
 
 def get_reader():
     global _reader
@@ -29,7 +37,7 @@ def pdf_to_text(pdf_path: Path, use_ocr: bool = True) -> str:
 
     try:
         for page_num in range(1, doc.page_count + 1):
-            page = doc[page_num - 1]
+            page = cast(_PdfPage, doc[page_num - 1])
 
             # Try to extract text layer
             raw_text = page.get_text("text")

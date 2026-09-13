@@ -51,14 +51,31 @@ class Settings(BaseSettings):
     # 200 is a good quality/speed tradeoff for reading dense Persian text.
     IMAGE_DPI: int = 200
 
+    # Batch size for embedding a document's pages (one batch per DB add,
+    # keeps memory bounded on big scanned PDFs).
+    IMAGE_BATCH_SIZE: int = 30
+
+    # Folder containing "raw" study PDFs that should be embedded
+    # page-by-page automatically before the app is used (see
+    # app/rag/ingest_raw.py).
+    RAW_DIR: str = "data/raw"
+
+    # Resolution used for the big bulk raw PDFs. Lower than IMAGE_DPI to
+    # keep the rendered page count / disk usage reasonable (120 DPI is
+    # still readable by the vision model).
+    RAW_INGEST_DPI: int = 120
+
     # Number of page images retrieved per question
     IMAGE_TOP_K: int = 3
 
-    # Minimum cosine similarity required before a page image can trigger
+# Minimum cosine similarity required before a page image can trigger
     # the vision pipeline.  Without this cutoff Chroma returns nearest
     # neighbours even for unrelated questions whenever images are indexed.
-    # Tune this upward for stricter matching or downward for higher recall.
-    IMAGE_RELEVANCE_THRESHOLD: float = 0.35
+    #
+    # The multilingual-CLIP text tower scores Persian questions against
+    # page images in a flat ~0.25-0.31 band, so 0.35 never fires. 0.24 keeps
+    # the cutoff meaningful while letting genuinely-related pages through.
+    IMAGE_RELEVANCE_THRESHOLD: float = 0.24
 
     # Separate Chroma collection for image embeddings (kept apart from the
     # text-chunk collection so the two pipelines never mix).

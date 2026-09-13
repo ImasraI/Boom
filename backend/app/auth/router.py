@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ..auth.database import get_db, User
 from ..auth.security import get_password_hash, verify_password, create_access_token
+from ..auth.deps import get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -10,6 +12,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 class RegisterRequest(BaseModel):
     username: str
     password: str
+    phone: str | None = None
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -20,10 +23,18 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     existing = db.query(User).filter(User.username == request.username).first()
     if existing:
         raise HTTPException(status_code=400, detail="Username already taken")
+    if request.phone:
+        phone_taken = db.query(User).filter(User.phone == request.phone).first()
+        if phone_taken:
+            raise HTTPException(status_code=400, detail="Phone already registered")
     hashed = get_password_hash(request.password)
-    user = User(username=request.username, hashed_password=hashed)
+    user = User(username=request.username, phone=request.phone, hashed_password=hashed)
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Username or phone already taken")
     db.refresh(user)
     token = create_access_token({"sub": str(user.id)})
     return TokenResponse(access_token=token)
@@ -35,3 +46,11 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     token = create_access_token({"sub": str(user.id)})
     return TokenResponse(access_token=token)
+
+@router.get("/me")
+def me(current_user: User = Depends(get_current_user)):
+    return {
+        "id": current_user.id,
+        "username": current_user.username,
+        "phone": current_user.phone,
+    }

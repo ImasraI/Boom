@@ -13,7 +13,7 @@ isolated inside one shared Chroma collection.
 """
 
 from functools import lru_cache
-from typing import List, Dict, Any, cast
+from typing import Any, Dict, List, Optional, cast
 import uuid
 
 import chromadb
@@ -52,6 +52,7 @@ class VectorStore:
         chunks: List[str],
         embeddings: List[List[float]],
         user_id: int,
+        category: str = "",
     ) -> int:
 
         # Generate a unique ID for each chunk
@@ -66,6 +67,7 @@ class VectorStore:
                 "document_name": document_name,
                 "chunk_index": i,
                 "user_id": user_id,
+                "category": category,
             }
             for i in range(len(chunks))
         ]
@@ -90,13 +92,19 @@ class VectorStore:
         query_embedding: List[float],
         top_k: int,
         user_id: int,
+        category: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
 
         # Search for the most similar chunks, restricted to this user's docs
+        # (and optionally to one source category, e.g. only the plan/mock
+        # documents, which otherwise get drowned out by much larger books).
+        where = {"user_id": user_id}
+        if category:
+            where = {"$and": [{"user_id": user_id}, {"category": category}]}
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,
-            where={"user_id": user_id},
+            where=where,
         )
 
         output = []
@@ -126,6 +134,7 @@ class VectorStore:
                     "content": documents[0][i],
                     "document_name": metadatas[0][i]["document_name"],
                     "chunk_index": metadatas[0][i]["chunk_index"],
+                    "category": str(metadatas[0][i].get("category") or ""),
                     "score": round(float(score), 4),
                 }
             )

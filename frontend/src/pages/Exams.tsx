@@ -3,7 +3,7 @@ import { NavFn } from "../types";
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} className="w-9 h-9 rounded-xl bg-[#F0EBE3] flex items-center justify-center text-[#7A6858] hover:bg-[#E5DDD4] transition-colors">
+    <button onClick={onClick} className="w-9 h-9 rounded-xl bg-[#F0EBE3] flex items-center justify-center text-[var(--muted)] hover:bg-[#E5DDD4] transition-colors">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: "scaleX(-1)" }}>
         <path d="M19 12H5M12 5l-7 7 7 7"/>
       </svg>
@@ -63,10 +63,10 @@ export default function Exams({ nav }: { nav: NavFn }) {
       <div className="px-5 pt-12 pb-4 flex items-center gap-4">
         <BackButton onClick={() => selected ? setSelected(null) : nav("home")} />
         <div className="text-right">
-          <h1 className="font-display text-xl text-[#1A1108]">
+          <h1 className="font-display text-xl text-[var(--text)]">
             {selected ? exam?.provider : "آزمون‌ها"}
           </h1>
-          <p className="text-[12px] text-[#A89888] font-medium">
+          <p className="text-[12px] text-[var(--muted-2)] font-medium">
             {selected ? exam?.date : "نتایج و تحلیل عملکرد"}
           </p>
         </div>
@@ -76,7 +76,7 @@ export default function Exams({ nav }: { nav: NavFn }) {
         <div className="px-5 space-y-4">
           {/* Upload */}
           <button onClick={handleUpload}
-            className="w-full bg-white rounded-2xl border-2 border-dashed border-[#E5DDD4] hover:border-[#C4714A] p-5 flex items-center gap-4 transition-all active:scale-[0.98] group">
+            className="w-full bg-[var(--card)] rounded-2xl border-2 border-dashed border-[#E5DDD4] hover:border-[#C4714A] p-5 flex items-center gap-4 transition-all active:scale-[0.98] group">
             <div className="w-11 h-11 rounded-xl bg-[#FFF5F0] group-hover:bg-[#FFE8DC] flex items-center justify-center transition-colors flex-shrink-0">
               {uploading ? (
                 <div className="w-5 h-5 border-2 border-[#C4714A] border-t-transparent rounded-full animate-spin" />
@@ -89,26 +89,26 @@ export default function Exams({ nav }: { nav: NavFn }) {
               )}
             </div>
             <div className="text-right flex-1">
-              <p className="text-[14px] font-bold text-[#1A1108]">
+              <p className="text-[14px] font-bold text-[var(--text)]">
                 {uploadDone ? "آپلود شد! در حال تحلیل..." : "آپلود نتایج آزمون"}
               </p>
-              <p className="text-[12px] text-[#A89888] font-medium mt-0.5">PDF، عکس یا پاسخنامه</p>
+              <p className="text-[12px] text-[var(--muted-2)] font-medium mt-0.5">PDF، عکس یا پاسخنامه</p>
             </div>
           </button>
 
-          <p className="text-[12px] font-bold text-[#A89888]">نتایج قبلی</p>
+          <p className="text-[12px] font-bold text-[var(--muted-2)]">نتایج قبلی</p>
 
           {EXAM_RESULTS.map(e => (
             <button key={e.id} onClick={() => setSelected(e.id)}
-              className="w-full bg-white rounded-2xl border border-[#F0EBE3] p-4 text-right hover:border-[#E5DDD4] active:scale-[0.98] transition-all">
+              className="w-full bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right hover:border-[#E5DDD4] active:scale-[0.98] transition-all">
               <div className="flex items-start justify-between mb-3">
                 <div className="text-left">
                   <p className="text-2xl font-bold text-[#C4714A]">{e.totalScore}%</p>
-                  <p className="text-[11px] text-[#A89888] font-medium">رتبه #{e.rank.toLocaleString()}</p>
+                  <p className="text-[11px] text-[var(--muted-2)] font-medium">رتبه #{e.rank.toLocaleString()}</p>
                 </div>
                 <div>
-                  <p className="text-[14px] font-bold text-[#1A1108]">{e.provider}</p>
-                  <p className="text-[11px] text-[#A89888] font-medium mt-0.5">{e.date}</p>
+                  <p className="text-[14px] font-bold text-[var(--text)]">{e.provider}</p>
+                  <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">{e.date}</p>
                 </div>
               </div>
               <div className="w-full h-1.5 bg-[#F0EBE3] rounded-full overflow-hidden">
@@ -127,21 +127,21 @@ export default function Exams({ nav }: { nav: NavFn }) {
         </div>
       ) : exam ? (
         <div className="px-5 space-y-4">
-          <div className="bg-white rounded-3xl border border-[#F0EBE3] p-5">
+          <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-5">
             <div className="flex items-center justify-between mb-2">
               <div className="text-left">
-                <p className="text-[11px] font-bold text-[#A89888]">رتبه‌ی کشوری</p>
-                <p className="text-3xl font-bold text-[#1A1108]">#{exam.rank.toLocaleString()}</p>
+                <p className="text-[11px] font-bold text-[var(--muted-2)]">رتبه‌ی کشوری</p>
+                <p className="text-3xl font-bold text-[var(--text)]">#{exam.rank.toLocaleString()}</p>
               </div>
               <div className="text-right">
-                <p className="text-[11px] font-bold text-[#A89888]">نمره‌ی کل</p>
+                <p className="text-[11px] font-bold text-[var(--muted-2)]">نمره‌ی کل</p>
                 <p className="text-5xl font-bold text-[#C4714A]">{exam.totalScore}%</p>
               </div>
             </div>
           </div>
 
-          <div className="bg-white rounded-3xl border border-[#F0EBE3] p-5">
-            <p className="text-[12px] font-bold text-[#A89888] mb-4 text-right">جزئیات هر درس</p>
+          <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-5">
+            <p className="text-[12px] font-bold text-[var(--muted-2)] mb-4 text-right">جزئیات هر درس</p>
             <div className="space-y-4">
               {exam.subjects.map(s => (
                 <div key={s.name}>
@@ -149,9 +149,9 @@ export default function Exams({ nav }: { nav: NavFn }) {
                     <div className="flex gap-3 text-[11px] font-bold" dir="ltr">
                       <span className="text-[#6B9E7A]">✓ {s.correct}</span>
                       <span className="text-[#C44A4A]">✗ {s.wrong}</span>
-                      <span className="text-[#A89888]">— {s.blank}</span>
+                      <span className="text-[var(--muted-2)]">— {s.blank}</span>
                     </div>
-                    <p className="text-[13px] font-semibold text-[#1A1108]">{s.name}</p>
+                    <p className="text-[13px] font-semibold text-[var(--text)]">{s.name}</p>
                   </div>
                   <ScoreBar score={s.score} />
                 </div>
@@ -170,3 +170,4 @@ export default function Exams({ nav }: { nav: NavFn }) {
     </div>
   );
 }
+

@@ -1,21 +1,55 @@
+﻿from contextlib import asynccontextmanager
+import threading
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.routers import chat, documents
-from .auth.database import Base, engine
+from app.routers.tasks import router as tasks_router
+from .auth.database import ensure_schema
 from .auth.router import router as auth_router
 from app.routers.boom_ai import router as boom_ai_router
+from app.utils.logger import get_logger
+
 
 # Load application settings
 settings = get_settings()
+logger = get_logger(__name__)
 
-Base.metadata.create_all(bind=engine)
+
+def _start_raw_ingestion() -> None:
+    """Background task that embeds any new PDFs from data/raw page-by-page.
+
+    Runs right after the server starts so the endpoint is always reachable
+    quickly; ``python -m app.rag.ingest_raw`` (invoked by run_boom.bat) does
+    the same work *before* the site starts for the first run.
+    """
+    from app.rag.ingest_raw import ingest_raw_pdfs
+
+    def _run() -> None:
+        try:
+            ingest_raw_pdfs()
+        except Exception as exc:  # noqa: BLE001 - never crash the server
+            logger.exception(f"Background raw-PDF ingestion failed: {exc}")
+
+    thread = threading.Thread(target=_run, name="raw-ingest", daemon=True)
+    thread.start()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _start_raw_ingestion()
+    yield
+
+
+ensure_schema()
 # Create the FastAPI application
 app = FastAPI(
     title=settings.APP_NAME,
     description="RAG-based AI assistant prototype for K. N. Toosi University",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan,
 )
 
 
@@ -49,6 +83,7 @@ app.include_router(chat.router)
 app.include_router(documents.router)
 app.include_router(auth_router)
 app.include_router(boom_ai_router)
+app.include_router(tasks_router)
 
 # Health check endpoint
 @app.get("/api/health", tags=["health"])

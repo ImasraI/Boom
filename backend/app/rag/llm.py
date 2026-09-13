@@ -83,7 +83,7 @@ class OllamaLLMClient(BaseLLMClient):
         model: str,
         temperature: float,
         max_tokens: int,
-        timeout: float = 60.0,
+        timeout: float = 300.0,
     ):
         clean_url = (base_url or "").strip().rstrip("/")
         if "localhost" in clean_url:
@@ -256,7 +256,7 @@ def get_vision_llm_client() -> BaseLLMClient:
             model=settings.VISION_LLM_MODEL_NAME,
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
-            timeout=120.0,  # vision requests are slower than text-only ones
+            timeout=300.0,  # vision requests (multi-page, CPU) need headroom
         )
 
     logger.info("Using MockLLMClient for vision (test mode without a real vision model).")
