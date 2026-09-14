@@ -1,6 +1,6 @@
 ﻿export type Screen =
   | "landing" | "login" | "signup" | "home"
-  | "streak" | "recovery" | "exams" | "plan" | "chat" | "profile" | "schedule";
+  | "streak" | "recovery" | "exams" | "plan" | "chat" | "profile" | "schedule" | "evaluation";
 
 export interface SignupData {
   name: string;

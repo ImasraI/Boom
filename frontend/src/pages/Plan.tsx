@@ -13,10 +13,17 @@ function BackButton({ onClick }: { onClick: () => void }) {
 }
 
 const UPCOMING_EXAMS = [
-  { label: "قلم‌چی — آزمون شماره ۴", date: "۱۵ شهریور ۱۴۰۵", daysAway: 10, color: "#5C8BA8" },
+  { label: "قلمچی — آزمون شماره ۴", date: "۱۵ شهریور ۱۴۰۵", daysAway: 10, color: "#5C8BA8" },
   { label: "آزمون ماهانه گاج", date: "۲۲ شهریور ۱۴۰۵", daysAway: 17, color: "#9B7AAD" },
-  { label: "امتحان میان‌ترم مدرسه", date: "۳۰ شهریور ۱۴۰۵", daysAway: 25, color: "var(--accent)" },
+  { label: "امتحان میانترم مدرسه", date: "۳۰ شهریور ۱۴۰۵", daysAway: 25, color: "var(--accent)" },
 ];
+
+const MOCK_SUBJECTS_PROGRESS = [
+  { subject: "حسابان", source: "کتاب تست مهر و ماه", read: 65, total: 100, testsLeft: 42 },
+  { subject: "فیزیک", source: "کتاب تست خیلی سبز", read: 30, total: 100, testsLeft: 85 },
+  { subject: "شیمی", source: "کتاب تست مبتکران", read: 80, total: 100, testsLeft: 20 },
+];
+
 
 const GOALS = [
   { horizon: "بلندمدت", icon: "💎", title: "رتبهی زیر ۵٬۰۰۰ کشوری", sub: "روز کنکور · خرداد ۱۴۰۶", progress: 28, color: "var(--accent)" },
@@ -99,6 +106,28 @@ export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupDa
       </div>
 
       <div className="px-5 space-y-4">
+        {/* Mock Subjects Progress */}
+        <div>
+          <p className="text-[12px] font-bold text-[var(--muted-2)] mb-2 text-right">وضعیت دروس آزمون بعدی</p>
+          <div className="space-y-2">
+            {MOCK_SUBJECTS_PROGRESS.map(s => (
+              <div key={s.subject} className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right">
+                <div className="flex justify-between mb-1">
+                  <p className="font-bold text-[14px]">{s.subject}</p>
+                  <p className="text-[11px] text-[var(--muted-2)]">منبع: {s.source}</p>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="flex-1 h-2 bg-[var(--border)] rounded-full overflow-hidden">
+                    <div className="h-full bg-[var(--accent)]" style={{ width: `${s.read}%` }} />
+                  </div>
+                  <span className="text-[11px] font-bold">{s.read}%</span>
+                </div>
+                <p className="text-[11px] text-[var(--muted-2)]">{100 - s.read}% باقیمانده · {s.testsLeft} تست باقیمانده تا هدف</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Auto-generated Plan */}
         {studyPlan && (
           <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right">
