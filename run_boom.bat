@@ -7,7 +7,9 @@ if not exist "%ROOT%backend" if exist "%ROOT%Boom-merged\backend" set "ROOT=%ROO
 set "BACKEND=%ROOT%backend"
 set "FRONTEND=%ROOT%frontend"
 set "VENV=%BACKEND%\.venv"
+set "LLM_MODEL=aya-expanse:8b-q4_K_S"
 set "EMBED_MODEL=nomic-embed-text"
+set "OLLAMA_URL=http://127.0.0.1:11434"
 
 echo ================================================================
 echo             BOOM AI KONKOOR MENTOR
@@ -78,7 +80,17 @@ node --version >nul 2>&1 || (echo [ERROR] Node.js is unavailable in this window.
 echo [OK] Node.js found
 node --version
 
-
+REM ----- Ollama -----
+where ollama >nul 2>&1
+if errorlevel 1 (
+  echo [INFO] Ollama not found. Attempting install with winget...
+  where winget >nul 2>&1 || (echo [ERROR] winget not available. Install Ollama manually from https://ollama.com/download/windows&pause&exit /b 1)
+  winget install --id Ollama.Ollama -e --accept-source-agreements --accept-package-agreements
+  if errorlevel 1 (echo [ERROR] Ollama installation failed.&pause&exit /b 1)
+  set "PATH=%PATH%;%LocalAppData%\Programs\Ollama;%ProgramFiles%\Ollama"
+)
+where ollama >nul 2>&1 || (echo [ERROR] Ollama not available in this window. Close and reopen the terminal.&pause&exit /b 1)
+echo [OK] Ollama found
 
 REM ----- Python virtual environment -----
 if not exist "%VENV%\Scripts\python.exe" (
@@ -122,7 +134,23 @@ if errorlevel 1 (echo [ERROR] Frontend dependencies failed.&pause&exit /b 1)
 cd /d "%ROOT%"
 echo [OK] Frontend dependencies installed
 
-
+REM ----- Start Ollama and wait for API -----
+echo [SETUP] Starting Ollama...
+curl.exe -s "%OLLAMA_URL%/api/tags" >nul 2>&1
+if errorlevel 1 (
+  start "Ollama" /min cmd /c "ollama serve"
+  echo        Waiting for Ollama API...
+)
+set /a tries=0
+:waitollama
+curl.exe -s "%OLLAMA_URL%/api/tags" >nul 2>&1
+if not errorlevel 1 goto ollamaready
+set /a tries+=1
+if !tries! GEQ 30 (echo [ERROR] Ollama did not become ready after 60 seconds.&pause&exit /b 1)
+timeout /t 2 /nobreak >nul
+goto waitollama
+:ollamaready
+echo [OK] Ollama API ready
 
 REM ----- Pull models -----
 echo [SETUP] Pulling LLM model: %LLM_MODEL%
@@ -136,6 +164,7 @@ if errorlevel 1 (
 echo [OK] LLM model ready: %LLM_MODEL%
 
 echo [SETUP] Pulling embedding model: %EMBED_MODEL%
+ollama pull "%EMBED_MODEL%"
 if errorlevel 1 (echo [ERROR] Could not pull embedding model.&pause&exit /b 1)
 echo [OK] Embedding model ready: %EMBED_MODEL%
 
@@ -167,6 +196,7 @@ echo ================================================================
 echo   BOOM IS RUNNING
 echo   Frontend: http://127.0.0.1:8443
 echo   Backend:  http://127.0.0.1:8000
+echo   Ollama:   %OLLAMA_URL%
 echo ================================================================
 echo.
 echo Close this window to stop. Backend and Frontend run in separate windows.

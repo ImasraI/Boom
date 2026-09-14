@@ -33,24 +33,19 @@ uvicorn app.main:app --reload --port 8000
 
 ## اتصال یک LLM واقعی
 
-پیش‌فرض `LLM_PROVIDER=mock` است تا بتوانید بدون هیچ کلید API، مسیر
-کامل فرانت -> بک -> بازیابی اسناد را تست کنید (پاسخ‌ها نمایشی خواهند بود).
-
 برای اتصال LLM واقعی در `.env`:
-
 ```
-LLM_PROVIDER=openai_compatible
+LLM_PROVIDER=groq
 LLM_API_KEY=<کلید شما>
-LLM_BASE_URL=<آدرس endpoint>
-LLM_MODEL_NAME=<نام مدل>
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_MODEL_NAME=llama-3.1-8b-instant
 ```
 
 این پروژه هر endpoint سازگار با OpenAI Chat Completions API را پشتیبانی
 می‌کند، از جمله:
+- Groq (`https://api.groq.com/openai/v1`)
 - OpenAI مستقیم (`https://api.openai.com/v1`)
-- سرویس‌های ایرانی سازگار مثل Aval AI یا Metis AI
-- مدل‌های متن‌باز محلی از طریق Ollama یا vLLM با حالت OpenAI-compatible
-  (مثلا `http://localhost:11434/v1` برای Ollama)
+- مدل‌های متن‌باز محلی از طریق vLLM با حالت OpenAI-compatible
 
 ## نکات اجرای پروداکشن
 
@@ -62,15 +57,8 @@ LLM_MODEL_NAME=<نام مدل>
   یا دیسک دائمی)، در غیر این صورت با هر ری‌استارت کانتینر، پایگاه دانش
   خالی می‌شود.
 
-## Boom AI: Ollama + RAG
+## Boom AI: RAG با Groq
 
-Boom's chat and multi-month study planner use the integrated RAG pipeline and a real Ollama LLM.
+این پروژه از Groq برایyai LLM چت و برنامه planner استفاده می‌کند.
 
-1. Install Ollama and pull the configured model:
-   `ollama pull aya-expanse:8b-q4_K_S`
-2. Start Ollama (`ollama serve` if it is not already running).
-3. Copy `.env.example` to `.env` and keep `LLM_PROVIDER=ollama` and `LLM_BASE_URL=http://localhost:11434`.
-4. Start the API with `uvicorn app.main:app --reload --port 8000`.
-5. Start the frontend with `npm install` then `npm run dev`.
-
-The planner retrieves relevant curriculum/resources from Chroma before asking the LLM to create the plan. The frontend sends the student's profile (name, major, grade, exam year, target rank, available study time, and test-exam preferences) with chat/planning requests.
+پلانificador استخواندیده منابع از Chroma قبل از‌پاس دادن به LLM برای ساخت برنامه. فرانت‌اند ملف personal (نام، رشته، سال، سطح امتحان goals, target rank, زمان مطالعهavailable study time, and test-exam preferences) را با درخواست‌های چت/پلنidar ارسال می‌کند.

@@ -2,10 +2,10 @@
 Embedding layer for converting text into vector representations.
 
 Supports:
-- Ollama (local)
 - OpenAI-compatible APIs (Groq, Omniroute, etc.)
+- Nomic embed-text
 
-Recommended models for Persian: nomic-embed-text, batai/qwen3-embedding:0.6b
+Recommended models for Persian: nomic-embed-text
 """
 
 from abc import ABC, abstractmethod
@@ -13,7 +13,7 @@ from functools import lru_cache
 from typing import List
 import httpx
 
-from langchain_community.embeddings import OllamaEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
 from app.config import get_settings
 from app.utils.logger import get_logger
@@ -30,29 +30,6 @@ class BaseEmbeddingModel(ABC):
     @abstractmethod
     def embed_query(self, text: str) -> List[float]:
         raise NotImplementedError
-
-
-class OllamaEmbeddingModel(BaseEmbeddingModel):
-    """Wrapper around Ollama's embedding models."""
-
-    def __init__(self, model_name: str, base_url: str):
-        logger.info(f"Loading Ollama embedding model: {model_name}")
-        raw_url = base_url.strip().rstrip("/")
-        if "localhost" in raw_url:
-            raw_url = raw_url.replace("localhost", "127.0.0.1")
-        if raw_url.endswith("/v1"):
-            raw_url = raw_url[:-3]
-        
-        self.model = OllamaEmbeddings(
-            model=model_name,
-            base_url=raw_url
-        )
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return self.model.embed_documents(texts)
-
-    def embed_query(self, text: str) -> List[float]:
-        return self.model.embed_query(text)
 
 
 class OpenAICompatibleEmbeddingModel(BaseEmbeddingModel):
@@ -100,10 +77,22 @@ def get_embedding_model() -> BaseEmbeddingModel:
     settings = get_settings()
     provider = settings.EMBEDDING_PROVIDER
 
+    if provider == "groq":
+        if not settings.EMBEDDING_API_KEY:
+            logger.warning("Groq embedding selected but EMBEDDING_API_KEY not set.")
+            return None
+        base_url = settings.EMBEDDING_BASE_URL or "https://api.groq.com/openai/v1"
+        logger.info(f"Using Groq embeddings: {base_url}, model={settings.EMBEDDING_MODEL_NAME}")
+        return OpenAICompatibleEmbeddingModel(
+            api_key=settings.EMBEDDING_API_KEY,
+            base_url=base_url,
+            model_name=settings.EMBEDDING_MODEL_NAME,
+        )
+
     if provider == "openai":
         if not settings.EMBEDDING_API_KEY:
-            logger.warning("OpenAI-compatible embedding selected but EMBEDDING_API_KEY not set. Falling back to Ollama.")
-            provider = "ollama"
+            logger.warning("OpenAI-compatible embedding selected but EMBEDDING_API_KEY not set. Falling back to Groq.")
+            provider = "groq"
         else:
             base_url = settings.EMBEDDING_BASE_URL
             if not base_url or base_url == "http://localhost:11434":
@@ -115,16 +104,10 @@ def get_embedding_model() -> BaseEmbeddingModel:
                 model_name=settings.EMBEDDING_MODEL_NAME,
             )
 
-    if provider == "ollama":
-        base_url = settings.EMBEDDING_BASE_URL or "http://127.0.0.1:11434"
-        logger.info(f"Using Ollama embeddings: {base_url}, model={settings.EMBEDDING_MODEL_NAME}")
-        return OllamaEmbeddingModel(
-            model_name=settings.EMBEDDING_MODEL_NAME,
-            base_url=base_url,
-        )
+    if provider == "nomic":
+        # Nomic embed-text can be used locally or via API
+        logger.info(f"Using Nomic embeddings: {settings.EMBEDDING_MODEL_NAME}")
+        return HuggingFaceEmbeddings(model_name=settings.EMBEDDING_MODEL_NAME)
 
-    logger.warning(f"Unknown embedding provider: {provider}. Falling back to Ollama.")
-    return OllamaEmbeddingModel(
-        model_name=settings.EMBEDDING_MODEL_NAME,
-        base_url="http://127.0.0.1:11434",
-    )
+    logger.warning(f"Unknown embedding provider: {provider}. Falling back to Groq.")
+    return get_embedding_model.__wrapped__(Settings()) if False else None

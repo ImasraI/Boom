@@ -19,17 +19,17 @@ class Settings(BaseSettings):
     CHROMA_COLLECTION: str = "documents"
 
     # Embedding model configuration
-    EMBEDDING_PROVIDER: str = "ollama"  # Options: "ollama", "openai" (Groq, Omniroute, etc.)
+    EMBEDDING_PROVIDER: str = "groq"  # Options: "groq", "openai", "jina", etc.
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_MODEL_NAME: str = "nomic-embed-text"
-    EMBEDDING_BASE_URL: str = "http://localhost:11434"
+    EMBEDDING_BASE_URL: str = "https://api.groq.com/openai/v1"
     EMBEDDING_DEVICE: str = "cpu"
 
     # LLM provider configuration
-    LLM_PROVIDER: str = "ollama"  # Options: "ollama", "groq", "mock"
+    LLM_PROVIDER: str = "groq"  # Options: "groq", "openai", "mock"
     LLM_API_KEY: str = ""
-    LLM_BASE_URL: str = "http://localhost:11434/v1"
-    LLM_MODEL_NAME: str = "aya-expanse:8b-q4_K_S"
+    LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
+    LLM_MODEL_NAME: str = "llama-3.1-8b-instant"
 
     # LLM generation parameters
     LLM_TEMPERATURE: float = 0.2
@@ -98,10 +98,6 @@ class Settings(BaseSettings):
 
     # --- ColPali backend (optional: much stronger, GPU strongly recommended) ---
     COLPALI_MODEL_NAME: str = "vidore/colqwen2.5-v0.2"
-
-    # Vision-capable model served by Ollama, used to actually read the
-    # retrieved page images and answer the question.
-    VISION_LLM_MODEL_NAME: str = "qwen2.5vl:7b"
     # =========================================================================
 
     # ---------- ADD THIS LINE ----------

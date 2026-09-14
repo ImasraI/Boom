@@ -392,7 +392,7 @@ def generate_study_plan(request: StudyPlanRequest):
 """
     answer = get_llm_client().generate([{"role": "user", "content": prompt}], max_tokens=1800)
     if not answer:
-        return {"plan": "مدل زبانی پاسخ نداد. اتصال Ollama و نام مدل را بررسی کن.", "sources": chunks, "error": "llm_unavailable"}
+        return {"plan": "مدل زبانی پاسخ نداد. تنظیماتprovider را بررسی کن.", "sources": chunks, "error": "llm_unavailable"}
     return {"plan": answer, "sources": chunks}
 
 

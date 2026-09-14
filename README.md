@@ -5,7 +5,7 @@ Boom's original frontend is kept, while the RAG backend from the uploaded Lapeac
 ## Architecture
 
 - `frontend/` — existing Boom React/Vite UI
-- `backend/app/rag/` — Chroma + hybrid retrieval + Ollama RAG pipeline
+- `backend/app/rag/` — Chroma + hybrid retrieval + Groq/LLM RAG pipeline
 - `backend/app/routers/boom_ai.py` — Boom chat and multi-month study-plan endpoints
 - `backend/data/chroma_db/` — existing RAG vector store from the uploaded Lapeace project
 - `backend/data/uploads/` — existing indexed documents/uploads
@@ -23,7 +23,7 @@ copy .env.example .env  # Windows
 uvicorn app.main:app --reload --port 8000
 ```
 
-Make sure Ollama is running and the configured models exist. The default configuration expects `aya-expanse:8b-q4_K_S` and `nomic-embed-text`.
+Make sure your Groq API key is set in the `.env` file. The default configuration expects `LLM_PROVIDER=groq` and `EMBEDDING_PROVIDER=groq` with the respective API keys.
 
 ## Run frontend
 
@@ -41,7 +41,7 @@ Boom's current frontend uses a local demo login, so `/api/boom/chat` and `/api/b
 
 ## Windows one-click setup
 
-Double-click `run_boom.bat` from the project root. It checks/installs Python 3.13, Node.js LTS, and Ollama using Windows `winget`, creates the backend virtual environment, installs Python and npm dependencies, creates `.env`, starts Ollama, pulls Aya Expanse and `nomic-embed-text`, then launches FastAPI and Vite in separate windows.
+Double-click `run_boom.bat` from the project root. It checks/installs Python 3.13, Node.js LTS, and creates the backend virtual environment, installs Python and npm dependencies, creates `.env`, starts the backend and frontend servers in separate windows.
 
 Requirements: Windows 10/11 with `winget` available and an internet connection for the first setup. The Aya model is several GB, so the first model download can take time.
 
