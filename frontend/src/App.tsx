@@ -20,9 +20,9 @@ const NAV_ITEMS: { screen: Screen; label: string; icon: React.ReactNode }[] = [
   { screen: "streak", label: "استریک", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C9 7 6 8 7 13c.7 3 3 5 5 5s4.3-2 5-5c1-5-2-6-5-11z"/></svg> },
   { screen: "recovery", label: "ریکاوری", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> },
   { screen: "exams", label: "آزمونها", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
-  { screen: "plan", label: "برنامه", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
-  { screen: "schedule", label: "برنامه هفتگی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
-  { screen: "profile", label: "پروفایل", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
+   { screen: "plan", label: "برنامه", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
+   { screen: "schedule", label: "برنامه هفتگی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
+   { screen: "chat", label: "چت", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> },
 ];
 
 function persistUser(data: SignupData) {
@@ -59,16 +59,6 @@ function DesktopSidebar({ screen, nav }: { screen: Screen; nav: (s: Screen) => v
           );
         })}
       </nav>
-      <div className="p-4 border-t border-[var(--border)]">
-        <button onClick={() => nav("chat")}
-          className="w-full py-3.5 rounded-2xl bg-[var(--text)] text-[var(--surface)] font-bold text-[13px] flex items-center justify-center gap-2 hover:bg-[var(--text-strong)] transition-colors"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-          گفتگو با بوم AI
-        </button>
-      </div>
     </aside>
   );
 }
@@ -89,7 +79,7 @@ function Shell({ children, screen, nav }: { children: React.ReactNode; screen: S
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("landing");
-  const [dark, setDark] = useState(() => localStorage.getItem("boom-theme") === "dark");
+  const [dark, setDark] = useState(() => { const stored = localStorage.getItem("boom-theme"); return stored ? stored === "dark" : true; });
   const [userData, setUserData] = useState<SignupData | null>(null);
 
   useEffect(() => {
@@ -168,14 +158,14 @@ export default function App() {
       {screen === "landing" && <Landing {...p} />}
       {screen === "login" && <Login {...p} onLogin={handleLogin} />}
       {screen === "signup" && <Signup {...p} onComplete={handleSignupComplete} />}
-      {screen === "home" && userData && <Home {...p} userData={userData} />}
+      {screen === "home" && userData && <Home {...p} userData={userData} logout={logout} />}
       {screen === "streak" && <Streak {...p} />}
       {screen === "recovery" && <Recovery {...p} />}
       {screen === "exams" && <Exams {...p} />}
       {screen === "plan" && <Plan {...p} userData={userData} />}
       {screen === "schedule" && <Schedule {...p} userData={userData} />}
       {screen === "chat" && <Chat {...p} userData={userData} />}
-      {screen === "profile" && userData && <Profile {...p} userData={userData} {...settingsProps} onUpdate={handleUpdateProfile} />}
+      {screen === "profile" && userData && <Profile {...p} userData={userData} {...settingsProps} />}
     </Shell>
   );
 }

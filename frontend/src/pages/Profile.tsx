@@ -38,12 +38,13 @@ function Chips({ options, value, onChange }: { options: string[]; value: string;
 const DAYS_FA = ["شنبه", "یکشنبه", "دوشنبه", "سهشنبه", "چهارشنبه", "پنجشنبه", "جمعه"];
 const SECTIONS = ["اطلاعات عمومی", "سبک زندگی", "ارزیابی دروس", "هوش مصنوعی", "تنظیمات"];
 
-export default function Profile({ nav, userData, dark, toggleDark, onSave }: { 
+export default function Profile({ nav, userData, dark, toggleDark, onSave, logout }: { 
   nav: NavFn; 
   userData: SignupData | null; 
   dark: boolean; 
   toggleDark: () => void;
   onSave: (data: SignupData) => void;
+  logout: () => void;
 }) {
   const [activeSection, setActiveSection] = useState(0);
   const subjects = SUBJECTS_BY_MAJOR[userData?.major ?? "ریاضی فیزیک"] ?? [];
@@ -288,7 +289,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave }: {
         </div>
       </div>
       <div className="bg-[var(--field)] rounded-xl px-4 py-3 flex items-center justify-between">
-        <button onClick={() => { localStorage.clear(); window.location.reload(); }}
+        <button onClick={logout}
           className="w-11 h-6 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400">

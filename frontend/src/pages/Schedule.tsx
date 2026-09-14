@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
 import { apiUrl } from "../api"
+import GroqChart from "../components/GroqChart"
 import {
   addDays,
   fromISO,
@@ -361,6 +362,7 @@ export default function Schedule({
   const genAbortRef = useRef<Record<string, AbortController>>({})
   const skipPersistRef = useRef(true)
 
+  const [showChart, setShowChart] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
   const blocksRef = useRef(blocks)
@@ -778,7 +780,7 @@ export default function Schedule({
           {isCurrentWeekGenerating ? (
             <button
               onClick={() => stopGeneration(weekStart)}
-              className="px-3 h-9 rounded-xl border border-red-500 bg-red-50 text-[11px] font-bold text-red-600 hover:bg-red-100 dark:border-red-900 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900 transition-colors"
+              className="px-3 h-9 rounded-xl border border-red-400 bg-red-100 text-[11px] font-bold text-red-600 hover:bg-red-200 transition-colors dark:border-red-500 dark:bg-red-900/50 dark:text-red-400 dark:hover:bg-red-900"
             >
               توقف
             </button>
@@ -791,6 +793,12 @@ export default function Schedule({
               {generating && !isCurrentWeekGenerating ? "در حال ساخت..." : "بازسازی"}
             </button>
           )}
+          <button
+            onClick={() => setShowChart(v => !v)}
+            className={`px-3 h-9 rounded-xl border text-[11px] font-bold transition-colors ${showChart ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border-strong)] text-[var(--muted)] hover:text-[var(--accent)]"}`}
+          >
+            {showChart ? "تقویم" : "نمودار"}
+          </button>
           <button
             onClick={() => openAdd(0, HOUR_START)}
             className="w-9 h-9 rounded-xl bg-[var(--accent)] text-white font-bold"
@@ -856,6 +864,7 @@ export default function Schedule({
         </div>
       </div>
 
+      {!showChart && (
       <div className="flex-1 overflow-auto">
         <div
           ref={gridRef}
@@ -994,6 +1003,15 @@ export default function Schedule({
           </div>
         </div>
       </div>
+      )}
+
+      {showChart && (
+        <GroqChart
+          blocks={displayedBlocks
+            .filter((b) => !isStaticInstance(b))
+            .map((b) => ({ day: b.day, type: b.type, title: b.title, duration: b.duration }))}
+        />
+      )}
 
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
