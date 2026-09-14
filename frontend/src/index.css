@@ -252,3 +252,17 @@ html.dark .schedule-block {
   line-height: 6px;
   opacity: 0.55;
 }
+
+.eval-card {
+  transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+}
+
+.eval-card:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 5px 5px 0 0 var(--block-shadow) !important;
+}
+
+.eval-card:active {
+  transform: translate(1px, 1px);
+  box-shadow: 2px 2px 0 0 var(--block-shadow) !important;
+}

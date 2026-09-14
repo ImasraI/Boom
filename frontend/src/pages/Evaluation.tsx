@@ -20,7 +20,8 @@ function SubjectCard({ test, onClick }: { test: SubjectTest; onClick: () => void
   return (
     <button
       onClick={onClick}
-      className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 text-right transition-all hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
+      className="eval-card relative overflow-hidden rounded-none border border-[var(--block-shadow] bg-[var(--card)] p-5 text-right transition-all"
+      style={{ boxShadow: "4px 4px 0 0 var(--block-shadow)" }}
     >
       <div className="flex items-center gap-4">
         <div
