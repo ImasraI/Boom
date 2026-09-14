@@ -90,8 +90,37 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
 
 function renderMarkdown(text: string): React.ReactNode {
   const lines = text.split("\n");
+  let inCodeBlock = false;
+  let codeBlockLines: string[] = [];
+  let lang = "";
+
   return lines.map((rawLine, i) => {
     const line = rawLine.trim();
+
+    if (line.startsWith("```")) {
+      if (inCodeBlock) {
+        // End code block
+        inCodeBlock = false;
+        const result = (
+          <pre key={i} className="bg-[var(--surface-2)] p-3 rounded-xl overflow-x-auto text-[12px] font-mono mt-2 mb-2 border border-[var(--border)]">
+            <code>{codeBlockLines.join("\n")}</code>
+          </pre>
+        );
+        codeBlockLines = [];
+        return result;
+      } else {
+        // Start code block
+        inCodeBlock = true;
+        lang = line.slice(3).trim();
+        return null;
+      }
+    }
+
+    if (inCodeBlock) {
+      codeBlockLines.push(rawLine);
+      return null;
+    }
+
     if (!line) return <div key={i} className="h-2" />;
 
     const heading = line.match(/^#{1,6}\s+(.*)$/);

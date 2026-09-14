@@ -287,6 +287,19 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave }: {
           <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">تغییر تم برنامه به حالت شب</p>
         </div>
       </div>
+      <div className="bg-[var(--field)] rounded-xl px-4 py-3 flex items-center justify-between">
+        <button onClick={() => { localStorage.clear(); window.location.reload(); }}
+          className="w-11 h-6 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+        </button>
+        <div className="text-right">
+          <p className="text-[13px] font-semibold text-[var(--text)]">خروج از حساب</p>
+          <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">پاک کردن اطلاعات و خروج</p>
+        </div>
+      </div>
     </div>,
   ];
 

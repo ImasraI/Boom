@@ -159,6 +159,12 @@ input:-webkit-autofill:focus {
   transition: background-color 5000s ease-in-out 0s;
 }
 
+html.dark .bg-red-50 {
+  background-color: var(--accent-soft) !important;
+  color: #f87171 !important;
+  border-color: #7f1d1d !important;
+}
+
 ::-webkit-scrollbar { width: 0; height: 0; }
 
 input[type="range"] {

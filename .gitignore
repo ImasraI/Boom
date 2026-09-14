@@ -17,7 +17,7 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
-Boom/
+
 # Local data
 *.sqlite3
 *.db

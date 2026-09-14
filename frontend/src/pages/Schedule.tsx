@@ -778,7 +778,7 @@ export default function Schedule({
           {isCurrentWeekGenerating ? (
             <button
               onClick={() => stopGeneration(weekStart)}
-              className="px-3 h-9 rounded-xl border border-red-500 bg-red-50 text-[11px] font-bold text-red-600 hover:bg-red-100 transition-colors"
+              className="px-3 h-9 rounded-xl border border-red-500 bg-red-50 text-[11px] font-bold text-red-600 hover:bg-red-100 dark:border-red-900 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900 transition-colors"
             >
               توقف
             </button>
@@ -791,9 +791,6 @@ export default function Schedule({
               {generating && !isCurrentWeekGenerating ? "در حال ساخت..." : "بازسازی"}
             </button>
           )}
-          >
-            {generating ? "در حال ساخت..." : "بازسازی"}
-          </button>
           <button
             onClick={() => openAdd(0, HOUR_START)}
             className="w-9 h-9 rounded-xl bg-[var(--accent)] text-white font-bold"

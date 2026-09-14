@@ -153,8 +153,15 @@ export default function App() {
     setUserData(data);
   }
 
+  function logout() {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    setUserData(null);
+    nav("landing");
+  }
+
   const p = { nav };
-  const settingsProps = { dark, toggleDark, onSave: handleSaveProfile };
+  const settingsProps = { dark, toggleDark, onSave: handleSaveProfile, logout };
 
   return (
     <Shell screen={screen} nav={nav}>
