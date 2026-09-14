@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { apiUrl } from "../api";
 import { NavFn, SignupData } from "../types";
+import { weeklyScheduleContext } from "../scheduleStore";
 
 interface Msg { role: "user" | "ai"; text: string; }
 const NEW_CHAT_NAME = "گفتگوی جدید";
@@ -228,7 +229,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
       target_rank: currentUser?.targetRank || "زیر ۵٬۰۰۰",
       student: currentUser || {},
       weak_subjects: [], strong_subjects: [], notes: query,
-    } : { question: query, history, student: currentUser || {} };
+    } : { question: query, history, student: currentUser || {}, schedule: weeklyScheduleContext() };
 
     fetch(apiUrl(endpoint), {
       method: "POST",
