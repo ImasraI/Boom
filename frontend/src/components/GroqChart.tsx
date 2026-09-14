@@ -50,7 +50,7 @@ export default function GroqChart({
         {Object.entries(TYPE_COLORS).map(([key, color]) => (
           <div key={key} className="flex items-center gap-1.5">
             <div className="w-3 h-3 rounded" style={{ backgroundColor: color }} />
-            <span className="text-[11px] font-bold text-[var(--muted)]">{key}</span>
+            <span className="text-[11px] text-[var(--muted)]" style={{ fontWeight: 700 }}>{key}</span>
           </div>
         ))}
       </div>

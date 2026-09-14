@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { apiUrl } from "../api";
 import { NavFn, SignupData } from "../types";
 
@@ -34,13 +34,50 @@ const GOALS = [
 // Shamsi day names (abbreviated)
 const DAY_LETTERS = ["ش", "ی", "د", "س", "چ", "پ", "ج"];
 
+// Helper to parse Markdown-like structure.
+function renderPlanContent(content: string): ReactNode[] {
+  const lines = content.split("\n");
+  const elements: ReactNode[] = [];
+  let tableData: string[][] = [];
+
+  lines.forEach((line, i) => {
+    if (line.startsWith("## ")) {
+      elements.push(<h3 key={i} className="font-bold text-[16px] text-[var(--text)] mt-5 mb-2">{line.replace("## ", "")}</h3>);
+    } else if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+      const row = line.split("|").filter(cell => cell.trim() !== "").map(cell => cell.trim());
+      tableData.push(row);
+      if (!lines[i + 1]?.trim().startsWith("|")) {
+        const [header, ...rows] = tableData;
+        elements.push(
+          <div key={i} className="overflow-x-auto my-3 border border-[var(--border)] rounded-xl">
+            <table className="w-full text-[11px] text-right border-collapse">
+              <thead className="bg-[var(--surface-2)]">
+                <tr>{header.map((cell, j) => <th key={j} className="p-2 border border-[var(--border)]">{cell}</th>)}</tr>
+              </thead>
+              <tbody>
+                {rows.slice(1).map((row, j) => <tr key={j} className="border-t border-[var(--border)]">{row.map((cell, k) => <td key={k} className="p-2 border border-[var(--border)]">{cell}</td>)}</tr>)}
+              </tbody>
+            </table>
+          </div>
+        );
+        tableData = [];
+      }
+    } else if (line.startsWith("* **")) {
+      const match = line.match(/\*\*(.*?)\*\*(.*)/);
+      elements.push(<p key={i} className="text-[13px] text-[var(--text)] leading-relaxed my-1"><strong className="font-bold">{match?.[1]}</strong>{match?.[2]}</p>);
+    } else if (line.trim()) {
+      elements.push(<p key={i} className="text-[13px] text-[var(--text)] leading-relaxed">{line}</p>);
+    }
+  });
+  return elements;
+}
+
 export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupData | null }) {
   const [studyPlan, setStudyPlan] = useState<string | null>(() => localStorage.getItem("boom-study-plan"));
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     async function fetchPlan() {
-      // Check if we already have a plan in localStorage
       const cached = localStorage.getItem("boom-study-plan");
       if (cached) {
         setStudyPlan(cached);
@@ -79,21 +116,18 @@ export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupDa
       }
     }
     fetchPlan();
-  }, [userData]); 
+  }, [userData]);
 
   const today = new Date();
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [viewYear] = useState(today.getFullYear());
-
   const monthNames = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
-  // approximate Shamsi month for display purposes
   const shamsiMonth = monthNames[(viewMonth + 3) % 12];
   const shamsiYear = viewMonth >= 9 ? "۱۴۰۵" : "۱۴۰۴";
-
   const firstDay = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
   const examDays = new Set([5, 12, 20]);
-  const taskDays = new Set([1,2,3,4,6,7,8,9,10,11,13,14,15,16,17,18,19,21,22,23,24,25,26]);
+  const taskDays = new Set([1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26]);
 
   return (
     <div className="min-h-screen bg-[var(--surface)] pb-10">
@@ -106,35 +140,20 @@ export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupDa
       </div>
 
       <div className="px-5 space-y-4">
-        {/* Mock Subjects Progress */}
         <div>
           <p className="text-[12px] font-bold text-[var(--muted-2)] mb-2 text-right">وضعیت دروس آزمون بعدی</p>
           <div className="space-y-2">
             {MOCK_SUBJECTS_PROGRESS.map(s => (
               <div key={s.subject} className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right">
-                <div className="flex justify-between mb-1">
-                  <p className="font-bold text-[14px]">{s.subject}</p>
-                  <p className="text-[11px] text-[var(--muted-2)]">منبع: {s.source}</p>
-                </div>
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="flex-1 h-2 bg-[var(--border)] rounded-full overflow-hidden">
-                    <div className="h-full bg-[var(--accent)]" style={{ width: `${s.read}%` }} />
-                  </div>
-                  <span className="text-[11px] font-bold">{s.read}%</span>
-                </div>
+                <div className="flex justify-between mb-1"><p className="font-bold text-[14px]">{s.subject}</p><p className="text-[11px] text-[var(--muted-2)]">منبع: {s.source}</p></div>
+                <div className="flex items-center gap-2 mb-2"><div className="flex-1 h-2 bg-[var(--border)] rounded-full overflow-hidden"><div className="h-full bg-[var(--accent)]" style={{ width: `${s.read}%` }} /></div><span className="text-[11px] font-bold">{s.read}%</span></div>
                 <p className="text-[11px] text-[var(--muted-2)]">{100 - s.read}% باقیمانده · {s.testsLeft} تست باقیمانده تا هدف</p>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Auto-generated Plan */}
-        {studyPlan && (
-          <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right">
-            <h2 className="font-bold text-[var(--text)] mb-2">برنامه پیشنهادی بوم</h2>
-            <div className="text-[13px] text-[var(--text)] leading-relaxed whitespace-pre-wrap">{studyPlan}</div>
-          </div>
-        )}
+        {studyPlan && <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right"><h2 className="font-bold text-[var(--text)] mb-2">برنامه پیشنهادی بوم</h2><div className="space-y-1">{renderPlanContent(studyPlan)}</div></div>}
         {loading && <div className="text-center text-[var(--muted)]">در حال تولید برنامه...</div>}
 
         {/* Goals */}
