@@ -34,7 +34,17 @@ const GOALS = [
 // Shamsi day names (abbreviated)
 const DAY_LETTERS = ["ش", "ی", "د", "س", "چ", "پ", "ج"];
 
-// Helper to parse Markdown-like structure.
+// Helper to parse Markdown-like structure more robustly.
+function renderInline(text: string, keyPrefix: string): ReactNode[] {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(p => p !== "");
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return <strong key={`${keyPrefix}-${i}`} className="font-bold">{part.slice(2, -2)}</strong>;
+    }
+    return <span key={`${keyPrefix}-${i}`}>{part}</span>;
+  });
+}
+
 function renderPlanContent(content: string): ReactNode[] {
   const lines = content.split("\n");
   const elements: ReactNode[] = [];
@@ -42,7 +52,7 @@ function renderPlanContent(content: string): ReactNode[] {
 
   lines.forEach((line, i) => {
     if (line.startsWith("## ")) {
-      elements.push(<h3 key={i} className="font-bold text-[16px] text-[var(--text)] mt-5 mb-2">{line.replace("## ", "")}</h3>);
+      elements.push(<h3 key={i} className="font-bold text-[16px] text-[var(--text)] mt-5 mb-2">{renderInline(line.replace("## ", ""), `h${i}`)}</h3>);
     } else if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
       const row = line.split("|").filter(cell => cell.trim() !== "").map(cell => cell.trim());
       tableData.push(row);
@@ -52,21 +62,18 @@ function renderPlanContent(content: string): ReactNode[] {
           <div key={i} className="overflow-x-auto my-3 border border-[var(--border)] rounded-xl">
             <table className="w-full text-[11px] text-right border-collapse">
               <thead className="bg-[var(--surface-2)]">
-                <tr>{header.map((cell, j) => <th key={j} className="p-2 border border-[var(--border)]">{cell}</th>)}</tr>
+                <tr>{header.map((cell, j) => <th key={j} className="p-2 border border-[var(--border)]">{renderInline(cell, `th${i}-${j}`)}</th>)}</tr>
               </thead>
               <tbody>
-                {rows.slice(1).map((row, j) => <tr key={j} className="border-t border-[var(--border)]">{row.map((cell, k) => <td key={k} className="p-2 border border-[var(--border)]">{cell}</td>)}</tr>)}
+                {rows.slice(1).map((row, j) => <tr key={j} className="border-t border-[var(--border)]">{row.map((cell, k) => <td key={k} className="p-2 border border-[var(--border)]">{renderInline(cell, `td${i}-${j}-${k}`)}</td>)}</tr>)}
               </tbody>
             </table>
           </div>
         );
         tableData = [];
       }
-    } else if (line.startsWith("* **")) {
-      const match = line.match(/\*\*(.*?)\*\*(.*)/);
-      elements.push(<p key={i} className="text-[13px] text-[var(--text)] leading-relaxed my-1"><strong className="font-bold">{match?.[1]}</strong>{match?.[2]}</p>);
     } else if (line.trim()) {
-      elements.push(<p key={i} className="text-[13px] text-[var(--text)] leading-relaxed">{line}</p>);
+      elements.push(<p key={i} className="text-[13px] text-[var(--text)] leading-relaxed my-1">{renderInline(line, `p${i}`)}</p>);
     }
   });
   return elements;
@@ -93,8 +100,8 @@ export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupDa
           grade: userData.grade || "دوازدهم (سال کنکور)",
           target_rank: userData.targetRank || "زیر ۵٬۰۰۰",
           student: userData,
-          weak_subjects: [],
-          strong_subjects: [],
+          weak_subjects: Object.keys(userData.completion ?? {}).filter(k => userData.completion![k] < 70),
+          strong_subjects: Object.keys(userData.confidence ?? {}).filter(k => userData.confidence![k] >= 70),
           notes: "برنامه مطالعاتی اولیه بر اساس پروفایل من",
         };
         const res = await fetch(apiUrl("/api/boom/study-plan"), {
@@ -153,7 +160,12 @@ export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupDa
           </div>
         </div>
 
-        {studyPlan && <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right"><h2 className="font-bold text-[var(--text)] mb-2">برنامه پیشنهادی بوم</h2><div className="space-y-1">{renderPlanContent(studyPlan)}</div></div>}
+        {studyPlan && (
+          <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right">
+            <h2 className="font-bold text-[var(--text)] mb-2">برنامه پیشنهادی بوم</h2>
+            <div className="space-y-1">{renderPlanContent(studyPlan)}</div>
+          </div>
+        )}
         {loading && <div className="text-center text-[var(--muted)]">در حال تولید برنامه...</div>}
 
         {/* Goals */}
