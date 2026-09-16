@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { NavFn } from "../types";
+import { apiUrl } from "../api";
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
@@ -11,28 +12,47 @@ function BackButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-const EXAM_RESULTS = [
-  {
-    id: 1, provider: "قلم‌چی", date: "۲۵ مرداد ۱۴۰۵", totalScore: 68.4, rank: 4820,
-    subjects: [
-      { name: "حسابان", score: 82, correct: 41, wrong: 4, blank: 5 },
-      { name: "فیزیک", score: 61, correct: 28, wrong: 9, blank: 13 },
-      { name: "شیمی", score: 74, correct: 35, wrong: 6, blank: 9 },
-      { name: "ادبیات", score: 71, correct: 33, wrong: 7, blank: 10 },
-      { name: "عربی", score: 55, correct: 24, wrong: 12, blank: 14 },
-    ],
-  },
-  {
-    id: 2, provider: "گاج", date: "۱۱ مرداد ۱۴۰۵", totalScore: 64.1, rank: 6200,
-    subjects: [
-      { name: "حسابان", score: 78, correct: 39, wrong: 6, blank: 5 },
-      { name: "فیزیک", score: 58, correct: 26, wrong: 11, blank: 13 },
-      { name: "شیمی", score: 69, correct: 32, wrong: 9, blank: 9 },
-      { name: "ادبیات", score: 65, correct: 31, wrong: 8, blank: 11 },
-      { name: "عربی", score: 51, correct: 22, wrong: 14, blank: 14 },
-    ],
-  },
-];
+export interface ExamResult {
+  id: number;
+  provider: string;
+  date: string;
+  totalScore: number;
+  rank: number;
+  subjects: ExamSubject[];
+}
+
+export interface ExamSubject {
+  name: string;
+  score: number;
+  correct: number;
+  wrong: number;
+  blank: number;
+}
+
+export function useExamResults() {
+  const [examResults, setExamResults] = useState<ExamResult[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    async function fetchResults() {
+      setLoading(true);
+      try {
+        const resp = await fetch(apiUrl("/api/boom/last-mock-results"));
+        if (resp.ok) {
+          const data = await resp.json();
+          setExamResults(data || []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch exam results:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchResults();
+  }, []);
+
+  return { examResults, loading };
+}
 
 function ScoreBar({ score }: { score: number }) {
   const color = score >= 80 ? "#6B9E7A" : score >= 60 ? "#C4714A" : "#C44A4A";
@@ -47,11 +67,12 @@ function ScoreBar({ score }: { score: number }) {
 }
 
 export default function Exams({ nav }: { nav: NavFn }) {
+  const { examResults, loading } = useExamResults();
   const [selected, setSelected] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
 
-  const exam = EXAM_RESULTS.find(e => e.id === selected);
+  const exam = examResults.find(e => e.id === selected);
 
   function handleUpload() {
     setUploading(true);
@@ -98,7 +119,7 @@ export default function Exams({ nav }: { nav: NavFn }) {
 
           <p className="text-[12px] font-bold text-[var(--muted-2)]">نتایج قبلی</p>
 
-          {EXAM_RESULTS.map(e => (
+          {examResults.map(e => (
             <button key={e.id} onClick={() => setSelected(e.id)}
               className="w-full bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right hover:border-[#E5DDD4] active:scale-[0.98] transition-all">
               <div className="flex items-start justify-between mb-3">
@@ -120,7 +141,7 @@ export default function Exams({ nav }: { nav: NavFn }) {
           {/* Trend */}
           <div className="bg-[#EAF5EC] rounded-2xl border border-[#C8E8D0] px-4 py-3 flex gap-3">
             <p className="text-[12px] text-[#3A6B48] leading-relaxed font-medium flex-1 text-right">
-              نمره‌ات در دو آزمون اخیر <strong>۴.۳٪</strong> بهتر شده. فیزیک بیشترین فرصت رشد رو داره — این هفته روش تمرکز کن.
+              نمره‌ات در دو آزمون اخیر <strong>{examResults.length > 1 ? (examResults[1].totalScore - examResults[0].totalScore).toFixed(1) : 0}٪</strong> بهتر شده. {examResults.length > 0 && examResults[0].subjects.find(s => s.name === 'فیزیک') ? 'فیزیک' : 'مباحث'} بیشترین فرصت رشد رو داره — این هفته روش تمرکز کن.
             </p>
             <span className="text-[#6B9E7A] mt-0.5 flex-shrink-0 font-bold">↑</span>
           </div>

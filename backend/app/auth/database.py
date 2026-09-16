@@ -14,7 +14,7 @@ from sqlalchemy import (
     inspect,
     text,
 )
-from sqlalchemy.orm import Mapped, declarative_base, mapped_column, sessionmaker
+from sqlalchemy.orm import Mapped, declarative_base, mapped_column, sessionmaker, relationship
 
 
 # Keep the SQLite file next to the backend package root, regardless of CWD.
@@ -54,6 +54,97 @@ class DailyTask(Base):
     description = Column(Text, nullable=False)
     duration_minutes = Column(Integer, nullable=False)
     completed = Column(Boolean, default=False)
+
+
+class BookCatalog(Base):
+    __tablename__ = "book_catalog"
+
+    id = Column(Integer, primary_key=True, index=True)
+    book_id = Column(String, unique=True, index=True, nullable=False)
+    subject = Column(String, nullable=False)
+    chapter = Column(String, nullable=True)
+    section = Column(String, nullable=True)
+    question_range_start = Column(Integer, nullable=True)
+    question_range_end = Column(Integer, nullable=True)
+    difficulty_tier = Column(String, nullable=True)  # easy, medium, hard
+    avg_seconds_per_question = Column(Integer, nullable=True)
+
+
+class Subject(Base):
+    __tablename__ = "subjects"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True)
+    topics = relationship("Topic", back_populates="subject")
+    resources = relationship("Resource", back_populates="subject")
+
+
+class Topic(Base):
+    __tablename__ = "topics"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
+    name = Column(String, nullable=False)
+    parent_topic_id = Column(Integer, ForeignKey("topics.id"), nullable=True)
+    prerequisite_topic_ids = Column(String, nullable=True)  # comma-separated IDs
+    mastery = Column(String, nullable=True)  # percentage or level
+    priority = Column(Integer, nullable=True)  # 1-5
+    subject = relationship("Subject", back_populates="topics")
+    resources = relationship("Resource", back_populates="topic")
+
+
+class Resource(Base):
+    __tablename__ = "resources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String, nullable=False)  # book, chapter, lesson, question_set
+    title = Column(String, nullable=False)
+    topic_ids = Column(String, nullable=True)  # comma-separated topic IDs
+    topic_id = Column(Integer, ForeignKey("topics.id"), nullable=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=True)
+    sections = Column(String, nullable=True)  # comma-separated section names
+    subject = relationship("Subject", back_populates="resources")
+    topic = relationship("Topic", back_populates="resources")
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
+    topic_id = Column(Integer, ForeignKey("topics.id"), nullable=True)
+    resource_id = Column(Integer, ForeignKey("resources.id"), nullable=True)
+    type = Column(String, nullable=False)  # study, test, review, practice
+    duration_minutes = Column(Integer, nullable=False)
+    scheduled_for = Column(Date, nullable=False)
+    priority = Column(Integer, nullable=True)  # 1-5
+    status = Column(String, nullable=False)  # pending, in_progress, completed, completed_late
+
+
+class StudySession(Base):
+    __tablename__ = "study_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id"), nullable=False)
+    topic_id = Column(Integer, ForeignKey("topics.id"), nullable=True)
+    started_at = Column(DateTime, nullable=False)
+    ended_at = Column(DateTime, nullable=True)
+    duration_minutes = Column(Integer, nullable=True)
+    completion_data = Column(Text, nullable=True)  # JSON string
+
+
+class Assessment(Base):
+    __tablename__ = "assessments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    title = Column(String, nullable=False)
+    date = Column(Date, nullable=False)
+    source = Column(String, nullable=True)  # mock_exam, konkoor, etc.
+    results = Column(Text, nullable=True)  # JSON string with scores per topic
 
 
 def _ensure_column(table: str, column: str, ddl_type: str) -> None:

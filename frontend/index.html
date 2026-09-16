@@ -7,7 +7,15 @@
     <title><!-- figma:title --></title>
     <!-- figma:head-end -->
   </head>
-  <body>
+  <body class="dark">
+    <script>
+      const theme = localStorage.getItem("boom-theme");
+      if (theme === "light") {
+        document.body.classList.remove("dark");
+      } else {
+        document.body.classList.add("dark");
+      }
+    </script>
     <!-- figma:body-start -->
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

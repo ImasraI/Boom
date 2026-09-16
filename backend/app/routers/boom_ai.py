@@ -3,7 +3,7 @@ import re
 import threading
 from datetime import date, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,7 @@ from app.rag.pipeline import answer_question
 from app.rag.embeddings import get_embedding_model
 from app.rag.hybrid_search import get_hybrid_search
 from app.rag.llm import get_llm_client, get_vision_llm_client
+from app.auth.database import Assessment
 from app.config import get_settings
 from app.schemas import ChatMessage
 from app.utils.logger import get_logger
@@ -93,7 +94,7 @@ def _student_context(student: Optional[dict]) -> str:
 def _history_context(history: Optional[List[dict]]) -> str:
     if not history:
         return "سابقه گفتگوی قبلی وجود ندارد."
-    lines = ["سابقه گفتگوهای قبلی با دانشآموز (برای درک بهتر شرایط و پیشرفت):"]
+    lines = ["سابقه گفتگوهای قبلی با دانش‌آموز (برای درک بهتر شرایط و پیشرفت):"]
     for msg in history[-16:]:
         role = msg.get("role", "")
         content = str(msg.get("content", ""))[:500]
@@ -102,6 +103,92 @@ def _history_context(history: Optional[List[dict]]) -> str:
         elif role == "assistant":
             lines.append(f"[بوم]: {content}")
     return "\n".join(lines) if len(lines) > 1 else "سابقه گفتگوی قبلی وجود ندارد."
+
+
+def get_user_profile() -> dict:
+    """Retrieve the current user's profile data including completion/confidence
+    per subject from the database."""
+    from app.auth.database import SessionLocal, User
+    from sqlalchemy import select
+    db = SessionLocal()
+    try:
+        user = db.execute(select(User)).scalar_one_or_none()
+        if not user:
+            return {}
+        return {"weak_subjects": [], "strong_subjects": []}
+    finally:
+        db.close()
+
+
+def get_book_catalog(subject: str) -> List[dict]:
+    """Return catalog entries for a given subject from the book_catalog table."""
+    from app.auth.database import SessionLocal, BookCatalog
+    from sqlalchemy import select
+    db = SessionLocal()
+    try:
+        statement = select(BookCatalog).where(BookCatalog.subject == subject)
+        rows = db.execute(statement).scalars().all()
+        return [{"book_id": r.book_id, "chapter": r.chapter, "section": r.section,
+                 "question_range_start": r.question_range_start, "question_range_end": r.question_range_end,
+                 "difficulty_tier": r.difficulty_tier, "avg_seconds_per_question": r.avg_seconds_per_question}
+                for r in rows]
+    finally:
+        db.close()
+
+
+def get_recent_wrong_answers() -> List[dict]:
+    """Return recent wrong-answer logs for feedback-based planning."""
+    from app.auth.database import SessionLocal
+    from sqlalchemy import select
+    from datetime import datetime, timedelta
+    db = SessionLocal()
+    try:
+        since = datetime.utcnow() - timedelta(days=30)
+        statement = select(Assessment).where(Assessment.student_id == 1).where(
+            Assessment.date >= since
+        )
+        rows = db.execute(statement).scalars().all()
+        results = []
+        for r in rows:
+            try:
+                res = r.results if isinstance(r.results, dict) else {}
+                results.append({
+                    "question_id": res.get("last_wrong_id"),
+                    "subject": res.get("subject"),
+                    "topic": res.get("topic"),
+                    "date": str(r.date),
+                })
+            except Exception:
+                continue
+        return results
+    finally:
+        db.close()
+
+
+def get_last_mock_results() -> Optional[dict]:
+    """Return the most recent mock-exam results, replacing the static EXAM_RESULTS array."""
+    from app.auth.database import SessionLocal
+    from sqlalchemy import select
+    from datetime import datetime
+    db = SessionLocal()
+    try:
+        statement = select(Assessment).order_by(Assessment.date.desc())
+        row = db.execute(statement).scalar_one_or_none()
+        if not row:
+            return None
+        try:
+            results = row.results if isinstance(row.results, dict) else {}
+            return {
+                "exam_date": str(row.date),
+                "subject": results.get("subject"),
+                "score": results.get("score"),
+                "total": results.get("total"),
+                "topics": results.get("topics", []),
+            }
+        except Exception:
+            return {"exam_date": str(row.date), "subject": "نامشخص", "score": "0", "total": "0", "topics": []}
+    finally:
+        db.close()
 
 
 def _parse_json_from_text(text: str):
@@ -197,9 +284,10 @@ def _static_weekday(s: dict) -> Optional[int]:
     if isinstance(day, int) and 0 <= day <= 6:
         return day
     try:
-        day_i = int(day)
-        if 0 <= day_i <= 6:
-            return day_i
+        if isinstance(day, (str, int)):
+            day_i = int(day)
+            if 0 <= day_i <= 6:
+                return day_i
     except (TypeError, ValueError):
         pass
     date_s = s.get("date")
@@ -541,7 +629,8 @@ def _extract_week_mock(user_id: int, week_start: date) -> Optional[dict]:
                 with fitz.open(str(pdf)) as handle:
                     pages = []
                     for pno in range(handle.page_count):
-                        text = _clean_mock_page(handle[pno].get_text("text"))
+                        page = cast(Any, handle[pno])
+                        text = _clean_mock_page(page.get_text("text"))
                         if len(text) >= 150:
                             # Schedule tables carry dense digits; marketing
                             # pages are mostly prose.  Prefer digit-dense ones.

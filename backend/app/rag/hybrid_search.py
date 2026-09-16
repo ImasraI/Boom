@@ -14,6 +14,9 @@ from typing import Any, Dict, List
 from app.rag.lexical_search import LexicalIndex
 from functools import lru_cache
 from app.rag.vector_store import get_vector_store
+from app.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def reciprocal_rank_fusion(
@@ -212,13 +215,15 @@ class HybridSearch:
         # Semantic Search
         # -----------------------------
 
-        semantic_results = (
-            self.vector_store.similarity_search(
+        if query_embedding:
+            semantic_results = self.vector_store.similarity_search(
                 query_embedding=query_embedding,
                 top_k=candidate_k,
                 user_id=user_id,
             )
-        )
+        else:
+            logger.warning("Empty query embedding; using lexical search only.")
+            semantic_results = []
 
         # -----------------------------
         # Lexical Search

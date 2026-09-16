@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { NavFn, SignupData } from "../types";
 import { SUBJECTS_BY_MAJOR } from "../data";
 
@@ -77,12 +77,12 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
   const [reminderTime, setReminderTime] = useState(userData?.reminderTime ?? "07:30");
   const [notifs, setNotifs] = useState(userData?.notifs ?? true);
 
+  const [savedData, setSavedData] = useState<SignupData | null>(userData);
   const [saved, setSaved] = useState(false);
-
-  function save() {
-    if (!userData) return;
-    onSave({
-      ...userData,
+  
+  function getCurrentData(): SignupData {
+    return {
+      ...(userData || {} as SignupData),
       name: `${firstName} ${lastName}`.trim(),
       phone,
       birthday,
@@ -102,10 +102,24 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
       studyStyle,
       reminderTime,
       notifs,
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+    };
   }
+
+  const isChanged = JSON.stringify(getCurrentData()) !== JSON.stringify(savedData);
+
+  function save() {
+    if (!userData) return;
+    const current = getCurrentData();
+    onSave(current);
+    setSavedData(current);
+    setSaved(true);
+  }
+
+  useEffect(() => {
+    if (isChanged) {
+      setSaved(false);
+    }
+  }, [isChanged]);
 
   const sections = [
     // اطلاعات عمومی
@@ -328,13 +342,17 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
       <div className="px-5 pt-5 pb-6">{sections[activeSection]}</div>
 
       <div className="px-5">
+        {(isChanged || saved) && (
         <button onClick={save}
           className={`w-full py-4 rounded-2xl font-bold text-[14px] transition-all active:scale-95 ${
             saved ? "bg-[var(--success-bg)] text-[var(--success-text)]" : "bg-[var(--accent)] text-[var(--surface)] hover:opacity-90"
           }`}
+          style={{ display: (isChanged || saved) ? 'block' : 'none' }}
         >
           {saved ? "✓ ذخیره شد — هوش مصنوعی برنامهات رو آپدیت میکنه" : "ذخیره تغییرات"}
         </button>
+
+        )}
       </div>
     </div>
   );

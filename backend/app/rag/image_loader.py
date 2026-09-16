@@ -8,7 +8,7 @@ directly to a vision-capable LLM.
 """
 
 from pathlib import Path
-from typing import List
+from typing import Any, List, cast
 
 import pymupdf
 
@@ -42,7 +42,7 @@ def pdf_to_page_images(
     doc = pymupdf.open(pdf_path)
     try:
         for page_num in range(1, doc.page_count + 1):
-            page = doc[page_num - 1]
+            page = cast(Any, doc[page_num - 1])
             pix = page.get_pixmap(matrix=matrix, alpha=False)
 
             image_path = output_dir / f"page_{page_num:04d}.png"

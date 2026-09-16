@@ -98,7 +98,13 @@ class VectorStore:
         # Search for the most similar chunks, restricted to this user's docs
         # (and optionally to one source category, e.g. only the plan/mock
         # documents, which otherwise get drowned out by much larger books).
-        where = {"user_id": user_id}
+        if not query_embedding:
+            logger.warning(
+                "Skipping Chroma query: empty embedding (check EMBEDDING_PROVIDER / API key / model)."
+            )
+            return []
+
+        where: Any = {"user_id": user_id}
         if category:
             where = {"$and": [{"user_id": user_id}, {"category": category}]}
         results = self.collection.query(

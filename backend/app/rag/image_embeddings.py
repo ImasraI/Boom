@@ -27,7 +27,7 @@ from different backends are not compatible with each other).
 from abc import ABC, abstractmethod
 from functools import lru_cache
 from pathlib import Path
-from typing import List
+from typing import Any, List, cast
 
 from app.config import get_settings
 from app.utils.logger import get_logger
@@ -71,14 +71,14 @@ class ClipImageEmbedding(BaseImageEmbeddingModel):
         from PIL import Image
 
         images = [Image.open(p).convert("RGB") for p in image_paths]
-        embeddings = self.image_model.encode(
-            images, convert_to_numpy=True, show_progress_bar=False
+        embeddings = cast(Any, self.image_model).encode(
+            cast(Any, images), convert_to_numpy=True, show_progress_bar=False
         )
-        return embeddings.tolist()
+        return cast(Any, embeddings).tolist()
 
     def embed_query(self, text: str) -> List[float]:
         embedding = self.text_model.encode(text, convert_to_numpy=True)
-        return embedding.tolist()
+        return cast(Any, embedding).tolist()
 
 
 class ColPaliImageEmbedding(BaseImageEmbeddingModel):
@@ -86,7 +86,11 @@ class ColPaliImageEmbedding(BaseImageEmbeddingModel):
 
     def __init__(self, model_name: str):
         import torch
-        from colpali_engine.models import ColQwen2_5, ColQwen2_5_Processor
+        from importlib import import_module
+
+        colpali_models = import_module("colpali_engine.models")
+        colqwen_model = getattr(colpali_models, "ColQwen2_5")
+        colqwen_processor = getattr(colpali_models, "ColQwen2_5_Processor")
 
         logger.info(f"Loading ColPali-family model '{model_name}'. This is a large "
                      f"model download and is much faster with a GPU available.")
@@ -99,17 +103,17 @@ class ColPaliImageEmbedding(BaseImageEmbeddingModel):
                 "for CPU-only setups."
             )
 
-        self.model = ColQwen2_5.from_pretrained(
+        self.model = colqwen_model.from_pretrained(
             model_name,
             torch_dtype=torch.float32,
             device_map=self.device,
         ).eval()
-        self.processor = ColQwen2_5_Processor.from_pretrained(model_name)
+        self.processor = colqwen_processor.from_pretrained(model_name)
 
-    def _pool(self, multi_vector) -> List[float]:
+    def _pool(self, multi_vector: Any) -> List[float]:
         # Mean-pool the per-patch vectors into a single vector so it fits
         # the single-vector Chroma store. See module docstring for context.
-        return multi_vector.mean(dim=0).tolist()
+        return cast(Any, multi_vector.mean(dim=0)).tolist()
 
     def embed_images(self, image_paths: List[Path]) -> List[List[float]]:
         import torch

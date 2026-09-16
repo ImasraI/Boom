@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { apiUrl } from "../api";
 import { NavFn, SignupData } from "../types";
 import { weeklyScheduleContext } from "../scheduleStore";
+import GroqChart from "../components/GroqChart";
 
 interface Msg { role: "user" | "ai"; text: string; }
 const NEW_CHAT_NAME = "گفتگوی جدید";

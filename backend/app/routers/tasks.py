@@ -1,5 +1,5 @@
 ﻿from datetime import date
-from typing import Optional
+from typing import Any, Optional, cast
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -63,13 +63,13 @@ def get_daily_tasks(
         "date": date_str,
         "tasks": [
             TaskResponse(
-                id=t.id,
-                date=t.date.isoformat(),
-                subject=t.subject,
-                task_type=t.task_type,
-                description=t.description,
-                duration_minutes=t.duration_minutes,
-                completed=t.completed
+                id=cast(int, t.id),
+                date=cast(Any, t.date).isoformat(),
+                subject=cast(str, t.subject),
+                task_type=cast(str, t.task_type),
+                description=cast(str, t.description),
+                duration_minutes=cast(int, t.duration_minutes),
+                completed=cast(bool, t.completed)
             ) for t in tasks
         ]
     }
@@ -88,7 +88,7 @@ def create_task(
         return {"error": "Invalid date format"}
     
     new_task = DailyTask(
-        user_id=current_user.id,
+        user_id=cast(int, current_user.id),
         date=task_date,
         subject=task.subject,
         task_type=task.task_type,
@@ -118,12 +118,13 @@ def update_task(
     if not task:
         return {"error": "Task not found"}
     
+    task_row: Any = task
     if update.completed is not None:
-        task.completed = update.completed
+        task_row.completed = update.completed
     if update.description:
-        task.description = update.description
+        task_row.description = update.description
     if update.duration_minutes:
-        task.duration_minutes = update.duration_minutes
+        task_row.duration_minutes = update.duration_minutes
     
     db.commit()
     return {"message": "Task updated"}

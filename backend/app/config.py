@@ -1,4 +1,3 @@
-from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,17 +18,18 @@ class Settings(BaseSettings):
     CHROMA_COLLECTION: str = "documents"
 
     # Embedding model configuration
-    EMBEDDING_PROVIDER: str = "groq"  # Options: "groq", "openai", "jina", etc.
+    EMBEDDING_PROVIDER: str = "ollama"  # Options: "ollama", "groq", "openai"
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_MODEL_NAME: str = "nomic-embed-text"
-    EMBEDDING_BASE_URL: str = "https://api.groq.com/openai/v1"
+    EMBEDDING_BASE_URL: str = "http://localhost:11434"
     EMBEDDING_DEVICE: str = "cpu"
 
     # LLM provider configuration
-    LLM_PROVIDER: str = "groq"  # Options: "groq", "openai", "mock"
+    LLM_PROVIDER: str = "groq"  # Options: "groq", "openai", "omniroute", "ollama", "mock"
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
     LLM_MODEL_NAME: str = "llama-3.1-8b-instant"
+    VISION_LLM_MODEL_NAME: str = "llava:7b"
 
     # LLM generation parameters
     LLM_TEMPERATURE: float = 0.2
@@ -51,7 +51,6 @@ class Settings(BaseSettings):
     IMAGES_DIR: str = "data/page_images"
 
     # Resolution used when rasterizing PDF pages to images.
-    # 200 is a good quality/speed tradeoff for reading dense Persian text.
     IMAGE_DPI: int = 200
 
     # Batch size for embedding a document's pages (one batch per DB add,
@@ -63,21 +62,15 @@ class Settings(BaseSettings):
     # app/rag/ingest_raw.py).
     RAW_DIR: str = "data/raw"
 
-    # Resolution used for the big bulk raw PDFs. Lower than IMAGE_DPI to
-    # keep the rendered page count / disk usage reasonable (120 DPI is
-    # still readable by the vision model).
+    # Resolution used for the big bulk raw PDFs.
     RAW_INGEST_DPI: int = 120
 
     # Number of page images retrieved per question
     IMAGE_TOP_K: int = 3
 
-# Minimum cosine similarity required before a page image can trigger
+    # Minimum cosine similarity required before a page image can trigger
     # the vision pipeline.  Without this cutoff Chroma returns nearest
     # neighbours even for unrelated questions whenever images are indexed.
-    #
-    # The multilingual-CLIP text tower scores Persian questions against
-    # page images in a flat ~0.25-0.31 band, so 0.35 never fires. 0.24 keeps
-    # the cutoff meaningful while letting genuinely-related pages through.
     IMAGE_RELEVANCE_THRESHOLD: float = 0.24
 
     # Separate Chroma collection for image embeddings (kept apart from the
@@ -85,29 +78,19 @@ class Settings(BaseSettings):
     CHROMA_IMAGE_COLLECTION: str = "document_images"
 
     # Which embedding backend to use for page images: "clip" or "colpali".
-    # This is a single switch — swap it any time without touching code.
     IMAGE_EMBEDDING_BACKEND: str = "clip"
 
-    # --- CLIP backend (default: light, CPU-friendly, multilingual) ---
-    # Two separate towers are used on purpose: sentence-transformers' CLIP
-    # image tower is English-only, and the multilingual text tower was
-    # distilled to share the *same* vector space so Persian queries still
-    # match against it correctly.
     CLIP_IMAGE_MODEL_NAME: str = "clip-ViT-B-32"
     CLIP_TEXT_MODEL_NAME: str = "clip-ViT-B-32-multilingual-v1"
 
-    # --- ColPali backend (optional: much stronger, GPU strongly recommended) ---
     COLPALI_MODEL_NAME: str = "vidore/colqwen2.5-v0.2"
-    # =========================================================================
 
-    # ---------- ADD THIS LINE ----------
     model_config = SettingsConfigDict(
-        env_file=".env", 
+        env_file="backend/.env",
         env_file_encoding="utf-8",
-        extra="ignore"   # <-- allows extra env vars like SECRET_KEY
+        extra="ignore",
     )
 
 
-@lru_cache
 def get_settings() -> Settings:
     return Settings()

@@ -11,7 +11,6 @@ The implementation is selected through the LLM_PROVIDER setting in .env.
 """
 
 from abc import ABC, abstractmethod
-from functools import lru_cache
 from typing import List, Dict, Generator, Optional
 import json
 import time
@@ -397,7 +396,6 @@ class OpenAICompatibleClient(BaseLLMClient):
             yield f"خطا: {e}"
 
 
-@lru_cache
 def get_llm_client() -> BaseLLMClient:
     settings = get_settings()
     provider = settings.LLM_PROVIDER
@@ -447,7 +445,6 @@ def get_llm_client() -> BaseLLMClient:
     return MockLLMClient()
 
 
-@lru_cache
 def get_vision_llm_client() -> BaseLLMClient:
     """
     Separate client for the "page-as-image" pipeline, pointed at a

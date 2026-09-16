@@ -1,10 +1,12 @@
 import logging
 import sys
+from typing import Any
 
 # Ensure UTF-8 output on Windows consoles to prevent UnicodeEncodeError with Persian characters
 if hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        stdout = sys.stdout
+        getattr(stdout, "reconfigure")(encoding="utf-8", errors="replace")
     except Exception:
         pass
 

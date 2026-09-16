@@ -53,7 +53,7 @@ def list_raw_pdfs() -> List[Path]:
     if not raw_dir.exists():
         return []
 
-    def _key(p: Path) -> str:
+    def _key(p: Path) -> tuple[int, str]:
         rel = p.relative_to(raw_dir)
         return (len(rel.parts), str(rel))
 
