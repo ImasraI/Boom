@@ -1,35 +1,41 @@
 """
-Renders each page of a PDF to an image file on disk.
-
-This is the entry point for the "page-as-image" RAG pipeline: instead of
-extracting text (and losing tables/figures/layout, or fighting OCR errors),
-every page becomes one image chunk that gets embedded and, later, handed
-directly to a vision-capable LLM.
+Renders each page of a PDF to an image, storing the result via the R2
+storage wrapper (or local disk fallback).  Returns the *key* (not a local
+Path) so the caller can hand it to the vision pipeline regardless of
+whether R2 or local disk is active.
 """
 
+import sys
 from pathlib import Path
 from typing import Any, List, cast
 
 import pymupdf
 
 from app.utils.logger import get_logger
+from app.utils.storage import put_object, get_object
 
 logger = get_logger(__name__)
 
 
 def pdf_to_page_images(
     pdf_path: Path,
-    output_dir: Path,
+    user_id: int,
+    document_name: str,
     dpi: int = 200,
-) -> List[Path]:
+) -> List[str]:
     """
-    Rasterize every page of `pdf_path` into a PNG file under `output_dir`.
+    Rasterize every page of `pdf_path` into PNG images stored via the
+    R2-aware storage module.
 
-    Returns the list of image paths, in page order (page 1 first).
+    Returns a list of *storage keys* (not local Path objects) in page order.
+    The key scheme is: ``{user_id}/{document_name}/page_{page_num:04d}.png``.
+
+    If R2 credentials are not configured, images fall back to local disk
+    under ``data/page_images/`` and the returned keys still follow the
+    same scheme so the downstream pipeline (pipeline.py) can read them
+    back via ``get_object()``.
     """
     pdf_path = Path(pdf_path)
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
@@ -37,7 +43,7 @@ def pdf_to_page_images(
     zoom = dpi / 72
     matrix = pymupdf.Matrix(zoom, zoom)
 
-    image_paths: List[Path] = []
+    image_keys: List[str] = []
 
     doc = pymupdf.open(pdf_path)
     try:
@@ -45,15 +51,20 @@ def pdf_to_page_images(
             page = cast(Any, doc[page_num - 1])
             pix = page.get_pixmap(matrix=matrix, alpha=False)
 
-            image_path = output_dir / f"page_{page_num:04d}.png"
-            pix.save(str(image_path))
-            image_paths.append(image_path)
+            # Key scheme: {user_id}/{document_name}/page_{page_num:04d}.png
+            key = f"{user_id}/{document_name}/page_{page_num:04d}.png"
+
+            # Render to bytes in memory first, then upload
+            buf = pix.tobytes(format="PNG")
+            put_object(key, buf)
+
+            image_keys.append(key)
 
         logger.info(
-            f"Rendered {len(image_paths)} page image(s) from '{pdf_path.name}' "
-            f"at {dpi} DPI."
+            f"Rendered {len(image_keys)} page image(s) from '{pdf_path.name}' "
+            f"at {dpi} DPI (key scheme: {key})."
         )
     finally:
         doc.close()
 
-    return image_paths
+    return image_keys

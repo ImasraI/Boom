@@ -8,7 +8,8 @@ class Settings(BaseSettings):
     DEMO_USER_ID: int = 1
 
     # Allowed frontend origins for CORS
-    CORS_ORIGINS: str = "*"
+    # Default allows all ("*") for development; override via CORS_ORIGINS env var for production
+    CORS_ORIGINS: str = "*"  # e.g., "https://your-app.vercel.app" or "https://your-app.vercel.app,https://admin.your-app.vercel.app"
 
     # File storage paths
     UPLOAD_DIR: str = "data/uploads"
@@ -23,6 +24,7 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL_NAME: str = "nomic-embed-text"
     EMBEDDING_BASE_URL: str = "http://localhost:11434"
     EMBEDDING_DEVICE: str = "cpu"
+    CHROMA_TELEMETRY: bool = False
 
     # LLM provider configuration
     LLM_PROVIDER: str = "groq"  # Options: "groq", "openai", "omniroute", "ollama", "mock"

@@ -20,6 +20,7 @@ import chromadb
 from chromadb.api.types import Embeddings, Include, Metadata
 from chromadb.config import Settings as ChromaSettings
 
+import os
 from app.config import get_settings
 from app.utils.logger import get_logger
 
@@ -33,6 +34,7 @@ class VectorStore:
 
     def __init__(self, persist_dir: str, collection_name: str):
         # Create a persistent ChromaDB client
+        os.environ["CHROMA_TELEMETRY"] = "false"
         self.client = chromadb.PersistentClient(
             path=persist_dir,
             settings=ChromaSettings(

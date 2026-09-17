@@ -11,7 +11,7 @@ The implementation is selected through the LLM_PROVIDER setting in .env.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Generator, Optional
+from typing import Any, List, Dict, Generator, Optional, Sequence
 import json
 import time
 import httpx
@@ -22,23 +22,26 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+LLMMessage = Dict[str, Any]
+ImageInput = str | bytes
+
 
 class BaseLLMClient(ABC):
     @abstractmethod
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[LLMMessage],
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
-        images: Optional[List[str]] = None,
+        images: Optional[Sequence[ImageInput]] = None,
     ) -> str:
         raise NotImplementedError
 
     @abstractmethod
     def generate_stream(
         self,
-        messages: List[Dict[str, str]],
-        images: Optional[List[str]] = None,
+        messages: List[LLMMessage],
+        images: Optional[Sequence[ImageInput]] = None,
     ) -> Generator[str, None, None]:
         raise NotImplementedError
 
@@ -47,10 +50,10 @@ class MockLLMClient(BaseLLMClient):
     """Test client that does not require a real LLM or API key."""
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[LLMMessage],
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
-        images: Optional[List[str]] = None,
+        images: Optional[Sequence[ImageInput]] = None,
     ) -> str:
         user_message = next(
             (m["content"] for m in reversed(messages) if m["role"] == "user"),
@@ -67,8 +70,8 @@ class MockLLMClient(BaseLLMClient):
 
     def generate_stream(
         self,
-        messages: List[Dict[str, str]],
-        images: Optional[List[str]] = None,
+        messages: List[LLMMessage],
+        images: Optional[Sequence[ImageInput]] = None,
     ) -> Generator[str, None, None]:
         full_text = self.generate(messages, images=images)
         for word in full_text.split(" "):
@@ -100,24 +103,28 @@ class OllamaLLMClient(BaseLLMClient):
         self.client = httpx.Client(timeout=timeout, follow_redirects=True, trust_env=False)
 
     @staticmethod
-    def _encode_images(image_paths: List[str]) -> List[str]:
+    def _encode_images(image_paths: Sequence[ImageInput]) -> List[str]:
         """Read image files from disk and base64-encode them for Ollama's
         /api/chat 'images' field (which takes raw base64, no data: URI prefix)."""
         encoded = []
         for path in image_paths:
             try:
-                with open(path, "rb") as f:
-                    encoded.append(base64.b64encode(f.read()).decode("utf-8"))
+                if isinstance(path, bytes):
+                    image_data = path
+                else:
+                    with open(path, "rb") as f:
+                        image_data = f.read()
+                encoded.append(base64.b64encode(image_data).decode("utf-8"))
             except OSError as e:
                 logger.warning(f"Could not read image for vision request: {path} ({e})")
         return encoded
 
     def _prepare_payload(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[LLMMessage],
         stream: bool = False,
         max_tokens: Optional[int] = None,
-        images: Optional[List[str]] = None,
+        images: Optional[Sequence[ImageInput]] = None,
     ):
         """Prepare the request payload for Ollama's /api/chat endpoint."""
         messages = [dict(m) for m in messages]
@@ -141,10 +148,10 @@ class OllamaLLMClient(BaseLLMClient):
 
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[LLMMessage],
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
-        images: Optional[List[str]] = None,
+        images: Optional[Sequence[ImageInput]] = None,
     ) -> str:
         url = f"{self.base_url}/api/chat"
         payload = self._prepare_payload(messages, stream=False, max_tokens=max_tokens, images=images)
@@ -168,8 +175,8 @@ class OllamaLLMClient(BaseLLMClient):
 
     def generate_stream(
         self,
-        messages: List[Dict[str, str]],
-        images: Optional[List[str]] = None,
+        messages: List[LLMMessage],
+        images: Optional[Sequence[ImageInput]] = None,
     ) -> Generator[str, None, None]:
         url = f"{self.base_url}/api/chat"
         payload = self._prepare_payload(messages, stream=True, images=images)
@@ -223,7 +230,7 @@ class GroqLLMClient(BaseLLMClient):
 
     def _prepare_payload(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[LLMMessage],
         max_tokens: Optional[int] = None,
     ):
         return {
@@ -235,10 +242,10 @@ class GroqLLMClient(BaseLLMClient):
 
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[LLMMessage],
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
-        images: Optional[List[str]] = None,
+        images: Optional[Sequence[ImageInput]] = None,
     ) -> str:
         if images:
             logger.warning("Groq does not support image inputs. Ignoring images.")
@@ -264,8 +271,8 @@ class GroqLLMClient(BaseLLMClient):
 
     def generate_stream(
         self,
-        messages: List[Dict[str, str]],
-        images: Optional[List[str]] = None,
+        messages: List[LLMMessage],
+        images: Optional[Sequence[ImageInput]] = None,
     ) -> Generator[str, None, None]:
         if images:
             logger.warning("Groq does not support image inputs. Ignoring images.")
@@ -325,7 +332,7 @@ class OpenAICompatibleClient(BaseLLMClient):
 
     def _prepare_payload(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[LLMMessage],
         max_tokens: Optional[int] = None,
     ):
         return {
@@ -337,10 +344,10 @@ class OpenAICompatibleClient(BaseLLMClient):
 
     def generate(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[LLMMessage],
         max_tokens: Optional[int] = None,
         timeout: Optional[float] = None,
-        images: Optional[List[str]] = None,
+        images: Optional[Sequence[ImageInput]] = None,
     ) -> str:
         if images:
             logger.warning("This provider does not support image inputs. Ignoring images.")

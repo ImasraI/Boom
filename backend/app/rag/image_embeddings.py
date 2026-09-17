@@ -26,18 +26,21 @@ from different backends are not compatible with each other).
 
 from abc import ABC, abstractmethod
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
-from typing import Any, List, cast
+from typing import Any, List, Sequence, cast
 
 from app.config import get_settings
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+ImageInput = Path | bytes
+
 
 class BaseImageEmbeddingModel(ABC):
     @abstractmethod
-    def embed_images(self, image_paths: List[Path]) -> List[List[float]]:
+    def embed_images(self, image_paths: Sequence[ImageInput]) -> List[List[float]]:
         """Embed a batch of page images."""
         raise NotImplementedError
 
@@ -67,10 +70,14 @@ class ClipImageEmbedding(BaseImageEmbeddingModel):
         except Exception:
             self.text_model = SentenceTransformer(text_model_name)
 
-    def embed_images(self, image_paths: List[Path]) -> List[List[float]]:
+    def embed_images(self, image_paths: Sequence[ImageInput]) -> List[List[float]]:
         from PIL import Image
 
-        images = [Image.open(p).convert("RGB") for p in image_paths]
+        images = [
+            Image.open(BytesIO(image)).convert("RGB") if isinstance(image, bytes)
+            else Image.open(image).convert("RGB")
+            for image in image_paths
+        ]
         embeddings = cast(Any, self.image_model).encode(
             cast(Any, images), convert_to_numpy=True, show_progress_bar=False
         )
@@ -115,11 +122,15 @@ class ColPaliImageEmbedding(BaseImageEmbeddingModel):
         # the single-vector Chroma store. See module docstring for context.
         return cast(Any, multi_vector.mean(dim=0)).tolist()
 
-    def embed_images(self, image_paths: List[Path]) -> List[List[float]]:
+    def embed_images(self, image_paths: Sequence[ImageInput]) -> List[List[float]]:
         import torch
         from PIL import Image
 
-        images = [Image.open(p).convert("RGB") for p in image_paths]
+        images = [
+            Image.open(BytesIO(image)).convert("RGB") if isinstance(image, bytes)
+            else Image.open(image).convert("RGB")
+            for image in image_paths
+        ]
         batch = self.processor.process_images(images).to(self.device)
 
         with torch.no_grad():

@@ -790,7 +790,7 @@ export default function Schedule({
               disabled={generating && !isCurrentWeekGenerating}
               className="px-3 h-9 rounded-xl border border-[var(--border-strong)] text-[11px] font-bold text-[var(--muted)] disabled:opacity-40 hover:text-[var(--accent)] transition-colors"
             >
-              {generating && !isCurrentWeekGenerating ? "در حال ساخت..." : "باز reconstruction"}
+              {generating && !isCurrentWeekGenerating ? "در حال ساخت..." : "بازسازی برنامه"}
             </button>
           )}
           <button

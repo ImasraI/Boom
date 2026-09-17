@@ -10,7 +10,6 @@ Recommended models for Persian: nomic-embed-text (via Ollama)
 """
 
 from abc import ABC, abstractmethod
-from functools import lru_cache
 from typing import List, Optional
 import httpx
 
@@ -198,7 +197,6 @@ class OpenAICompatibleEmbeddingModel(BaseEmbeddingModel):
         return results[0] if results else []
 
 
-@lru_cache
 def get_embedding_model() -> BaseEmbeddingModel:
     settings = get_settings()
     provider = (settings.EMBEDDING_PROVIDER or "").strip().lower()

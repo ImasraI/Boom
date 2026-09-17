@@ -5,7 +5,7 @@ import json
 from app.config import get_settings
 from app.rag.embeddings import get_embedding_model
 from app.rag.vector_store import get_vector_store, get_image_vector_store
-from app.rag.llm import get_llm_client, get_vision_llm_client
+from app.rag.llm import get_llm_client, get_vision_llm_client, MockLLMClient
 from app.schemas import ChatMessage, SourceChunk
 from app.utils.logger import get_logger
 from app.rag.hybrid_search import get_hybrid_search, HybridSearch
@@ -304,9 +304,8 @@ def _retrieve_image_hits(
         except Exception:
             pass
 
-        # Retrieve extra candidates, then filter by actual similarity.
-        # A larger candidate pool improves recall without allowing unrelated
-        # pages through to the vision model.
+    # Retrieve extra candidates, then filter by actual similarity.
+
         candidate_k = max(k * 4, 20) if category else max(k * 3, 10)
         candidates = image_vector_store.similarity_search(
             query_embedding=query_embedding,
@@ -379,12 +378,17 @@ def answer_question(
         f"retrieved for user {user_id}."
     )
 
-    if image_hits:
+    vision_llm = get_vision_llm_client()
+    # Only use vision if we have image hits and we actually have a real vision LLM (not the MockLLMClient)
+    use_vision = bool(image_hits) and not isinstance(vision_llm, MockLLMClient)
+
+    if use_vision:
         # At least one relevant page image was found -> use the vision LLM,
         # with any text chunks attached as supplementary context.
-        vision_llm = get_vision_llm_client()
-        image_paths = [hit["content"] for hit in image_hits]
+        from app.utils.storage import get_object
 
+        image_keys = [hit["content"] for hit in image_hits]
+        image_paths = [get_object(key) for key in image_keys]
         messages = _build_image_messages(question, image_hits, retrieved_chunks, history, schedule)
         answer_text = vision_llm.generate(messages, images=image_paths)
 
@@ -405,14 +409,12 @@ def answer_question(
             )
             for c in retrieved_chunks
         ]
-
         return {"answer": answer_text, "sources": sources}
 
-    # No relevant page images -> original text-only pipeline
+
     llm_client = get_llm_client()
     messages = _build_messages(question, retrieved_chunks, history, student, schedule)
     answer_text = llm_client.generate(messages)
-
     sources = [
         SourceChunk(
             document_name=c["document_name"],
@@ -434,7 +436,8 @@ def answer_question_stream(
     question: str,
     user_id: int,
     history: Optional[List[ChatMessage]] = None,
-    top_k: Optional[int] = None
+    top_k: Optional[int] = None,
+    schedule: Optional[dict] = None,
 ) -> Generator[str, None, None]:
     """Stream answer chunks along with initial metadata (sources) using NDJSON protocol."""
 
@@ -462,16 +465,17 @@ def answer_question_stream(
 
     # Image retrieval: covers PDFs ingested in "page-as-image" mode
     image_hits = _retrieve_image_hits(search_query, user_id, settings.IMAGE_TOP_K)
+    vision_llm = get_vision_llm_client()
+    use_vision = bool(image_hits) and not isinstance(vision_llm, MockLLMClient)
 
     logger.info(
         f"{len(retrieved_chunks)} text chunk(s) and {len(image_hits)} page image(s) "
-        f"retrieved for user {user_id} (streaming)."
+        f"retrieved for user {user_id} (streaming). use_vision={use_vision}"
     )
 
-    if image_hits:
-        vision_llm = get_vision_llm_client()
+    if use_vision:
         image_paths = [hit["content"] for hit in image_hits]
-        messages = _build_image_messages(question, image_hits, retrieved_chunks, history)
+        messages = _build_image_messages(question, image_hits, retrieved_chunks, history, schedule)
 
         sources_data = [
             {
@@ -577,6 +581,7 @@ def ingest_pdf_as_images(
 ) -> int:
     from app.rag.image_loader import pdf_to_page_images
     from app.rag.image_embeddings import get_image_embedding_model
+    from app.utils.storage import get_object
 
     settings = get_settings()
 
@@ -584,9 +589,9 @@ def ingest_pdf_as_images(
     batch_size = batch_size or settings.IMAGE_BATCH_SIZE
 
     output_dir = Path(settings.IMAGES_DIR) / str(user_id) / Path(document_name).stem
-    image_paths = pdf_to_page_images(pdf_path, output_dir, dpi=dpi)
+    image_keys = pdf_to_page_images(pdf_path, user_id, document_name, dpi=dpi)
 
-    if not image_paths:
+    if not image_keys:
         logger.warning(f"No pages were rendered from document '{document_name}'.")
         return 0
 
@@ -598,12 +603,15 @@ def ingest_pdf_as_images(
     image_vector_store.delete_document(document_name, user_id)
 
     total = 0
-    for start in range(0, len(image_paths), batch_size):
-        batch = image_paths[start:start + batch_size]
-        embeddings = image_embedder.embed_images(batch)
+    for start in range(0, len(image_keys), batch_size):
+        batch = image_keys[start:start + batch_size]
+        # batch contains keys like "user_id/document_name/page_NNNN.png"
+        # get_object returns the bytes for each key
+        image_bytes = [get_object(key) for key in batch]
+        embeddings = image_embedder.embed_images(image_bytes)
         total += image_vector_store.add_chunks(
             document_name,
-            [str(p) for p in batch],  # stored as "content": the file path
+            [key for key in batch],  # stored as "content": the key (R2 or local path)
             embeddings,
             user_id=user_id,
             category=category,
@@ -612,8 +620,8 @@ def ingest_pdf_as_images(
             "  '%s': embedded pages %d-%d of %d.",
             document_name,
             start + 1,
-            min(start + batch_size, len(image_paths)),
-            len(image_paths),
+            min(start + batch_size, len(image_keys)),
+            len(image_keys),
         )
 
     logger.info(

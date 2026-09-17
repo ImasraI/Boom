@@ -60,6 +60,11 @@ export function fromISO(s: string) {
 }
 
 // Persian week starts on Saturday.
+export function getWeekISO(d: Date = new Date()): string {
+  const start = startOfWeek(d);
+  return toISO(start);
+}
+
 export function startOfWeek(d: Date) {
   const t = new Date(d.getFullYear(), d.getMonth(), d.getDate())
   t.setDate(t.getDate() - ((t.getDay() + 1) % 7))

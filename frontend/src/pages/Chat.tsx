@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { apiUrl } from "../api";
 import { NavFn, SignupData } from "../types";
-import { weeklyScheduleContext } from "../scheduleStore";
+import { weeklyScheduleContext, loadWeekBlocks, saveWeekBlocks, getWeekISO, StoredBlock } from "../scheduleStore";
 import GroqChart from "../components/GroqChart";
 
 interface Msg { role: "user" | "ai"; text: string; }
@@ -238,7 +238,34 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
       body: JSON.stringify(body),
     })
       .then(r => r.json())
-      .then(data => {
+.then(data => {
+        // Handle plan update if present
+        if (data.plan_update && data.plan_update.blocks && data.plan_update.blocks.length > 0) {
+          const weekISO = getWeekISO();
+          const currentBlocks = loadWeekBlocks(weekISO);
+          
+          // Merge new blocks with existing ones (replace if same day/startHour/duration/title)
+          const newBlocks = data.plan_update.blocks;
+          const existingBlocks = currentBlocks || [];
+          
+          const mergedBlocks = [...existingBlocks];
+          newBlocks.forEach((newBlock: StoredBlock) => {
+            const idx = mergedBlocks.findIndex(b => 
+              b.day === newBlock.day && 
+              b.startHour === newBlock.startHour && 
+              b.duration === newBlock.duration && 
+              b.title === newBlock.title
+            );
+            if (idx >= 0) {
+              mergedBlocks[idx] = { ...mergedBlocks[idx], ...newBlock };
+            } else {
+              mergedBlocks.push(newBlock);
+            }
+          });
+          
+          saveWeekBlocks(weekISO, mergedBlocks);
+        }
+        
         const answer = data.plan || data.answer || "پاسخی دریافت نشد.";
         const current = sessionsRef.current;
         if (!current[sessionId]) return;
