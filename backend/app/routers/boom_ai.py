@@ -374,6 +374,8 @@ def _extract_plan_update(answer: str):
     clean = answer[:idx].rstrip()
     section = answer[idx + len(PLAN_UPDATE_MARKER):].strip()
     data = _parse_json_from_text(section)
+    if not data:
+        return clean, None
     blocks = _plan_blocks(data)
     # Also extract removed blocks (blocks to delete)
     removed_raw = data.get("removed") or data.get("deleted") or data.get("removed_blocks") or []
