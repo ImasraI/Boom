@@ -329,6 +329,171 @@ class GroqLLMClient(BaseLLMClient):
             yield f"خطا: {e}"
 
 
+class GeminiLLMClient(BaseLLMClient):
+    """OpenAI-compatible HTTP client for Google Gemini (vision capable).
+
+    Uses Gemini's ``/v1beta/openai`` endpoint so it accepts the same JSON
+    shape as the other clients.  Images are sent as inline base64 ``data:``
+    URLs in the last user message, which Gemini's API understands natively.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: float = 300.0,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        self.client = httpx.Client(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+    def _encode_images(
+        self, images: Sequence[ImageInput]
+    ) -> List[Dict[str, str]]:
+        """Build OpenAI-style image_url parts (inline base64) from file paths."""
+        parts: List[Dict[str, str]] = []
+        for path in images:
+            try:
+                if isinstance(path, bytes):
+                    image_data = path
+                    mime = "image/png"
+                else:
+                    with open(path, "rb") as f:
+                        image_data = f.read()
+                    # Gemini accepts PNG/JPEG; guess the mime from the suffix.
+                    name = str(path).lower()
+                    mime = "image/jpeg" if name.endswith(
+                        (".jpg", ".jpeg")
+                    ) else "image/png"
+                b64 = base64.b64encode(image_data).decode("utf-8")
+                parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                })
+            except OSError as e:
+                logger.warning(f"Could not read image for vision request: {path} ({e})")
+        return parts
+
+    def _prepare_payload(
+        self,
+        messages: List[LLMMessage],
+        max_tokens: Optional[int] = None,
+        images: Optional[Sequence[ImageInput]] = None,
+    ):
+        messages = [dict(m) for m in messages]
+        if images:
+            image_parts = self._encode_images(images)
+            if image_parts:
+                for message in reversed(messages):
+                    if message.get("role") == "user":
+                        content = message.get("content", "")
+                        message["content"] = [
+                            {"type": "text", "text": content or "تصویر را تحلیل کن."},
+                            *image_parts,
+                        ]
+                        break
+                else:
+                    messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "تصویر را تحلیل کن."},
+                            *image_parts,
+                        ],
+                    })
+        return {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": max_tokens or self.max_tokens,
+        }
+
+    def generate(
+        self,
+        messages: List[LLMMessage],
+        max_tokens: Optional[int] = None,
+        timeout: Optional[float] = None,
+        images: Optional[Sequence[ImageInput]] = None,
+    ) -> str:
+        url = f"{self.base_url}/chat/completions"
+        payload = self._prepare_payload(messages, max_tokens=max_tokens, images=images)
+        req_timeout = timeout if timeout is not None else self.timeout
+
+        last_error = ""
+        for attempt in range(1, 5):
+            try:
+                resp = self.client.post(url, json=payload, timeout=req_timeout)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    last_error = f"HTTP {resp.status_code}"
+                    time.sleep(2 * attempt)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    content = data["choices"][0].get("message", {}).get("content")
+                    if content:
+                        return content
+                    # 200 with empty content -> treat as a retryable hiccup
+                    last_error = "empty completion"
+                else:
+                    last_error = "unexpected response format"
+            except httpx.TimeoutException:
+                last_error = "timeout"
+            except httpx.HTTPStatusError as e:
+                last_error = f"HTTP {e.response.status_code}" if e.response is not None else str(e)
+                if resp.status_code not in (429, 500, 502, 503, 504):
+                    break
+            except Exception as e:
+                last_error = str(e)
+            logger.warning("Gemini request attempt %d failed (%s); retrying...",
+                           attempt, last_error)
+            time.sleep(2 * attempt)
+
+        logger.warning("Gemini request failed after retries: %s", last_error)
+        return ""
+
+    def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        images: Optional[List[str]] = None,
+    ) -> Generator[str, None, None]:
+        url = f"{self.base_url}/chat/completions"
+        payload = self._prepare_payload(messages, images=images)
+        payload["stream"] = True
+
+        try:
+            with self.client.stream("POST", url, json=payload) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line or line == "data: [DONE]":
+                        continue
+                    if line.startswith("data: "):
+                        line = line[6:]
+                    try:
+                        chunk = json.loads(line)
+                        if "choices" in chunk and len(chunk["choices"]) > 0:
+                            content = chunk["choices"][0].get("delta", {}).get("content", "")
+                            if content:
+                                yield content
+                    except json.JSONDecodeError:
+                        continue
+        except Exception as e:
+            logger.warning(f"Gemini streaming request failed: {e}")
+            yield f"خطا: {e}"
+
+
 class OpenAICompatibleClient(BaseLLMClient):
     """Generic OpenAI-compatible client for providers like Omniroute, Cloudflare, etc."""
 
@@ -473,6 +638,19 @@ def get_llm_client() -> BaseLLMClient:
             logger.warning("Ollama selected but base_url is not local. Using mock.")
             return MockLLMClient()
 
+    if provider == "gemini":
+        if not settings.GEMINI_API_KEY:
+            logger.warning("Gemini selected but GEMINI_API_KEY is not set. Using mock.")
+            return MockLLMClient()
+        logger.info(f"Using GeminiLLMClient with model={settings.GEMINI_MODEL_NAME}")
+        return GeminiLLMClient(
+            api_key=settings.GEMINI_API_KEY,
+            base_url=settings.GEMINI_BASE_URL,
+            model=settings.GEMINI_MODEL_NAME,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+        )
+
     logger.info("Using MockLLMClient (test mode without a real LLM).")
     return MockLLMClient()
 
@@ -480,10 +658,25 @@ def get_llm_client() -> BaseLLMClient:
 def get_vision_llm_client() -> BaseLLMClient:
     """
     Separate client for the "page-as-image" pipeline, pointed at a
-    vision-capable model. Note: Groq doesn't support vision, so it falls back to mock.
+    vision-capable model. Provider is chosen via VISION_LLM_PROVIDER so text
+    (Groq) and vision (Google Gemini) can be different providers. Falls back
+    to the mock client when the requested provider is unavailable.
     """
     settings = get_settings()
-    provider = settings.LLM_PROVIDER
+    provider = settings.VISION_LLM_PROVIDER
+
+    if provider == "gemini":
+        if not settings.GEMINI_API_KEY:
+            logger.warning("Gemini selected for vision but GEMINI_API_KEY is not set. Using mock.")
+            return MockLLMClient()
+        logger.info(f"Using GeminiLLMClient (vision) with model={settings.GEMINI_MODEL_NAME}")
+        return GeminiLLMClient(
+            api_key=settings.GEMINI_API_KEY,
+            base_url=settings.GEMINI_BASE_URL,
+            model=settings.GEMINI_MODEL_NAME,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+        )
 
     if provider == "groq":
         logger.warning("Groq does not support vision models. Using mock for vision.")

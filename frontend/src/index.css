@@ -195,6 +195,9 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; }
   box-shadow: 4px 4px 0 0 var(--block-shadow);
   cursor: grab;
   touch-action: none;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
   transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
 }
 

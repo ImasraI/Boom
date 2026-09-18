@@ -139,7 +139,7 @@ function renderMarkdown(text: string): React.ReactNode {
       return (
         <div key={i} className="flex gap-1.5 items-start">
           <span className="text-[var(--accent)] mt-0.5 flex-shrink-0">•</span>
-          <span>{renderInline(bullet[1], `b${i}`)}</span>
+          <span className="min-w-0 break-words [overflow-wrap:anywhere]">{renderInline(bullet[1], `b${i}`)}</span>
         </div>
       );
     }
@@ -149,12 +149,12 @@ function renderMarkdown(text: string): React.ReactNode {
       return (
         <div key={i} className="flex gap-1.5 items-start">
           <span className="text-[var(--muted-2)] font-bold flex-shrink-0">{numbered[1]}.</span>
-          <span>{renderInline(numbered[2], `n${i}`)}</span>
+          <span className="min-w-0 break-words [overflow-wrap:anywhere]">{renderInline(numbered[2], `n${i}`)}</span>
         </div>
       );
     }
 
-    return <div key={i}>{renderInline(line, `p${i}`)}</div>;
+    return <div key={i} className="break-words [overflow-wrap:anywhere]">{renderInline(line, `p${i}`)}</div>;
   });
 }
 
@@ -400,11 +400,11 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
             {msgs.map((m, i) => (
               <div key={i} className="flex justify-start">
                 {m.role === "user" ? (
-                  <div className="max-w-[85%] px-4 py-3 rounded-3xl bg-[var(--chip)] text-[var(--text)] text-[13px] leading-relaxed whitespace-pre-wrap">
+                  <div className="max-w-[85%] px-4 py-3 rounded-3xl bg-[var(--chip)] text-[var(--text)] text-[13px] leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                     {m.text}
                   </div>
                 ) : (
-                  <div className="max-w-[85%] text-[13px] leading-relaxed text-[var(--text)]">
+                  <div className="max-w-[85%] min-w-0 text-[13px] leading-relaxed text-[var(--text)] break-words [overflow-wrap:anywhere]">
                     {renderMarkdown(m.text)}
                   </div>
                 )}

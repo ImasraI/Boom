@@ -379,6 +379,55 @@ def _retrieve_image_hits(
         return []
 
 
+def _resolve_ocr_page_images(
+    text_chunks: List[dict],
+    user_id: int,
+) -> List[dict]:
+    """Turn OCR text hits into exact page-image hits.
+
+    The OCR corpus stores each book page as ``[صفحه N] ...`` in the text
+    store.  When a retrieved chunk carries that marker, the underlying page
+    PNG has already been rendered by the OCR job -- so we serve the actual
+    *image* to the vision model, preserving figures, shapes and formulas that
+    OCR text alone cannot represent.  Returns image-hit dicts compatible with
+    ``_retrieve_image_hits`` output.
+    """
+    import re as _re
+
+    from app.utils.storage import get_object
+
+    marker = _re.compile(r"\[صفحه\s*([0-9۰-۹]+)\]\s*")
+    hits: List[dict] = []
+    seen = set()
+    for c in text_chunks:
+        name = c.get("document_name", "")
+        m = marker.search(c.get("content", "") or "")
+        if not m:
+            continue
+        try:
+            page = int(m.group(1).translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")))
+        except ValueError:
+            continue
+        key = f"{user_id}/{name}/page_{page:04d}.png"
+        try:
+            get_object(key)
+        except Exception:
+            continue  # page image not rendered for this book -> text chunk only
+        dedupe = (name, page)
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+        hits.append({
+            "document_name": name,
+            "chunk_index": page - 1,
+            "content": key,
+            "score": float(c.get("score") or 0.0),
+        })
+    if hits:
+        logger.info("OCR text hits resolved %d page image(s) for the vision read.", len(hits))
+    return hits
+
+
 # Answer a user question using the RAG pipeline (Non-streaming)
 def answer_question(
     question: str,
@@ -391,6 +440,29 @@ def answer_question(
 
     settings = get_settings()
     k = top_k or settings.TOP_K
+
+    if schedule is not None and question:
+        # "Which tests should I do today?" -> dedicated recommender that ties
+        # today's schedule, the week's mock exam topics and the OCR'd test
+        # books together, instead of the generic RAG.
+        try:
+            from app.routers.boom_ai import maybe_daily_tests
+            rec = maybe_daily_tests(question, user_id, student or {}, schedule)
+            if rec:
+                return {
+                    "answer": rec["answer"],
+                    "sources": [
+                        SourceChunk(
+                            document_name=s["document_name"],
+                            chunk_index=s["chunk_index"],
+                            content=s["content"],
+                            score=float(s.get("score", 0.0)),
+                        )
+                        for s in rec.get("sources", [])
+                    ],
+                }
+        except Exception:
+            pass
 
     embedding_model = get_embedding_model()
     hybrid_search = get_hybrid_search()
@@ -408,6 +480,12 @@ def answer_question(
 
     # Image retrieval: covers PDFs ingested in "page-as-image" mode
     image_hits = _retrieve_image_hits(search_query, user_id, settings.IMAGE_TOP_K)
+
+    # OCR text hits point at exact page images (figures/formulas intact).
+    # Use them so a question about a specific exercise is answered from the
+    # real page image even when CLIP didn't rank the page on top.
+    if not image_hits and retrieved_chunks:
+        image_hits = _resolve_ocr_page_images(retrieved_chunks, user_id) or []
 
     logger.info(
         f"{len(retrieved_chunks)} text chunk(s) and {len(image_hits)} page image(s) "
@@ -488,6 +566,35 @@ def answer_question_stream(
     settings = get_settings()
     k = top_k or settings.TOP_K
 
+    # Daily-tests recommender hook (streaming form).
+    if schedule is not None and question:
+        try:
+            from app.routers.boom_ai import maybe_daily_tests
+            rec = maybe_daily_tests(question, user_id, {}, schedule)
+            if rec:
+                yield json.dumps(
+                    {"type": "sources", "data": [
+                        {
+                            "document_name": s["document_name"],
+                            "chunk_index": s["chunk_index"],
+                            "content": s["content"],
+                            "score": float(s.get("score", 0.0)),
+                        } for s in rec.get("sources", [])
+                    ]}
+                ) + "\n"
+                yield json.dumps(
+                    {"type": "status", "data": "بر اساس برنامه امروز و آزمون هفته، تست‌های پیشنهادی:"}
+                ) + "\n"
+                for line in (rec["answer"] or "").split("\n"):
+                    while len(line) > 150:
+                        yield json.dumps({"type": "text", "data": line[:150]}) + "\n"
+                        line = line[150:]
+                    if line:
+                        yield json.dumps({"type": "text", "data": line}) + "\n"
+                return
+        except Exception:
+            pass
+
     embedding_model = get_embedding_model()
     hybrid_search = get_hybrid_search()
 
@@ -509,6 +616,11 @@ def answer_question_stream(
 
     # Image retrieval: covers PDFs ingested in "page-as-image" mode
     image_hits = _retrieve_image_hits(search_query, user_id, settings.IMAGE_TOP_K)
+
+    # OCR text hits resolve to exact page images for the vision read.
+    if not image_hits and retrieved_chunks:
+        image_hits = _resolve_ocr_page_images(retrieved_chunks, user_id) or []
+
     vision_llm = get_vision_llm_client()
     use_vision = bool(image_hits) and not isinstance(vision_llm, MockLLMClient)
 

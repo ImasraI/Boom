@@ -959,9 +959,9 @@ export default function Schedule({
                     } as React.CSSProperties
                   }
                 >
-                  <div className="font-bold truncate flex items-center gap-1 pointer-events-none">
-                    <span className="text-[10px] leading-none">↻</span>
-                    <span className="truncate">{b.title}</span>
+                  <div className="font-bold flex items-center gap-1 pointer-events-none leading-tight break-words [overflow-wrap:anywhere]">
+                    <span className="text-[10px] leading-none flex-shrink-0">↻</span>
+                    <span className="min-w-0 break-words [overflow-wrap:anywhere]">{b.title}</span>
                   </div>
                   <div className="text-[10px] opacity-80 pointer-events-none">
                     {formatTime(b.startHour)} -{" "}
@@ -986,7 +986,7 @@ export default function Schedule({
                     } as React.CSSProperties
                   }
                 >
-                  <div className="font-bold truncate pointer-events-none">
+                  <div className="font-bold pointer-events-none leading-tight break-words [overflow-wrap:anywhere]">
                     {b.title}
                   </div>
                   <div className="text-[10px] opacity-80 pointer-events-none">
@@ -1044,14 +1044,14 @@ export default function Schedule({
                 <label className="block text-xs text-[var(--muted)] mb-1 text-right">
                   عنوان
                 </label>
-                <input
-                  type="text"
+                <textarea
+                  rows={1}
                   value={newBlock.title}
                   onChange={(e) =>
                     setNewBlock({ ...newBlock, title: e.target.value })
                   }
                   placeholder="مثال: ریاضی"
-                  className="w-full border rounded-xl px-3 py-2 text-sm text-right bg-[var(--card)] text-[var(--text)]"
+                  className="w-full border rounded-xl px-3 py-2 text-sm text-right bg-[var(--card)] text-[var(--text)] resize-none break-words [overflow-wrap:anywhere] leading-relaxed"
                 />
               </div>
 

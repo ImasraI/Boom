@@ -31,7 +31,31 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
     LLM_MODEL_NAME: str = "llama-3.1-8b-instant"
-    VISION_LLM_MODEL_NAME: str = "llava:7b"
+    VISION_LLM_PROVIDER: str = "gemini"  # Options: "gemini", "groq", "ollama", "mock"
+    VISION_LLM_MODEL_NAME: str = "gemini-3.6-flash"
+
+    # Google Gemini API (vision-capable provider, free tier).
+    GEMINI_API_KEY: str = ""
+    GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    GEMINI_MODEL_NAME: str = "gemini-3.6-flash"
+
+    # ================= Bulk OCR corpus of scanned books =================
+    # OCR gives the planner knowledge of what every book contains (chapters,
+    # questions, page ranges).  The vision path *still* reads the real page
+    # image when a user asks for a question/answer/explanation, so figures
+    # and formulas that OCR cannot keep are preserved.
+    #
+    # Free-tier Gemini caps image-mode requests at ~250 RPD, so the bulk job
+    # is resumable and stops at a daily cap (GEMINI_OCR_DAILY_CAP) - re-run
+    # it each day until the whole library is transcribed.
+    OCR_DIR: str = "data/ocr"
+    OCR_DPI: int = 120
+    # Pages transcribed per Gemini request (fewer requests = less quota burn).
+    OCR_PAGES_PER_REQUEST: int = 4
+    # Safety margin under Gemini's 15 RPM image limit.
+    OCR_SLEEP_SECONDS: float = 5.0
+    # Do not exceed this many Gemini image requests per calendar day.
+    GEMINI_OCR_DAILY_CAP: int = 200
 
     # LLM generation parameters
     LLM_TEMPERATURE: float = 0.2

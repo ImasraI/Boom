@@ -1030,6 +1030,449 @@ def _complete_week_plan(
     return out
 
 
+# ---------------- "What tests should I do today?" ----------------
+
+_TODAY_TESTS_INTENT = re.compile(
+    r"چه تست|چه سوال|چه تمرین|چند تا تست|چند تست|تست بزن|تست بزنم|"
+    r"سوال بزنم|تمرین بزنم|چه چیزهایی بزنم|چی بزنم|امروز.*تست|تست.*امروز|"
+    r"تست‌های امروز|تستهای امروز|برای امروز"
+)
+
+_SUBJECT_WORDS = [
+    ("فیزیک", "فیزیک"),
+    ("شیمی", "شیمی"),
+    ("زیست", "زیست"),
+    ("ریاضی", "ریاضی"),
+    ("هندسه", "هندسه"),
+    ("آمار و احتمال", "آمار و احتمال"),
+    ("آمار", "آمار و احتمال"),
+    ("احتمال", "آمار و احتمال"),
+    ("ادبیات", "ادبیات"),
+    ("عربی", "عربی"),
+    ("دین و زندگی", "دینی"),
+    ("دینی", "دینی"),
+    ("زبان", "زبان"),
+    ("زمین‌شناسی", "زمین‌شناسی"),
+    ("زمین", "زمین‌شناسی"),
+]
+
+_NOT_TESTS = re.compile(r"استراحت|breaking|زنگ|break|ناهار|صبحانه")
+
+
+def _detect_subject(text: str) -> Optional[str]:
+    text = (text or "")
+    for kw, label in _SUBJECT_WORDS:
+        if kw in text:
+            return label
+    return None
+
+
+def _today_index(schedule: Optional[dict]) -> Optional[int]:
+    """day index (0=شنبه..6=جمعه) for *today* inside the schedule week."""
+    try:
+        ws = date.fromisoformat(str((schedule or {}).get("week_start", ""))[:10])
+        idx = (date.today() - ws).days
+        return idx if 0 <= idx <= 6 else None
+    except Exception:
+        return None
+
+
+def _today_blocks(schedule: Optional[dict], today_idx: int) -> List[dict]:
+    """All blocks scheduled for `today_idx` (day blocks + static blocks)."""
+    blocks = []
+    for b in (schedule or {}).get("blocks") or []:
+        if int(b.get("day", -1)) == today_idx:
+            blocks.append(b)
+    for s in (schedule or {}).get("statics") or []:
+        day = s.get("day")
+        try:
+            day_i = int(day)
+        except (TypeError, ValueError):
+            day_i = -1
+        if day_i == today_idx:
+            blocks.append(s)
+    return blocks
+
+
+_MOCK_TOPICS_PROMPT = """تو یک تحلیلگر برنامه‌ی آزمون آزمایشی کنکور هستی.
+از متن «برنامه آزمون» که می‌فرستم، برای هر درس، مباحث تستیِ اعلام‌شده برای نزدیک‌ترین آزمون را استخراج کن.
+- فقط مباحثی را بیاور که در متن آمده؛ چیزی از خودت اضافه نکن.
+- «tests» = تعداد سوالی که در آزمون برای همان درس اعلام شده (اگر هست).
+- «pages» = بازه صفحه‌ای که برای درس اعلام شده (اگر هست).
+- «questions» = بازه شماره تست‌ها/سوال‌های همان درس که در برنامه اعلام شده (اگر هست)، مثل «160 تا 180»؛ اگر نیست خالی بگذار.
+- subject فقط یکی از این‌ها باشد: فیزیک، شیمی، زیست، ریاضی، هندسه، آمار و احتمال، ادبیات، عربی، دینی، زبان، زمین‌شناسی.
+خروجی فقط یک JSON آرایه از این شکل، بدون هیچ توضیح دیگری:
+[{{"subject":"فیزیک","topics":["اثر داپلر","امواج صوتی"],"pages":"۱۵۴ تا ۲۳۴","tests":16,"questions":"160 تا 180"}}]
+
+متن برنامه آزمون:
+{mock}"""
+
+
+_FA_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
+
+
+def _norm_digits(text) -> str:
+    """Normalize Persian digits (and numpy ints) to plain ASCII."""
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = str(text)
+    return text.translate(_FA_DIGITS)
+
+
+def _mock_topics(mock_summary: str) -> List[dict]:
+    """Structured [{subject, topics, pages, tests, questions}] extracted from
+    the week's mock summary via a small text-LLM call (fails gracefully)."""
+    if not mock_summary:
+        return []
+    try:
+        messages = [
+            {"role": "system", "content": _MOCK_TOPICS_PROMPT.format(mock=mock_summary[:5000])}
+        ]
+        raw = get_llm_client().generate(messages, max_tokens=900, timeout=120).strip()
+        data = _parse_json_from_text(raw)
+        if isinstance(data, list):
+            rows = []
+            for d in data:
+                if isinstance(d, dict) and d.get("subject"):
+                    q = (d.get("questions") or "").replace(",", " ")
+                    qn = re.search(r"(\d{1,3})\s*(?:تا|الی|ـ|-)\s*(\d{1,3})", _norm_digits(q))
+                    rows.append({
+                        "subject": d["subject"],
+                        "topics": [t for t in (d.get("topics") or []) if t][:8],
+                        "pages": _norm_digits(d.get("pages") or ""),
+                        "tests": int(d["tests"]) if str(d.get("tests") or "").replace(",", "").isdigit() else None,
+                        "questions": f"{qn.group(1)} تا {qn.group(2)}" if qn
+                                     and 0 < int(qn.group(1)) <= int(qn.group(2)) < 1000 else "",
+                    })
+            if rows:
+                return rows
+    except Exception as exc:
+        logger.warning("Mock topic extraction failed: %s", exc)
+    return []
+
+
+def _chunk_page(chunk: dict) -> Optional[int]:
+    m = re.search(r"\[صفحه\s*([0-9۰-۹]+)\]", chunk.get("content", "") or "")
+    if not m:
+        return None
+    try:
+        return int(m.group(1).translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")))
+    except ValueError:
+        return None
+
+
+_QUESTION_RANGE = re.compile(r"تست(?:ها|های)?\s*(?:از\s*)?(\d{1,3})\s*(?:تا|الی|ـ|-)\s*(\d{1,3})")
+_ANY_QNUM = re.compile(r"(?<![\d۰-۹])(\d{1,3})\s*[.)،ْ]")
+
+
+def _question_chain(text: str):
+    """Try to find the chained question range in an OCR chunk.  Returns
+    (q_from, q_to) when a coherent group exists, else None.  Handles both
+    Latin and Persian digits and ZWNJ inside words (تست‌های)."""
+    # Normalize: Persian->Latin digits and drop ZWNJ so "تست‌های ۴۱ تا ۵۶"
+    # becomes the plain "تستهای 41 تا 56" the regex can match.
+    text = _norm_digits(text).replace("\u200c", "")
+    m = _QUESTION_RANGE.search(text)
+    if m:
+        a, b = int(m.group(1)), int(m.group(2))
+        if 0 < a <= b < 500:
+            return (a, b)
+    nums = [int(n) for n in _ANY_QNUM.findall(text)]
+    nums = sorted(set(n for n in nums if n <= 500))
+    if len(nums) < 2:
+        return None
+    # Longest consecutive run
+    best_start = best_len = cur_start = cur_len = 0
+    prev = None
+    for n in nums:
+        if prev is not None and n == prev + 1:
+            cur_len += 1
+        else:
+            cur_start, cur_len = n, 1
+        if cur_len > best_len:
+            best_start, best_len = cur_start, cur_len
+        prev = n
+    if best_len >= 2:
+        return (best_start, best_start + best_len - 1)
+    return (nums[0], nums[-1])
+
+
+def _retrieve_topic_chunks(subject: str, topic: str, user_id: int, k: int = 8) -> List[dict]:
+    """OCR'd book chunks whose content matches a subject *and* its topic
+    (the chained test groups usually have their own titles)."""
+    query = f"{subject} {topic} تست و سوال چهارگزینه‌ای کنکور فصل مبحث تمرین"
+    try:
+        embedder = get_embedding_model()
+        search = get_hybrid_search()
+        e = embedder.embed_query(query)
+        chunks = search.search(query_text=query, query_embedding=e, user_id=user_id, top_k=k)
+    except Exception as exc:
+        logger.warning("Topic chunk retrieval failed for %s/%s: %s", subject, topic, exc)
+        return []
+    hits = []
+    for c in chunks:
+        content = c.get("content", "") or ""
+        has_page = _chunk_page(c) is not None
+        if has_page and (topic.lower().replace(" ", "") in content.replace(" ", "").lower()
+                         or any(w in content for w in topic.split() if len(w) > 2)):
+            hits.append(c)
+    return hits or chunks  # best effort even when the topic word is missing
+
+
+def recommend_today_tests(
+    user_id: int,
+    student: Optional[dict],
+    schedule: Optional[dict],
+) -> dict:
+    """Recommend concrete tests for today.
+
+    Combines three signals:
+    1. Today's schedule (which study blocks exist today).
+    2. The next mock exam content (subjects + specific topics + pages + test
+       count), so test selection targets the exact examined area.
+    3. OCR'd test-book content (text store) to name the exact question chains
+       (e.g. "تست‌های ۴۱ تا ۵۶" on pages 154-158) for that topic.
+    """
+    settings = get_settings()
+    student = student or {}
+    today_idx = _today_index(schedule)
+    if today_idx is None:
+        return {"answer": "", "tests": [], "sources": []}
+
+    today_blocks = _today_blocks(schedule, today_idx)
+    day_label = _DAY_LABELS[today_idx]
+    day_heads = [b.get("title", "") for b in today_blocks]
+    day_subjects = list(dict.fromkeys(s for s in (_detect_subject(t) for t in day_heads) if s))
+
+    week_start = date.fromisoformat(str(schedule.get("week_start", ""))[:10])
+    mock = _extract_week_mock(user_id, week_start)
+    topics_rows = _mock_topics((mock or {}).get("summary", "")) if mock else []
+
+    # Prioritize weak subjects, then subjects the student studies today.
+    weak = student.get("weakSubjects") or student.get("weak_subjects") or []
+    focus = [t for t in topics_rows if _detect_subject(t["subject"]) == t["subject"]
+             or t["subject"] in weak]
+    focus = focus or topics_rows
+    subjects_from_today = day_subjects or [_detect_subject(w) for w in weak] or []
+
+    if not focus and not subjects_from_today:
+        return {
+            "answer": (
+                "برای امروز هنوز برنامه مشخصی (بلوک مطالعه یا آزمون) و محتوای OCR کتاب‌ها ثبت نکرده‌ام؛ "
+                "اول برنامه هفته را بساز یا منتظر باش محتوای کتاب‌ها تامین شود."
+            ),
+            "tests": [],
+            "sources": [],
+        }
+
+    daily_hours = float(student.get("ساعات مطالعه روزانه") or 4)
+    per_subject = max(10, min(24, int(daily_hours * 6)))
+
+    tests: List[dict] = []
+    sources: List[dict] = []
+    done_subs: set = set()
+
+    ordered = (focus + [{"subject": s, "topics": [], "pages": "", "tests": None} for s in subjects_from_today
+                if s not in {t["subject"] for t in focus}])[:3]
+
+    for row in ordered:
+        subject = row["subject"]
+        if subject in done_subs:
+            continue
+        done_subs.add(subject)
+        topics = [t for t in (row.get("topics") or []) if t] or [subject]
+        count = row.get("tests") or per_subject
+        problem_pages = _norm_digits(row.get("pages") or "").replace("،", " ")
+
+        item: dict = {
+            "subject": subject,
+            "topic": topics[0],
+            "book": "",
+            "page_from": None,
+            "page_to": None,
+            "q_from": None,
+            "q_to": None,
+            "count": int(count),
+            "match_note": "مبحث اعلام‌شده آزمون",
+        }
+        page_nums: List[int] = []
+        chains: List[tuple] = []
+        for topic in topics:
+            chunks = _retrieve_topic_chunks(subject, topic, user_id)
+            for c in chunks:
+                p = _chunk_page(c)
+                if p:
+                    page_nums.append(p)
+                chain = _question_chain(c.get("content", ""))
+                if chain:
+                    chains.append(chain)
+                if p and c.get("document_name"):
+                    item["book"] = item["book"] or c["document_name"]
+                    sources.append({
+                        "document_name": c["document_name"],
+                        "chunk_index": p - 1,
+                        "content": c["content"][:2000],
+                        "score": float(c.get("hybrid_score") or c.get("score") or 0.0),
+                    })
+        if page_nums:
+            item["page_from"] = min(page_nums)
+            item["page_to"] = max(page_nums)
+            item["match_note"] = f"مبحث «{topics[0]}» در صفحات {item['page_from']} تا {item['page_to']}"
+        if chains:
+            best = max(chains, key=lambda ch: ch[1] - ch[0])
+            item["q_from"], item["q_to"] = best
+            item["match_note"] = (
+                f"تست‌های {best[0]} تا {best[1]} " +
+                (f"(صفحه {item['page_from']} تا {item['page_to']})" if item["page_from"] else "") +
+                f" — مبحث «{topics[0]}» اعلام‌شده در آزمون"
+            )
+        # No OCR chain found -> use the question range declared in the mock plan.
+        if not chains and row.get("questions"):
+            qn = re.search(r"(\d{1,3})\s*(?:تا|الی|ـ|-)\s*(\d{1,3})", _norm_digits(row["questions"]).replace("،", " "))
+            if qn:
+                a, b = int(qn.group(1)), int(qn.group(2))
+                if 0 < a <= b < 1000:
+                    item["q_from"], item["q_to"] = a, b
+        if not item["book"]:
+            picked = _pick_main_book({**student, "weakSubjects": [subject]})
+            item["book"] = picked
+            if problem_pages and not item["page_from"]:
+                m = re.search(r"(\d{1,3})\s*(?:تا|الی|ـ|-)\s*(\d{1,3})", problem_pages)
+                if m:
+                    item["page_from"] = int(m.group(1))
+                    item["page_to"] = int(m.group(2))
+            concrete = []
+            if item["page_from"]:
+                concrete.append(f"صفحه {item['page_from']} تا {item['page_to']}")
+            if item["q_from"]:
+                concrete.append(f"تست‌های {item['q_from']} تا {item['q_to']}")
+            note = "بر اساس مبحث اعلام‌شده آزمون"
+            if concrete:
+                note += f" — {', '.join(concrete)}"
+            if not concrete:
+                note += " (OCR کتاب‌ها هنوز کامل نشده)"
+            item["match_note"] = note
+        tests.append(item)
+
+    # De-duplicate sources
+    seen_src, uniq = set(), []
+    for s in sources:
+        k = (s["document_name"], s["chunk_index"])
+        if k not in seen_src:
+            seen_src.add(k)
+            uniq.append(s)
+    sources = uniq
+
+    answer = _daily_tests_text(tests, day_label, today_idx)
+    return {"answer": answer, "tests": tests, "sources": sources}
+
+
+def _daily_tests_text(tests: List[dict], day_label: str, today_idx: int) -> str:
+    lines = [f"امروز ({day_label}) این تست‌ها را بزن:", ""]
+    if not tests:
+        return "برای امروز محتوای تستی مشخصی پیدا نکردم."
+    for i, t in enumerate(tests, start=1):
+        q = f"تست‌های {t['q_from']} تا {t['q_to']}" if t.get("q_from") else "تست‌های این مبحث"
+        pg = f"، صفحه {t['page_from']} تا {t['page_to']}" if t.get("page_from") else ""
+        lines.append(
+            f"{i}) {t['subject']} — {t['topic']} ({q}{pg})\n"
+            f"   کتاب: {t['book'] or 'نامشخص'}\n"
+            f"   تعداد: {t['count']} تست\n"
+            f"   چرا: {t['match_note']}"
+        )
+    return "\n".join(lines)
+
+
+def maybe_daily_tests(
+    question: str,
+    user_id: int,
+    student: Optional[dict],
+    schedule: Optional[dict],
+) -> Optional[dict]:
+    """Chat hook: when the user asks about today's tests, answer with the
+    dedicated recommender instead of generic RAG."""
+    if not question or not schedule:
+        return None
+    if not _TODAY_TESTS_INTENT.search(question):
+        return None
+    try:
+        rec = recommend_today_tests(user_id, student or {}, schedule)
+    except Exception as exc:
+        logger.warning("Daily-tests recommender failed: %s", exc)
+        return None
+    if not rec or not rec.get("tests"):
+        return None
+    return {
+        "answer": rec["answer"],
+        "tests": rec["tests"],
+        "sources": rec.get("sources", []),
+    }
+
+
+class TodayTestsRequest(BaseModel):
+    student: Optional[dict] = None
+    schedule: Optional[dict] = None
+    daily_hours: Optional[float] = None
+
+
+@router.post("/today-tests")
+def today_tests_endpoint(request: TodayTestsRequest):
+    rec = recommend_today_tests(
+        get_settings().DEMO_USER_ID,
+        request.student,
+        request.schedule,
+    )
+    return {"answer": rec["answer"], "tests": rec["tests"], "sources": rec["sources"]}
+
+
+def _subject_book_context(
+    weak_subjects: List[str],
+    major: str,
+    grade: str,
+) -> List[dict]:
+    """Retrieve OCR'd book content relevant to each weak subject.
+
+    After the raw books are OCR'd, their pages live in the *text* store as
+    per-page chunks with ``[صفحه N]`` markers.  Querying each weak subject
+    separately returns the actual chapters/questions the book contains, so
+    the planner can pick real topics and page ranges instead of guessing
+    from a bare book title.
+    """
+    settings = get_settings()
+    if not weak_subjects:
+        return []
+    try:
+        embedder = get_embedding_model()
+        search = get_hybrid_search()
+    except Exception:
+        return []
+    hits: List[dict] = []
+    seen = set()
+    for subject in list(weak_subjects)[:3]:
+        q = (
+            f"{subject} تست و پرسش چهارگزینه‌ای کنکور {major} {grade} "
+            f"فصل، مبحث، نمونه سوال و تمرین"
+        )
+        try:
+            e = embedder.embed_query(q)
+            for c in search.search(
+                query_text=q,
+                query_embedding=e,
+                user_id=settings.DEMO_USER_ID,
+                top_k=3,
+            ):
+                key = (c["document_name"], c["content"][:80])
+                if key not in seen:
+                    seen.add(key)
+                    hits.append(c)
+        except Exception as exc:
+            logger.warning("Subject retrieval failed for %s: %s", subject, exc)
+    logger.info("Subject-aware OCR retrieval: %d chunk(s) for weak subjects %s.",
+                len(hits), list(weak_subjects)[:3])
+    return hits
+
+
 WEEKLY_PLAN_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنکور.
 برنامه هفتگی میسازی که دانشآموز را برای آزمونهای آزمایشی (ماک) آماده میکند.
 
@@ -1050,7 +1493,8 @@ WEEKLY_PLAN_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنک�
 - startHour: ۶ تا ۲۳.۵ با گام ۰.۵؛ duration: ۰.۵ تا ۶ ساعت.
 - type فقط: study, test, class, break.
 - فقط یک JSON خروجی بده (بدون markdown، بدون کامنت).
-- عنوان بلوک‌های تست باید نام کتاب واقعی از «منابع موجود در سامانه» را داشته باشد (مثلاً «۲۰ تست فیزیک از فیزیک ۱ خیلی سبز») و اگر آزمون بازه صفحه مشخص کرده، همان بازه را در عنوان بیاور (مثلاً «تست فیزیک از فیزیک ۱ خیلی سبز صفحات ۱۵۴ تا ۲۳۴»).
+- عنوان بلوک‌های تست باید نام کتاب واقعی از «منابع موجود در سامانه» را داشته باشد (مثلاً «۲۰ تست فیزیک از فیزیک ۱ خیلی سبز»).
+- وقتی «متن‌های مرجع» شامل محتوای واقعی کتاب (فصل، مبحث، شماره سوال، بازه صفحه) است، از همان محتوا استفاده کن و در عنوان بلوک تست بازه صفحه واقعی را بیاور (مثلاً «۲۰ تست حرکت‌شناسی از فیزیک ۱ خیلی سبز، صفحه ۱۵۴ تا ۱۶۲») و موضوع تست را از همان مبحث‌های آزمون انتخاب کن.
 - نام کتاب را فقط از «منابع موجود در سامانه» انتخاب کن؛ برای کتابی که در لیست نیست عنوان ننویس و نپرس کدام کتاب — از همان لیست مناسب‌ترین را بر اساس رشته و پایه دانش‌آموز انتخاب کن.
 
 قالب خروجی:
@@ -1102,6 +1546,18 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
         top_k=6,
     )
     books = _book_list(chunks)
+
+    # OCR'd book pages live in the text store, so pull each weak subject's
+    # own content (chapters, question types, page ranges) -- this is how the
+    # planner "knows which questions to put".
+    subject_chunks = _subject_book_context(weak, major, grade)
+    if subject_chunks:
+        seen = {(c["document_name"], c["content"][:80]) for c in chunks}
+        for c in subject_chunks:
+            if (c["document_name"], c["content"][:80]) not in seen:
+                seen.add((c["document_name"], c["content"][:80]))
+                chunks.append(c)
+        books = list(dict.fromkeys(books + [_c["document_name"] for _c in subject_chunks]))
 
     # The text store is often empty (books are scanned page images), so also
     # name the retrieved books from the image store to ground test blocks.
