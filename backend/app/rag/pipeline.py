@@ -251,7 +251,7 @@ def rewrite_query(question: str) -> str:
         # مدل (مثلا روی CPU-only)، به‌جای معطل ماندن طولانی، سریع به سوال
         # اصلی کاربر برگردیم.
         rewritten = llm_client.generate(
-            messages, max_tokens=150, timeout=15).strip()
+            messages, max_tokens=150, timeout=60).strip()
 
         looks_invalid = (
             not rewritten
