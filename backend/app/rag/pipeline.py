@@ -38,6 +38,7 @@ SYSTEM_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنکور �
 - removed: بلوک‌هایی که باید از برنامه کاربر حذف شوند. برای هر بلوک حذفی، day و startHour و title را دقیقاً مطابق همان چیزی که در «برنامه مطالعه کاربر» آمده است بنویس (همان ساعت شروع قبلی). اگر کاربر خواست بلوکی جابه‌جا شود یا حذف شود، حتماً بلوک قبلی را در removed بگذار؛ در غیر این صورت برنامه قدیمی حذف نمی‌شود.
 - blocks: بلوک‌هایی که باید اضافه شوند یا جایگزین بلوک موجود شوند (با همان day و startHour اگر جایگزین همان ساعتی است).
 - فقط بلوک‌هایی را تغییر بده که کاربر خواسته؛ بقیه بلوک‌ها را در خروجی نیاور.
+نکته مهم درباره day: در «برنامه مطالعه کاربر» هر روز با [day=N] و نام فارسی آمده است؛ حتماً از همان مقدار عددی day استفاده کن (۰=شنبه، ۱=یکشنبه، ۲=دوشنبه، ۳=سه‌شنبه، ۴=چهارشنبه، ۵=پنجشنبه، ۶=جمعه).
 type فقط یکی از: study, test, class, break. بلوک‌های تست باید با [منبع N] یا نام کتاب مشخص شوند.
 ۱۰. اگر کاربر مثلاً خواست «بعد از هر جلسه مطالعه ۳۰ دقیقه استراحت اضافه شود»، این تغییر برای همه روزهایی که آن الگو را دارند اعمال شود، نه فقط یک روز.
 ۱۱. «بلوکهای ثابت هفتگی» هر هفته در همان روز و ساعت تکرار میشوند (مثلاً کلاس ۱۶ تا ۱۸). آنها را حذف یا جابهجا نکن و هیچ بلوک مطالعه/تست روی آن ساعتها نگذار."""
@@ -108,15 +109,16 @@ def _schedule_context(schedule: Optional[dict]) -> str:
             start = b.get("startHour")
             dur = b.get("duration")
             label = _DAY_LABELS[day] if isinstance(day, int) and 0 <= day <= 6 else str(day)
+            day_num = int(day) if isinstance(day, int) and 0 <= day <= 6 else "?"
             parts.append(
-                f"- {label}: {_fmt_range(start, dur)} | {b.get('title', '')} "
+                f"- [day={day_num}] {label}: {_fmt_range(start, dur)} | {b.get('title', '')} "
                 f"| نوع: {b.get('type', '')}"
                 + (f" | تعداد تست: {b.get('count')}" if b.get("count") else "")
             )
 
     statics = schedule.get("statics") or []
     if statics:
-        parts.append("بلوکهای ثابت هفتگی (هر هفته در همین روز و ساعت تکرار میشوند؛ روی این ساعتها برنامه نگذار):")
+        parts.append("بلوکهای ثابت هفتگی (هر هفته در همان روز و ساعت تکرار میشوند؛ روی این ساعتها برنامه نگذار):")
         for s in statics:
             day = s.get("day")
             try:
@@ -124,8 +126,9 @@ def _schedule_context(schedule: Optional[dict]) -> str:
             except (TypeError, ValueError):
                 day_i = -1
             label = _DAY_LABELS[day_i] if 0 <= day_i <= 6 else str(s.get("date") or day)
+            day_num = day_i if 0 <= day_i <= 6 else "?"
             parts.append(
-                f"- {label}: {_fmt_range(s.get('startHour'), s.get('duration'))} "
+                f"- [day={day_num}] {label}: {_fmt_range(s.get('startHour'), s.get('duration'))} "
                 f"| {s.get('title', '')} | نوع: {s.get('type', '')}"
             )
 
