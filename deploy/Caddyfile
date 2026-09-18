@@ -1,0 +1,13 @@
+# Replace with your actual domain
+api.yourdomain.com {
+    reverse_proxy 127.0.0.1:8000
+    header {
+        # Security headers
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+    # Increase timeouts for long LLM requests
+    timeout 300s
+}

@@ -88,7 +88,7 @@ class Settings(BaseSettings):
     COLPALI_MODEL_NAME: str = "vidore/colqwen2.5-v0.2"
 
     model_config = SettingsConfigDict(
-        env_file="backend/.env",
+        env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )

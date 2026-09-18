@@ -1,10 +1,11 @@
 """Tests for the weekly planner validator (_complete_week_plan)."""
 
 import sys
-import os
+from pathlib import Path
 
 # Add backend to path
-sys.path.insert(0, r"C:\Users\Arsam\Desktop\Boom-merged\backend")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "backend"))
 
 from app.routers.boom_ai import _complete_week_plan, _default_week_plan
 

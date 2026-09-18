@@ -55,7 +55,7 @@ def pdf_to_page_images(
             key = f"{user_id}/{document_name}/page_{page_num:04d}.png"
 
             # Render to bytes in memory first, then upload
-            buf = pix.tobytes(format="PNG")
+            buf = pix.tobytes()
             put_object(key, buf)
 
             image_keys.append(key)

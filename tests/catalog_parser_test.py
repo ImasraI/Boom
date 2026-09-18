@@ -3,7 +3,10 @@
 import re
 import os
 import glob
+from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+TEST_BOOKS_DIR = REPO_ROOT / "backend" / "data" / "raw" / "test-books"
 
 def test_persian_digit_pattern():
     """The regex should match question ranges with both Arabic/Persian digits and ASCII digits."""
@@ -26,8 +29,7 @@ def test_persian_digit_pattern():
 
 def test_extract_question_ranges():
     """Extract question ranges from test book text files."""
-    directory = r"C:\Users\Arsam\Desktop\Boom-merged\backend\data\raw\test-books"
-    pdfs = glob.glob(os.path.join(directory, "*.txt"))
+    pdfs = sorted(glob.glob(str(TEST_BOOKS_DIR / "*.txt")))
 
     pattern = r"سوال\s+([\d|۱-۹]+):\s+از\s+صفحه\s+([\d|۱-۹]+)\s+تا\s+([\d|۱-۹]+)"
 
@@ -46,8 +48,7 @@ def test_extract_question_ranges():
 
 def test_mathematics_has_ranges():
     """Mathematics book should have question ranges extracted."""
-    directory = r"C:\Users\Arsam\Desktop\Boom-merged\backend\data\raw\test-books"
-    pdfs = glob.glob(os.path.join(directory, "*.txt"))
+    pdfs = sorted(glob.glob(str(TEST_BOOKS_DIR / "*.txt")))
 
     pattern = r"سوال\s+([\d|۱-۹]+):\s+از\s+صفحه\s+([\d|۱-۹]+)\s+تا\s+([\d|۱-۹]+)"
 

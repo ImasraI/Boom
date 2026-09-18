@@ -240,30 +240,45 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
       .then(r => r.json())
 .then(data => {
         // Handle plan update if present
-        if (data.plan_update && data.plan_update.blocks && data.plan_update.blocks.length > 0) {
+        if (data.plan_update) {
           const weekISO = getWeekISO();
-          const currentBlocks = loadWeekBlocks(weekISO);
+          let currentBlocks = loadWeekBlocks(weekISO) || [];
           
-          // Merge new blocks with existing ones (replace if same day/startHour/duration/title)
-          const newBlocks = data.plan_update.blocks;
-          const existingBlocks = currentBlocks || [];
+          // Handle removed blocks (delete)
+          if (data.plan_update.removed && data.plan_update.removed.length > 0) {
+            const removedBlocks = data.plan_update.removed;
+            currentBlocks = currentBlocks.filter((existingBlock: StoredBlock) => {
+              return !data.plan_update.removed.some((removedBlock: StoredBlock) =>
+                existingBlock.day === removedBlock.day &&
+                existingBlock.startHour === removedBlock.startHour &&
+                existingBlock.title === removedBlock.title
+              );
+            });
+            saveWeekBlocks(weekISO, currentBlocks);
+          }
           
-          const mergedBlocks = [...existingBlocks];
-          newBlocks.forEach((newBlock: StoredBlock) => {
-            const idx = mergedBlocks.findIndex(b => 
-              b.day === newBlock.day && 
-              b.startHour === newBlock.startHour && 
-              b.duration === newBlock.duration && 
-              b.title === newBlock.title
-            );
-            if (idx >= 0) {
-              mergedBlocks[idx] = { ...mergedBlocks[idx], ...newBlock };
-            } else {
-              mergedBlocks.push(newBlock);
-            }
-          });
-          
-          saveWeekBlocks(weekISO, mergedBlocks);
+          // Handle added/updated blocks
+          if (data.plan_update.blocks && data.plan_update.blocks.length > 0) {
+            const newBlocks = data.plan_update.blocks;
+            currentBlocks = loadWeekBlocks(weekISO) || [];
+            
+            const mergedBlocks = [...currentBlocks];
+            newBlocks.forEach((newBlock: StoredBlock) => {
+              const idx = mergedBlocks.findIndex(b => 
+                b.day === newBlock.day && 
+                b.startHour === newBlock.startHour && 
+                b.duration === newBlock.duration && 
+                b.title === newBlock.title
+              );
+              if (idx >= 0) {
+                mergedBlocks[idx] = { ...mergedBlocks[idx], ...newBlock };
+              } else {
+                mergedBlocks.push(newBlock);
+              }
+            });
+            
+            saveWeekBlocks(weekISO, mergedBlocks);
+          }
         }
         
         const answer = data.plan || data.answer || "پاسخی دریافت نشد.";

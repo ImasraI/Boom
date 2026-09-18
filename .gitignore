@@ -27,5 +27,6 @@ Thumbs.db
 backend/server_*.log
 
 # Generated app data (vector store, rendered page images, mock cache, raw uploads)
+data/
 backend/data/
 backend/data/**

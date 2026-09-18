@@ -366,7 +366,7 @@ def _extract_plan_update(answer: str):
     """Pull the machine-readable plan-update section out of an LLM chat answer.
 
     Returns (clean_text_without_marker, update_or_None). The update is a dict
-    {"blocks": [...], "note": str} the frontend can apply to the current week.
+    {"blocks": [...], "removed": [...], "note": str} the frontend can apply to the current week.
     """
     if not answer or PLAN_UPDATE_MARKER not in answer:
         return answer, None
@@ -375,10 +375,14 @@ def _extract_plan_update(answer: str):
     section = answer[idx + len(PLAN_UPDATE_MARKER):].strip()
     data = _parse_json_from_text(section)
     blocks = _plan_blocks(data)
-    if not blocks:
+    # Also extract removed blocks (blocks to delete)
+    removed_raw = data.get("removed") or data.get("deleted") or data.get("removed_blocks") or []
+    removed_blocks = _plan_blocks({"blocks": removed_raw}) if isinstance(removed_raw, list) else []
+    if not blocks and not removed_blocks:
         return clean, None
     return clean, {
         "blocks": blocks,
+        "removed": removed_blocks,
         "note": str((data or {}).get("note") or ""),
     }
 
@@ -855,20 +859,24 @@ def _complete_week_plan(
     daily_hours: float,
     student: Optional[dict],
     statics: Optional[List[dict]] = None,
+    protected_statics: Optional[List[dict]] = None,
 ) -> List[dict]:
     """Ensure the weekly plan covers all 7 days with study + test blocks each.
 
     LLM JSON output is sometimes partial (a few days or one block type).
     Missing days and missing study/test blocks are backfilled from the
     deterministic default plan, then every block gets a stable generated id.
-    Blocks that overlap weekly-static (class) slots are dropped.
+    Blocks that overlap protected static (user-created) slots are dropped.
+    System static blocks can be modified by the LLM.
     """
-    occupied = _occupied_slots(statics)
+    # Separate protected (user-created) statics from system statics
+    protected_statics = protected_statics or []
+    occupied = _occupied_slots(protected_statics)
     kept = [
         dict(b) for b in blocks
         if not _overlaps_occupied(b.get("day", 0), b.get("startHour", 0), b.get("duration", 1), occupied)
     ]
-    default = _default_week_plan(books, daily_hours, student, occupied)
+    default = _default_week_plan(books, daily_hours, student, _occupied_slots([]))
     by_day: dict[int, List[dict]] = {}
     for b in kept:
         by_day.setdefault(int(b.get("day", 0)), []).append(dict(b))
@@ -886,7 +894,7 @@ def _complete_week_plan(
                 continue
             if db["type"] == "test" and has_test:
                 continue
-            if _overlaps_occupied(db["day"], db["startHour"], db["duration"], occupied):
+            if _overlaps_occupied(db["day"], db["startHour"], db["duration"], _occupied_slots([])):
                 continue
             if any(_hours_overlap(db["startHour"], db["duration"], b["startHour"], b["duration"]) for b in day_blocks):
                 continue
@@ -1025,7 +1033,12 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
         note = "برنامه استاندارد پیش‌فرض (خروجی مدل قابل تفسیر نبود). llm_used=false"
         llm_used = False
 
-    blocks = _complete_week_plan(blocks, books, daily, student, request.statics)
+    # Separate user statics (protected) from system statics
+    # User statics are the ones created by the user via static/repeating option
+    # System statics are the pre-defined weekly schedule blocks
+    # For now, we treat request.statics as user statics (protected)
+    # and system statics as empty (to be added later if needed)
+    blocks = _complete_week_plan(blocks, books, daily, student, statics=[], protected_statics=request.statics)
     if books:
         main = books[0]
         for b in blocks:

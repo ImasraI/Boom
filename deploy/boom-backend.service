@@ -1,0 +1,19 @@
+[Unit]
+Description=Boom Backend API
+After=network.target ollama.service
+Wants=ollama.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/boom/backend
+Environment=PATH=/home/ubuntu/boom/backend/.venv/bin
+ExecStart=/home/ubuntu/boom/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
