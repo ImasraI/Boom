@@ -20,6 +20,127 @@ router = APIRouter(prefix="/api/boom", tags=["boom-ai"])
 
 logger = get_logger(__name__)
 
+_GRADE_LABELS = {
+    "10": "پایه دهم",
+    "11": "پایه یازدهم",
+    "12": "پایه دوازدهم",
+    "33": "جامع (پایه‌های دهم تا دوازدهم)",
+}
+
+_SOURCE_TYPES = {
+    "plans": "برنامه آزمون",
+    "test-books": "کتاب تست",
+    "ministerial-books": "کتاب درسی وزارت",
+    "custom-sources": "منبع اختصاصی",
+}
+
+_SUBJECT_LABELS = {
+    "physics": "فیزیک",
+    "hendese": "هندسه",
+    "shimi": "شیمی",
+    "riazi": "ریاضی",
+    "zist": "زیست",
+    "arabi": "عربی",
+    "adabiat": "ادبیات",
+    "dini": "دینی",
+}
+
+
+_GRADE_KEYS = {
+    "10": "10", "پایه دهم": "10", "دهم": "10",
+    "11": "11", "پایه یازدهم": "11", "یازدهم": "11",
+    "12": "12", "پایه دوازدهم": "12", "دوازدهم": "12",
+    "33": "33", "جامع": "33",
+}
+
+
+def _book_catalog_rows() -> List[dict]:
+    """[(name, grade, subject_label, kind_label)] for every raw PDF."""
+    try:
+        from app.rag.ingest_raw import list_raw_pdfs
+    except Exception:
+        return []
+    rows = []
+    for pdf in list_raw_pdfs():
+        parts = []
+        parent = pdf.parent
+        while parent.name != "raw" and parent != parent.parent:
+            parts.append(parent.name)
+            parent = parent.parent
+        parts.reverse()
+        kind = parts[0] if parts else ""
+        grade = next((p for p in parts if p in _GRADE_LABELS), "")
+        subject = next(
+            (p for p in reversed(parts)
+             if p not in ("test-books", "ministerial-books", "custom-sources", "plans")
+             and p not in _GRADE_LABELS and p != kind),
+            "",
+        )
+        rows.append({
+            "name": pdf.name,
+            "kind": kind,
+            "grade": grade,
+            "subject": _SUBJECT_LABELS.get(subject, subject),
+        })
+    return rows
+
+
+def book_catalog() -> List[str]:
+    """Human-readable list of the reference sources on disk (no ingestion
+    required), e.g. ``فیزیک ۱ خیلی سبز.pdf (دهم، فیزیک، کتاب تست)``.
+
+    The model needs these names to ground test blocks in real books instead
+    of asking the student which book to use.
+    """
+    entries = []
+    seen = set()
+    for row in _book_catalog_rows():
+        if row["name"] in seen:
+            continue
+        seen.add(row["name"])
+        grade = row["grade"] and _GRADE_LABELS.get(row["grade"], "")
+        kind_label = _SOURCE_TYPES.get(row["kind"], "منبع")
+        tags = "، ".join(x for x in [grade, row["subject"] or None, kind_label] if x)
+        entries.append(f"{row['name']} ({tags})")
+    return entries
+
+
+def _pick_main_book(student: Optional[dict]) -> str:
+    """Best test-book filename from the catalog for this student's branch,
+    grade and weak subjects; "" if the catalog has no test books."""
+    student = student or {}
+    major = (student.get("major") or "").lower()
+    grade_txt = " ".join([
+        str(student.get("grade") or ""),
+        str(student.get("gradeName") or ""),
+    ])
+    weak = " ".join(student.get("weakSubjects") or student.get("weak_subjects") or [])
+    rows = [r for r in _book_catalog_rows() if r["kind"] == "test-books"]
+    if not rows:
+        return ""
+
+    def _score(row: dict) -> int:
+        s = 0
+        if any(g in grade_txt for g in ("دهم", "10")) and row["grade"] == "10":
+            s += 2
+        if any(g in grade_txt for g in ("یازدهم", "11")) and row["grade"] == "11":
+            s += 2
+        if any(g in grade_txt for g in ("دوازدهم", "12")) and row["grade"] == "12":
+            s += 2
+        if "جامع" in grade_txt and row["grade"] == "33":
+            s += 2
+        subj = row["subject"]
+        if subj and weak and any(w in subj or subj in w for w in weak.split()):
+            s += 3
+        if major in ("ریاضی", "ریاضی فیزیک") and row["name"].lower().find("ریاضی") >= 0:
+            s += 1
+        if "تجربی" in major and subj in ("زیست",):
+            s += 1
+        return s
+
+    best = max(rows, key=_score)
+    return best["name"] if _score(best) else rows[0]["name"]
+
 _J_MONTHS = [
     "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
     "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند",
@@ -929,6 +1050,8 @@ WEEKLY_PLAN_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنک�
 - startHour: ۶ تا ۲۳.۵ با گام ۰.۵؛ duration: ۰.۵ تا ۶ ساعت.
 - type فقط: study, test, class, break.
 - فقط یک JSON خروجی بده (بدون markdown، بدون کامنت).
+- عنوان بلوک‌های تست باید نام کتاب واقعی از «منابع موجود در سامانه» را داشته باشد (مثلاً «۲۰ تست فیزیک از فیزیک ۱ خیلی سبز») و اگر آزمون بازه صفحه مشخص کرده، همان بازه را در عنوان بیاور (مثلاً «تست فیزیک از فیزیک ۱ خیلی سبز صفحات ۱۵۴ تا ۲۳۴»).
+- نام کتاب را فقط از «منابع موجود در سامانه» انتخاب کن؛ برای کتابی که در لیست نیست عنوان ننویس و نپرس کدام کتاب — از همان لیست مناسب‌ترین را بر اساس رشته و پایه دانش‌آموز انتخاب کن.
 
 قالب خروجی:
 {{"blocks":[{{"day":0,"startHour":6,"duration":2,"title":"مطالعه فیزیک حرکتشناسی","type":"study","count":null}},{{"day":0,"startHour":9,"duration":1,"title":"۲۰ تست فیزیک از [نام کتاب]","type":"test","count":20}}],"note":"توضیح کوتاه درباره منطق برنامه و توزیع مباحث"}}
@@ -995,6 +1118,23 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
         for i, c in enumerate(chunks)
     )
 
+    # If retrieval found no book (vector stores hold only plan docs so far),
+    # still ground the plan in a sensible book from the on-disk catalog so
+    # test blocks name a real source instead of a generic placeholder.
+    if not books:
+        picked = _pick_main_book(student)
+        if picked:
+            books = [picked]
+
+    catalog = "، ".join(book_catalog())
+    reference_block = (
+        "منابع موجود در سامانه (کتاب‌های فایل‌شده):\n"
+        + (catalog if catalog else "هنوز کتابی بارگذاری نشده است.")
+        + "\n\n"
+        + ("کتاب‌های به‌دست‌آمده از جستجو: " + "، ".join(books) if books else "کتابی از جستجو به‌دست نیامد.")
+        + ("\n\n" + context if context else "")
+    )
+
     # Anchor the planning to a concrete week (default: current week) and find
     # the mock exam scheduled inside it, so the plan prepares the student for
     # exactly the subjects/chapters tested by that week's mock.
@@ -1021,7 +1161,7 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
         week_range=week_range,
         mock=(mock["summary"] if mock else "آزمون هفتگیای این هفته برنامهریزی نشده است."),
         occupied=_occupied_prompt(occupied),
-        context=book_line + ("\n\n" + context if context else ""),
+        context=book_line + ("\n\n" + reference_block if reference_block else ""),
     )
     answer = get_llm_client().generate([{"role": "user", "content": prompt}], max_tokens=1600)
 

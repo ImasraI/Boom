@@ -41,7 +41,9 @@ SYSTEM_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنکور �
 نکته مهم درباره day: در «برنامه مطالعه کاربر» هر روز با [day=N] و نام فارسی آمده است؛ حتماً از همان مقدار عددی day استفاده کن (۰=شنبه، ۱=یکشنبه، ۲=دوشنبه، ۳=سه‌شنبه، ۴=چهارشنبه، ۵=پنجشنبه، ۶=جمعه).
 type فقط یکی از: study, test, class, break. بلوک‌های تست باید با [منبع N] یا نام کتاب مشخص شوند.
 ۱۰. اگر کاربر مثلاً خواست «بعد از هر جلسه مطالعه ۳۰ دقیقه استراحت اضافه شود»، این تغییر برای همه روزهایی که آن الگو را دارند اعمال شود، نه فقط یک روز.
-۱۱. «بلوکهای ثابت هفتگی» هر هفته در همان روز و ساعت تکرار میشوند (مثلاً کلاس ۱۶ تا ۱۸). آنها را حذف یا جابهجا نکن و هیچ بلوک مطالعه/تست روی آن ساعتها نگذار."""
+۱۱. «بلوکهای ثابت هفتگی» هر هفته در همان روز و ساعت تکرار میشوند (مثلاً کلاس ۱۶ تا ۱۸). آنها را حذف یا جابهجا نکن و هیچ بلوک مطالعه/تست روی آن ساعتها نگذار.
+۱۲. اگر دانشآموز خواست برنامه را با کتاب/تست تنظیم کند ولی «متنهای مرجع» محتوایی نداشتند، از «منابع موجود در سامانه» مناسبترین کتاب را بر اساس رشته و پایه انتخاب کن و در پیشنهادت به همان نام اشاره کن (مثلاً «۲۰ تست فیزیک از فیزیک ۱ خیلی سبز»). از کاربر نپرس کدام کتاب؛ مگر اینکه واقعاً هیچ منبعی برای آن درس در سامانه نباشد.
+۱۳. بازه صفحه (مثل صفحات ۱۵۴ تا ۲۳۴) را فقط وقتی در مرجع یا برنامه آزمون وارد شده است بنویس؛ هرگز صفحه را حدس نزن."""
 
 
 # System instructions for the vision LLM (page-as-image pipeline)
@@ -173,6 +175,19 @@ def _build_messages(
     # Build context from retrieved chunks
     context_block = _build_context_block(context_chunks)
 
+    # The available reference sources (book catalog from the raw folder tree)
+    # ground plan/test suggestions in real books, even before per-page OCR
+    # content is indexed.
+    try:
+        from app.routers.boom_ai import book_catalog
+        catalog = "، ".join(book_catalog())
+    except Exception:
+        catalog = ""
+    catalog_block = (
+        f"منابع موجود در سامانه (کتاب‌های فایل‌شده):\n{catalog}\n\n"
+        if catalog else ""
+    )
+
     # Combine retrieved context and user's question
     student_block = "\n".join(f"- {k}: {v}" for k, v in (student or {}).items()) or "اطلاعات پروفایل موجود نیست."
     plan_block = _schedule_context(schedule)
@@ -182,7 +197,7 @@ def _build_messages(
         f"متن‌های مرجع:\n{context_block}\n\n"
         f"سوال کاربر: {question}"
         if context_chunks
-        else f"{plan_block}\n\nهیچ متن مرجعی یافت نشد.\n\nسوال کاربر: {question}"
+        else f"{plan_block}\n\n{catalog_block}سوال کاربر: {question}"
     )
 
     messages.append({

@@ -253,21 +253,46 @@ class GroqLLMClient(BaseLLMClient):
         payload = self._prepare_payload(messages, max_tokens=max_tokens)
         req_timeout = timeout if timeout is not None else self.timeout
 
-        try:
-            resp = self.client.post(url, json=payload, timeout=req_timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            if "choices" in data and len(data["choices"]) > 0:
-                return data["choices"][0]["message"]["content"]
-            else:
-                logger.warning("Unexpected response format from Groq: %s", data)
-                return ""
-        except httpx.TimeoutException:
-            logger.warning("Groq request timed out after %ss.", req_timeout)
-            return ""
-        except Exception as e:
-            logger.warning(f"Groq request failed: {e}")
-            return ""
+        # Groq occasionally returns an empty completion (HTTP 200, no usable
+        # content) or a rate-limit/5xx error.  Retry briefly so a single
+        # flaky call doesn't degrade weekly-planning to the default fallback.
+        last = ""
+        for attempt in range(4):
+            try:
+                resp = self.client.post(url, json=payload, timeout=req_timeout)
+                resp.raise_for_status()
+                data = resp.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    content = data["choices"][0]["message"]["content"]
+                    if content:
+                        return content
+                    last = ""
+                    logger.warning(
+                        "Groq returned an empty completion (attempt %d).", attempt + 1,
+                    )
+                else:
+                    last = ""
+                    logger.warning("Unexpected response format from Groq: %s", data)
+            except httpx.HTTPStatusError as e:
+                last = ""
+                logger.warning(
+                    "Groq request failed (attempt %d): %s", attempt + 1, e,
+                )
+            except httpx.TimeoutException:
+                last = ""
+                logger.warning(
+                    "Groq request timed out after %ss (attempt %d).",
+                    req_timeout, attempt + 1,
+                )
+            except Exception as e:
+                last = ""
+                logger.warning(
+                    "Groq request failed (attempt %d): %s", attempt + 1, e,
+                )
+            if attempt < 3:
+                import time
+                time.sleep(2 * (attempt + 1))
+        return last
 
     def generate_stream(
         self,
