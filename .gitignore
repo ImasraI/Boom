@@ -19,14 +19,26 @@ dist/
 Thumbs.db
 
 # Local data
+# Raw PDFs: too large + user-supplied — transfer to VM via scp/rsync (one-time).
+backend/data/raw/
+# Rendered page images (PNG): ~7 GB at full corpus size, impossible in git;
+# re-rendered on the server from raw PDFs by the background ingest thread,
+# or transferred alongside via scp/rsync. Do NOT commit.
+backend/data/1/
+backend/data/page_images/
+backend/data/uploads/
+# Runtime scratch (progress mocks etc.) — not part of the deployable artifact
+backend/data/mock_*
+backend/data/*_progress.json
+
+# SQLite — ignore app DBs but keep Chroma's store (vectors + text + images)
 *.sqlite3
 *.db
-.kilo/
+!backend/data/chroma_db/*.sqlite3
+!backend/data/chroma_db/*.db
+!backend/data/chroma_db/*.bin
+!backend/data/chroma_db/*.pickle
+
 # Runtime logs
 *.log
 backend/server_*.log
-
-# Generated app data (vector store, rendered page images, mock cache, raw uploads)
-data/
-backend/data/
-backend/data/**
