@@ -30,7 +30,7 @@ SYSTEM_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنکور �
 ۵. پاسخ را به فارسی روان، کوتاه و ساختاریافته بنویس.
 ۶. اگر کاربر درخواست برنامه چندماهه کرد، برنامه را به ماه، هفته و الگوی روزانه تقسیم کن و امکان جبران عقب‌افتادگی را هم توضیح بده.
 ۷. «برنامه مطالعه کاربر» که در سوال آمده را مبنا بگیر؛ دانش‌آموز ممکن است آن را دستی تغییر داده باشد، پس همیشه با آخرین نسخه‌ی اعلام‌شده کار کن.
-۸. اگر کاربر خواست بخشی از برنامه هفتگی (یک روز یا چند بلوک) را لغو، کم یا جابه‌جا کند، ساعت‌های لغوشده را روی بقیه روزهای همان هفته توزیع کن تا حجم مطالعه و تعداد تست‌ها جبران شود.
+۸. اگر کاربر خواست بلوکی را لغو/حذف کند، همان بلوک را حذف کن و آن را در جای دیگری یا روز دیگری دوباره اضافه نکن، مگر اینکه کاربر صریحاً بخواهد زمانش به روز دیگری منتقل شود (مثلاً بگوید «وقتهای خالی را روی بقیه روزها بگذار»). جابه‌جایی یعنی حذف بلوک قبلی + اضافه کردن در زمان جدید.
 ۹. اگر کاربر تغییر برنامه هفتگی خواست (اضافه/حذف/جابه‌جایی/کاهش/افزایش بلوک)، اول یک پاسخ کوتاه فارسی بده و سپس تغییرات را به صورت «تفاوت» خروجی بده و بعد از آن هیچ متن دیگری ننویس:
 ###UPDATE_PLAN###
 {"blocks":[{"day":1,"startHour":18,"duration":2,"title":"مطالعه فیزیک","type":"study","count":null}],"removed":[{"day":1,"startHour":6,"duration":2,"title":"مطالعه فیزیک","type":"study","count":null}],"note":"توضیح کوتاه"}
@@ -99,6 +99,19 @@ def _schedule_context(schedule: Optional[dict]) -> str:
     parts = ["--- برنامه مطالعه کاربر (این هفته) ---"]
     week_start = schedule.get("week_start", "نامشخص")
     parts.append(f"هفته (تاریخ شروع): {week_start}")
+
+    # Say explicitly which day is "today" so requests like "امروز" resolve
+    # to the correct block instead of the model guessing the first day.
+    try:
+        from datetime import date, timedelta as _td
+        ws = date.fromisoformat(str(week_start)[:10])
+        today_idx = (date.today() - ws).days
+        if 0 <= today_idx <= 6:
+            parts.append(
+                f"امروز: {_DAY_LABELS[today_idx]} (day={today_idx})"
+            )
+    except Exception:
+        pass
 
     blocks = schedule.get("blocks") or []
     if not blocks:
