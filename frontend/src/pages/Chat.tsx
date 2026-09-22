@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { apiUrl } from "../api";
+import { apiUrl, authHeaders } from "../api";
 import { NavFn, SignupData } from "../types";
 import { weeklyScheduleContext, loadWeekBlocks, saveWeekBlocks, getWeekISO, StoredBlock } from "../scheduleStore";
-import GroqChart from "../components/GroqChart";
 
 interface Msg { role: "user" | "ai"; text: string; }
 const NEW_CHAT_NAME = "گفتگوی جدید";
@@ -234,7 +233,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
 
     fetch(apiUrl(endpoint), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     })
       .then(r => r.json())

@@ -379,6 +379,69 @@ def _retrieve_image_hits(
         return []
 
 
+def _render_qbank_page_image(book: str, page: int) -> Optional[str]:
+    """Render one raw-PDF page to PNG (cached in storage); returns the key.
+
+    Question-bank chunks point at real book pages that were never ingested
+    through the app, so their page images don't exist in storage yet. Render
+    on demand from the raw PDF and cache under page_images/qbank/ so later
+    reads (and the vision model) get the real figure-bearing page.
+    """
+    from app.utils.storage import get_object, put_object
+
+    key = f"page_images/qbank/{book}/page_{page:04d}.png"
+    try:
+        get_object(key)  # already rendered
+        return key
+    except Exception:
+        pass
+
+    try:
+        from app.rag.ingest_raw import list_raw_pdfs
+
+        pdf = next((p for p in list_raw_pdfs() if p.stem == book), None)
+        if pdf is None:
+            return None
+        import pymupdf
+
+        with pymupdf.open(pdf) as doc:
+            if not (1 <= page <= doc.page_count):
+                return None
+            pix = doc[page - 1].get_pixmap(dpi=150)
+            put_object(key, pix.tobytes("png"))
+        return key
+    except Exception as exc:
+        logger.warning("Could not render page image for %s p%d: %s", book, page, exc)
+        return None
+
+
+def _retrieve_question_bank_chunks(
+    search_query: str,
+    user_id: int,
+    top_k: int = 5,
+) -> List[dict]:
+    """Retrieve structured question-bank chunks (vision transcriptions).
+
+    Each hit is one printed question / lesson-prose / figure chunk carrying
+    the question number, options and a text description of any figure - the
+    retrieval layer that actually "understands" shapes, symbols and question
+    numbering. Fails soft (returns []) when the bank is empty/unavailable.
+    """
+    try:
+        from app.rag.hybrid_search import get_question_hybrid_search
+
+        embedding = get_embedding_model().embed_query(search_query)
+        return get_question_hybrid_search().search(
+            query_text=search_query,
+            query_embedding=embedding,
+            user_id=user_id,
+            top_k=top_k,
+        )
+    except Exception as exc:
+        logger.warning("Question-bank retrieval unavailable: %s", exc)
+        return []
+
+
 def _resolve_ocr_page_images(
     text_chunks: List[dict],
     user_id: int,
@@ -400,19 +463,31 @@ def _resolve_ocr_page_images(
     hits: List[dict] = []
     seen = set()
     for c in text_chunks:
-        name = c.get("document_name", "")
-        m = marker.search(c.get("content", "") or "")
-        if not m:
-            continue
-        try:
-            page = int(m.group(1).translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")))
-        except ValueError:
-            continue
-        key = f"{user_id}/{name}/page_{page:04d}.png"
-        try:
-            get_object(key)
-        except Exception:
-            continue  # page image not rendered for this book -> text chunk only
+        # Question-bank chunks carry book/page metadata directly; their page
+        # images are rendered on demand from the raw PDF (see helper above).
+        if c.get("category") == "question_bank" and c.get("book") and c.get("page") is not None:
+            name = str(c["book"])
+            try:
+                page = int(c["page"])
+            except (TypeError, ValueError):
+                continue
+            key = _render_qbank_page_image(name, page)
+            if not key:
+                continue
+        else:
+            name = c.get("document_name", "")
+            m = marker.search(c.get("content", "") or "")
+            if not m:
+                continue
+            try:
+                page = int(m.group(1).translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")))
+            except ValueError:
+                continue
+            key = f"{user_id}/{name}/page_{page:04d}.png"
+            try:
+                get_object(key)
+            except Exception:
+                continue  # page image not rendered for this book -> text chunk only
         dedupe = (name, page)
         if dedupe in seen:
             continue
@@ -477,6 +552,16 @@ def answer_question(
         user_id=user_id,
         top_k=k,
     )
+
+    # Question bank: structured per-question chunks (text, options, figure
+    # descriptions) from the vision transcriptions. Ranked ahead of generic
+    # text chunks - they answer "which printed question is this?" precisely.
+    qa_hits = _retrieve_question_bank_chunks(search_query, user_id, top_k=max(4, k // 2))
+    if qa_hits:
+        qa_ids = {c.get("id") for c in qa_hits}
+        retrieved_chunks = qa_hits + [
+            c for c in retrieved_chunks if c.get("id") not in qa_ids
+        ]
 
     # Image retrieval: covers PDFs ingested in "page-as-image" mode
     image_hits = _retrieve_image_hits(search_query, user_id, settings.IMAGE_TOP_K)
@@ -613,6 +698,14 @@ def answer_question_stream(
         user_id=user_id,
         top_k=k,
     )
+
+    # Question bank merge (same as the non-streaming path)
+    qa_hits = _retrieve_question_bank_chunks(search_query, user_id, top_k=max(4, k // 2))
+    if qa_hits:
+        qa_ids = {c.get("id") for c in qa_hits}
+        retrieved_chunks = qa_hits + [
+            c for c in retrieved_chunks if c.get("id") not in qa_ids
+        ]
 
     # Image retrieval: covers PDFs ingested in "page-as-image" mode
     image_hits = _retrieve_image_hits(search_query, user_id, settings.IMAGE_TOP_K)

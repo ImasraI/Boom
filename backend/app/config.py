@@ -39,6 +39,59 @@ class Settings(BaseSettings):
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     GEMINI_MODEL_NAME: str = "gemini-3.6-flash"
 
+    # SMS signup verification (SMS.ir / Melipayamak panel).
+    # Create a verification template containing {CODE} in the panel, then put
+    # its numeric template id in SMS_VERIFY_TEMPLATE_ID.
+    SMS_API_KEY: str = ""
+    SMS_VERIFY_TEMPLATE_ID: str = ""
+    SECRET_KEY: str = ""  # JWT + code-hashing secret (set it in .env!)
+    SMS_BASE_URL: str = "https://api.sms.ir"
+    # Dev convenience: when True (and APP_ENV != production) the request-code
+    # endpoint returns the code in the response instead of sending an SMS.
+    SMS_DEBUG_ECHO: bool = False
+
+    # ====== Per-user daily AI quotas (0 or negative = unlimited) =========
+    # Counts successful AI requests per user per UTC day; adjust in .env.
+    AI_DAILY_CHAT: int = 50
+    AI_DAILY_STUDY_PLAN: int = 10
+    AI_DAILY_WEEKLY_PLAN: int = 20
+    AI_DAILY_TODAY_TESTS: int = 30
+    AI_DAILY_MOCK_GENERATE: int = 10
+
+    # Upload limits (per file): reject anything bigger without reading it all.
+    MAX_UPLOAD_MB: int = 20
+    # Optional local proxy (e.g. VPN client) used ONLY for Gemini requests,
+    # which are geo-blocked in some regions. Groq/Ollama stay direct.
+    # Example: http://127.0.0.1:10809 (v2rayN HTTP port)
+    GEMINI_PROXY: str = ""
+
+    # OpenRouter (geo-unblocked alternative to Gemini; free-tier vision models)
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_VISION_MODEL: str = "qwen/qwen2.5-vl-72b-instruct:free"
+
+    # Groq (fast LPU inference; free tier includes llama-4 vision models)
+    GROQ_API_KEY: str = ""
+    GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
+    GROQ_VISION_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
+
+    # ================= Question-bank transcription (vision RAG) ==========
+    # Structured per-page transcription of the scanned books (questions,
+    # options, figure descriptions, lesson prose) stored as JSON under
+    # data/ocr/<book>/pages/ and embedded into the question_bank collection.
+    TRANSCRIBE_PROVIDER: str = "auto"  # auto | gemini | groq | ollama
+    TRANSCRIBE_DPI: int = 150
+    TRANSCRIBE_SLEEP_SECONDS: float = 2.0
+    TRANSCRIBE_LOCAL_MODEL: str = "qwen2.5vl:7b"
+
+    # Separate Chroma collection for structured question chunks.
+    CHROMA_QA_COLLECTION: str = "question_bank"
+
+    # Cross-encoder reranking applied on top of hybrid retrieval.
+    RERANK_ENABLED: bool = True
+    RERANK_MODEL_NAME: str = "BAAI/bge-reranker-base"
+    RERANK_CANDIDATES: int = 20
+
     # ================= Bulk OCR corpus of scanned books =================
     # OCR gives the planner knowledge of what every book contains (chapters,
     # questions, page ranges).  The vision path *still* reads the real page

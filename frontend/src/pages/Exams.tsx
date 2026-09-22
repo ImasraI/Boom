@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { NavFn } from "../types";
-import { apiUrl } from "../api";
+import { apiUrl, authHeaders } from "../api";
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
@@ -37,7 +37,9 @@ export function useExamResults() {
     async function fetchResults() {
       setLoading(true);
       try {
-        const resp = await fetch(apiUrl("/api/boom/last-mock-results"));
+        const resp = await fetch(apiUrl("/api/insights/last-mock-results"), {
+          headers: authHeaders(),
+        });
         if (resp.ok) {
           const data = await resp.json();
           setExamResults(data || []);

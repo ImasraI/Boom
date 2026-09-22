@@ -163,7 +163,9 @@ def ocr_book(
 
     logger.info("Local OCR for %s (%d pending pages)...", pdf.name, len(pending))
     try:
-        full_text = pdf_to_text(pdf, use_ocr=True)  # native text + EasyOCR (local, free)
+        start_p = min(pending)
+        end_p = max(pending)
+        full_text = pdf_to_text(pdf, use_ocr=True, start_page=start_p, end_page=end_p)
         sections = _parse_sections(full_text)
         for p in pending:
             text = sections.get(p, "").strip()

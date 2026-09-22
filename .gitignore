@@ -27,6 +27,12 @@ backend/data/raw/
 backend/data/1/
 backend/data/page_images/
 backend/data/uploads/
+# OCR output (EasyOCR baseline .txt + vision page .json): laptop-side scan
+# artifact, grows with the corpus. Ship to the server via scp alongside
+# data/chroma_db when needed - never through git.
+backend/data/ocr/
+# Runtime scratch cache (generated-mock extraction etc.)
+backend/data/cache/
 # Runtime scratch (progress mocks etc.) — not part of the deployable artifact
 backend/data/mock_*
 backend/data/*_progress.json
@@ -42,3 +48,38 @@ backend/data/*_progress.json
 # Runtime logs
 *.log
 backend/server_*.log
+
+# Tooling caches / AI-agent scratch
+.pytest_cache/
+.ruff_cache/
+.kilo/
+debug_output.txt
+nohup.out
+
+# ---------------------------------------------------------------------------
+# Laptop-only: GPU OCR fleet + tooling. NOT needed on the server.
+# (If any of these were committed earlier, gitignore alone won't untrack
+#  them - use: git rm -r --cached <path>)
+# ---------------------------------------------------------------------------
+ocr-workers/
+ocr-kit/
+ocr-output/
+scanned-pending/
+*.bat
+
+# Laptop-only scripts (GPU EasyOCR fleet / bulk transcription drivers).
+# The server needs none of these - retrieval runs off the committed data.
+backend/scripts/bulk_easyocr.py
+backend/scripts/run_question_bank.py
+
+# AI-assistant workspace docs (for coding agents, not the app)
+frontend/AGENTS.md
+frontend/CLAUDE.md
+
+# ---------------------------------------------------------------------------
+# Secrets - API keys (Gemini/Groq/OpenRouter). NEVER commit these.
+# `.env` at any depth is ignored above; worker.env files are not.
+# ---------------------------------------------------------------------------
+worker.env
+ocr-kit/keys.txt
+

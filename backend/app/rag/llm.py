@@ -228,17 +228,33 @@ class GroqLLMClient(BaseLLMClient):
             },
         )
 
+    @property
+    def _is_reasoning_model(self) -> bool:
+        # gpt-oss emits hidden "analysis" tokens that consume the completion
+        # budget before the visible answer is written.
+        return self.model.startswith("openai/gpt-oss")
+
     def _prepare_payload(
         self,
         messages: List[LLMMessage],
         max_tokens: Optional[int] = None,
     ):
-        return {
+        budget = max_tokens or self.max_tokens
+        payload = {
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
-            "max_tokens": max_tokens or self.max_tokens,
         }
+        if self._is_reasoning_model:
+            # A small budget (e.g. the 150-token query rewrite) can be eaten
+            # entirely by reasoning -> empty content with finish_reason=length.
+            # reasoning_effort=low keeps analysis short and a generous floor
+            # guarantees room for the visible answer.
+            payload["reasoning_effort"] = "low"
+            payload["max_completion_tokens"] = max(budget, 1024)
+        else:
+            payload["max_tokens"] = budget
+        return payload
 
     def generate(
         self,
@@ -263,13 +279,23 @@ class GroqLLMClient(BaseLLMClient):
                 resp.raise_for_status()
                 data = resp.json()
                 if "choices" in data and len(data["choices"]) > 0:
-                    content = data["choices"][0]["message"]["content"]
+                    choice = data["choices"][0]
+                    content = choice["message"]["content"]
                     if content:
                         return content
+                    finish = choice.get("finish_reason")
                     last = ""
                     logger.warning(
-                        "Groq returned an empty completion (attempt %d).", attempt + 1,
+                        "Groq returned an empty completion (attempt %d, finish_reason=%s).",
+                        attempt + 1, finish,
                     )
+                    if finish == "length":
+                        # Hidden reasoning consumed the whole budget; retry with
+                        # a doubled completion budget.
+                        payload = self._prepare_payload(
+                            messages,
+                            max_tokens=(max_tokens or self.max_tokens) * (2 ** (attempt + 1)),
+                        )
                 else:
                     last = ""
                     logger.warning("Unexpected response format from Groq: %s", data)

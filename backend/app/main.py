@@ -6,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.routers import chat, documents
+from app.routers import insights
+from app.routers import mocks
+from app.routers import arena
 from app.routers.tasks import router as tasks_router
 from .auth.database import ensure_schema
 from .auth.router import router as auth_router
@@ -84,6 +87,9 @@ app.include_router(documents.router)
 app.include_router(auth_router)
 app.include_router(boom_ai_router)
 app.include_router(tasks_router)
+app.include_router(insights.router)
+app.include_router(mocks.router)
+app.include_router(arena.router)
 
 # Health check endpoint
 @app.get("/api/health", tags=["health"])

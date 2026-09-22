@@ -55,11 +55,15 @@ class OllamaEmbeddingModel(BaseEmbeddingModel):
         self,
         model_name: str = "nomic-embed-text",
         base_url: str = "http://localhost:11434",
-        timeout: float = 120.0,
+        timeout: float = 600.0,
     ):
         self.model = ollama_embedding_model_name(model_name)
         self.base_url = _ollama_native_base(base_url)
-        self.client = httpx.Client(timeout=timeout, follow_redirects=True)
+        # trust_env=False: never route localhost Ollama calls through a
+        # system/VPN proxy (a proxy in front of Ollama returns 503s).
+        self.client = httpx.Client(
+            timeout=timeout, follow_redirects=True, trust_env=False,
+        )
 
     def _parse_embedding(self, data: dict) -> List[float]:
         if "embeddings" in data and data["embeddings"]:
@@ -76,18 +80,23 @@ class OllamaEmbeddingModel(BaseEmbeddingModel):
             (f"{self.base_url}/api/embeddings", {"model": self.model, "prompt": text}),
         )
         last_error = None
-        for url, payload in attempts:
-            try:
-                resp = self.client.post(url, json=payload)
-                if resp.status_code >= 400:
-                    last_error = f"{resp.status_code} {resp.text[:300]}"
-                    continue
-                embedding = self._parse_embedding(resp.json())
-                if embedding:
-                    return embedding
-                last_error = f"empty vector from {url}"
-            except Exception as e:
-                last_error = str(e)
+        # Ollama briefly returns 503 while it (re)loads a model - retry.
+        for round_no in range(3):
+            for url, payload in attempts:
+                try:
+                    resp = self.client.post(url, json=payload)
+                    if resp.status_code >= 400:
+                        last_error = f"{resp.status_code} {resp.text[:300]}"
+                        if resp.status_code == 503:
+                            import time as _t
+                            _t.sleep(3 * (round_no + 1))
+                        continue
+                    embedding = self._parse_embedding(resp.json())
+                    if embedding:
+                        return embedding
+                    last_error = f"empty vector from {url}"
+                except Exception as e:
+                    last_error = str(e)
         logger.warning(
             "Ollama embedding failed for model=%s at %s: %s. "
             "Is Ollama running, and have you pulled the model? "
@@ -100,7 +109,33 @@ class OllamaEmbeddingModel(BaseEmbeddingModel):
         return []
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """Encode multiple texts using Ollama embeddings."""
+        """Encode texts in one batched request (Ollama /api/embed accepts
+        a list input and batches internally - much faster than one HTTP
+        call per chunk for the ~100k-chunk question bank)."""
+        if not texts:
+            return []
+        url = f"{self.base_url}/api/embed"
+        try:
+            # Long keep_alive: this Ollama install intermittently fails GPU
+            # discovery on model (re)load (watchdog timeout -> 503), so keep
+            # the model resident instead of cycling it every 5 idle minutes.
+            resp = self.client.post(
+                url,
+                json={"model": self.model, "input": texts, "keep_alive": "60m"},
+            )
+            if resp.status_code < 400:
+                data = resp.json()
+                vectors = (data.get("embeddings") or [])
+                if len(vectors) == len(texts) and all(vectors):
+                    return vectors
+                logger.warning(
+                    "Ollama batch embed returned %d/%d vectors; falling back to per-text.",
+                    len(vectors), len(texts),
+                )
+            else:
+                logger.warning("Ollama batch embed failed (%s); falling back to per-text.", resp.status_code)
+        except Exception as e:
+            logger.warning("Ollama batch embed error: %s; falling back to per-text.", e)
         return [self._encode_text(text) for text in texts]
 
     def embed_query(self, text: str) -> List[float]:

@@ -70,9 +70,24 @@ async def upload_documents(
                     )
                 )
 
+            # Path-traversal guard: only the bare filename is used, so a
+            # crafted name like "../../app/main.py" can never escape the
+            # user's own upload folder.
+            safe_name = Path(file.filename).name
+            if safe_name in ("", ".", ".."):
+                raise HTTPException(status_code=400, detail="Invalid file name")
+
+            # Size cap (MAX_UPLOAD_MB in .env): read nothing beyond the cap.
+            max_bytes = get_settings().MAX_UPLOAD_MB * 1024 * 1024
+            content = await file.read(max_bytes + 1)
+            if len(content) > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"فایل بزرگ‌تر از حد مجاز ({get_settings().MAX_UPLOAD_MB} مگابایت) است",
+                )
+
             # Save the uploaded file inside this user's own folder
-            destination = upload_dir / file.filename
-            content = await file.read()
+            destination = upload_dir / safe_name
             destination.write_bytes(content)
 
             try:

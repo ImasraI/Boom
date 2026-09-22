@@ -12,6 +12,7 @@ documents.
 from typing import Any, Dict, List
 
 from app.rag.lexical_search import LexicalIndex
+from app.rag.reranker import get_reranker, rerank_enabled
 from functools import lru_cache
 from app.rag.vector_store import get_vector_store
 from app.utils.logger import get_logger
@@ -116,9 +117,16 @@ class HybridSearch:
         documents.
         """
 
-        # Retrieve all chunks that belong to this user
+        # Retrieve all chunks that belong to this user, PLUS the shared
+        # corpus (content embedded under DEMO_USER_ID - books/OCR pages).
+        try:
+            from app.config import get_settings
+            owner = int(get_settings().DEMO_USER_ID)
+        except Exception:
+            owner = user_id
+        owners = [user_id] if user_id == owner else [user_id, owner]
         data = self.vector_store.collection.get(
-            where={"user_id": user_id},
+            where={"user_id": {"$in": owners}},
             include=[
                 "documents",
                 "metadatas",
@@ -242,15 +250,31 @@ class HybridSearch:
         # Combine results
         # -----------------------------
 
+        # Keep more candidates than top_k so the cross-encoder reranker
+        # (if enabled) can reorder a wider pool before we cut down.
+        settings_rerank = rerank_enabled()
+        fusion_k = top_k
+        if settings_rerank and get_reranker().available:
+            from app.config import get_settings
+            fusion_k = max(top_k, get_settings().RERANK_CANDIDATES)
+
         fused_results = (
             reciprocal_rank_fusion(
                 [
                     semantic_results,
                     lexical_results,
                 ],
-                top_k=top_k,
+                top_k=fusion_k,
             )
         )
+
+        # -----------------------------
+        # Cross-encoder rerank
+        # -----------------------------
+        if settings_rerank and fusion_k > top_k:
+            fused_results = get_reranker().rerank(
+                query_text, fused_results, top_k=top_k,
+            )
 
         return fused_results
 
@@ -267,3 +291,15 @@ def get_hybrid_search() -> HybridSearch:
     vector_store = get_vector_store()
 
     return HybridSearch(vector_store)
+
+
+@lru_cache
+def get_question_hybrid_search() -> HybridSearch:
+    """Hybrid search over the structured question-bank collection.
+
+    Backed by the per-page vision transcriptions (questions, options,
+    figure descriptions, lesson prose) embedded by app.rag.question_chunks.
+    """
+    from app.rag.vector_store import get_question_vector_store
+
+    return HybridSearch(get_question_vector_store())

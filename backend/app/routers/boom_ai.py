@@ -4,14 +4,16 @@ import threading
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, List, Optional, cast
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from app.rag.pipeline import answer_question
 from app.rag.embeddings import get_embedding_model
 from app.rag.hybrid_search import get_hybrid_search
 from app.rag.llm import get_llm_client, get_vision_llm_client
-from app.auth.database import Assessment
+from app.auth.database import Assessment, User
+from app.auth.deps import get_current_user
+from app.auth.limits import check_ai_quota, record_ai_use
 from app.config import get_settings
 from app.schemas import ChatMessage
 from app.utils.logger import get_logger
@@ -257,20 +259,48 @@ def get_book_catalog(subject: str) -> List[dict]:
         db.close()
 
 
-def get_recent_wrong_answers() -> List[dict]:
-    """Return recent wrong-answer logs for feedback-based planning."""
+def get_recent_wrong_answers(student_id: Optional[int] = None, days: int = 30) -> List[dict]:
+    """Recent wrong/blank answers (the planner's weakness memory).
+
+    Reads the ``wrong_answers`` table that every test surface (generated
+    mock, arena duel, manual practice) writes to via /api/insights.
+    Falls back to legacy Assessment rows when that table is empty so old
+    data still influences the plan.
+    """
     from app.auth.database import SessionLocal
-    from sqlalchemy import select
+    from sqlalchemy import select, func
     from datetime import datetime, timedelta
     db = SessionLocal()
     try:
-        since = datetime.utcnow() - timedelta(days=30)
-        statement = select(Assessment).where(Assessment.student_id == 1).where(
-            Assessment.date >= since
+        sid = student_id if student_id is not None else get_settings().DEMO_USER_ID
+        since = datetime.utcnow() - timedelta(days=days)
+        from app.auth.database import WrongAnswer
+        rows = db.execute(
+            select(WrongAnswer)
+            .where(WrongAnswer.student_id == sid)
+            .where(WrongAnswer.created_at >= since)
+            .order_by(WrongAnswer.created_at.desc())
+        ).scalars().all()
+        if rows:
+            return [
+                {
+                    "subject": r.subject,
+                    "topic": r.topic or "",
+                    "book": r.book or "",
+                    "page": r.page,
+                    "was_blank": bool(r.was_blank),
+                    "source": r.source or "",
+                    "date": r.created_at.date().isoformat() if r.created_at else "",
+                }
+                for r in rows
+            ]
+        # Legacy fallback: Assessment.results JSON blobs.
+        statement = select(Assessment).where(Assessment.student_id == sid).where(
+            Assessment.date >= since.date()
         )
-        rows = db.execute(statement).scalars().all()
+        legacy_rows = db.execute(statement).scalars().all()
         results = []
-        for r in rows:
+        for r in legacy_rows:
             try:
                 res = r.results if isinstance(r.results, dict) else {}
                 results.append({
@@ -284,6 +314,60 @@ def get_recent_wrong_answers() -> List[dict]:
         return results
     finally:
         db.close()
+
+
+def _weakness_summary(student: Optional[dict], student_id: Optional[int] = None) -> dict:
+    """Aggregate the weakness memory into per-subject counts + top topics.
+
+    Returns {"subjects": [subject, ...] ordered by weakness,
+             "topics": ["فیزیک: اثر داپلر", ...],
+             "line": short Persian summary for the LLM prompt}.
+    """
+    rows = get_recent_wrong_answers(student_id=student_id) or []
+    by_subject: dict = {}
+    for r in rows:
+        subj = (r.get("subject") or "").strip()
+        if not subj:
+            continue
+        agg = by_subject.setdefault(subj, {"count": 0, "topics": {}})
+        agg["count"] += 1
+        topic = (r.get("topic") or "").strip()
+        if topic:
+            agg["topics"][topic] = agg["topics"].get(topic, 0) + 1
+    subjects = [s for s, _ in sorted(by_subject.items(), key=lambda kv: -kv[1]["count"])]
+    topics = [
+        f"{s}: {t} ({n} غلط)"
+        for s, agg in by_subject.items()
+        for t, n in sorted(agg["topics"].items(), key=lambda kv: -kv[1])[:3]
+    ]
+    # Clean "درس: مبحث" pairs for the range resolver (no counts attached).
+    pairs = [f"{s}: {t}" for s, agg in by_subject.items()
+             for t, _ in sorted(agg["topics"].items(), key=lambda kv: -kv[1])[:3]]
+    # Profile-declared weak subjects always participate (merged, deduped).
+    declared = student.get("weakSubjects") or student.get("weak_subjects") or []
+    for s in declared:
+        if s and s not in subjects:
+            subjects.append(s)
+    total = sum(agg["count"] for agg in by_subject.values())
+    if total:
+        line = (
+            f"در ۳۰ روز گذشته {total} تست غلط/نزده ثبت شده؛ "
+            f"ضعیف‌ترین درس‌ها: {'، '.join(subjects[:3])}."
+        )
+    else:
+        line = "تست غلط ثبت‌شده‌ای در هفته‌های اخیر نیست؛ بر اساس پروفایل اولویت بده."
+    return {"subjects": subjects, "topics": topics[:8], "pairs": pairs[:8],
+            "line": line, "total": total}
+
+
+def _weakness_prompt(weakness: dict) -> str:
+    """Weakness block injected into the weekly-plan prompt."""
+    lines = [weakness.get("line", "")]
+    topics = weakness.get("topics") or []
+    if topics:
+        lines.append("مباحث پرغلط (اولویت تست و مرور):")
+        lines.extend(f"- {t}" for t in topics[:6])
+    return "\n".join(x for x in lines if x)
 
 
 def get_last_mock_results() -> Optional[dict]:
@@ -520,18 +604,16 @@ def _book_list(chunks: List[dict]) -> List[str]:
 
 
 @router.post("/chat")
-def boom_chat(request: BoomChatRequest):
-    """Prototype chat endpoint for Boom's current frontend.
-
-    It intentionally uses demo user 1 because Boom's current UI has a local
-    demo login rather than a connected authentication flow. Production should
-    replace this with get_current_user and the authenticated user's id.
-    """
-    settings = get_settings()
+def boom_chat(
+    request: BoomChatRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Authenticated Boom chat (RAG + LLM) for the signed-in user."""
+    check_ai_quota(current_user.id, "chat")
     history = [ChatMessage(**h) for h in (request.history or [])]
     result = answer_question(
         question=request.question,
-        user_id=settings.DEMO_USER_ID,
+        user_id=current_user.id,
         history=history,
         top_k=request.top_k,
         student=request.student,
@@ -550,16 +632,21 @@ def boom_chat(request: BoomChatRequest):
     result["answer"] = clean
     if plan_update:
         result["plan_update"] = plan_update
+    record_ai_use(current_user.id, "chat")
     return result
 
 
 @router.post("/study-plan")
-def generate_study_plan(request: StudyPlanRequest):
+def generate_study_plan(
+    request: StudyPlanRequest,
+    current_user: User = Depends(get_current_user),
+):
     """Generate a multi-month Konkoor plan using RAG + the LLM.
 
     RAG grounds the plan in the indexed curriculum/resources, while the LLM
     turns the retrieved material and student constraints into a usable plan.
     """
+    check_ai_quota(current_user.id, "study_plan")
     settings = get_settings()
     student = request.student or {}
     weak = request.weak_subjects or student.get("weakSubjects", []) or student.get("weak_subjects", [])
@@ -578,7 +665,7 @@ def generate_study_plan(request: StudyPlanRequest):
     chunks = search.search(
         query_text=search_text,
         query_embedding=q,
-        user_id=settings.DEMO_USER_ID,
+        user_id=current_user.id,
         top_k=8,
     )
     context = "\n\n".join(
@@ -606,6 +693,7 @@ def generate_study_plan(request: StudyPlanRequest):
 4. قوانین جبران عقب‌افتادگی
 """
     answer = get_llm_client().generate([{"role": "user", "content": prompt}], max_tokens=1800)
+    record_ai_use(current_user.id, "study_plan")
     if not answer:
         return {"plan": "مدل زبانی پاسخ نداد. تنظیماتprovider را بررسی کن.", "sources": chunks, "error": "llm_unavailable"}
     return {"plan": answer, "sources": chunks}
@@ -649,7 +737,7 @@ def _fa_digits(value) -> str:
     return "".join(fa[int(c)] if c.isdigit() else c for c in str(value))
 
 
-def _week_mock_note(raw_summary: str, week_start: date, week_end: date) -> str:
+def _week_mock_note(raw_summary: str, week_start: date, week_end: date, label: str = "این هفته") -> str:
     """Deterministically report which mock exam dates fall inside this week.
 
     Mock dates in the plan are written as `NUM month` with clean Arabic
@@ -683,13 +771,13 @@ def _week_mock_note(raw_summary: str, week_start: date, week_end: date) -> str:
             in_week.append(f"{d} {mon}")
     if in_week:
         return (
-            f"آزمون ماز در این هفته (شنبه {_jalali_date_str(week_start)} تا "
+            f"آزمون ماز {label} (شنبه {_jalali_date_str(week_start)} تا "
             f"جمعه {_jalali_date_str(week_end)}): {_fa_digits('، '.join(in_week))}. "
             f"کل هفته را طوری برنامه‌ریزی کن که دانش‌آموز برای مباحث همان آزمون آماده شود "
             f"و دقیقا در روز آزمون یک بلوک test با عنوان «آزمون آزمایشی ماز» قرار بده."
         )
     return (
-        f"آزمون ماز در این هفته (شنبه {_jalali_date_str(week_start)} تا "
+        f"آزمون ماز {label} (شنبه {_jalali_date_str(week_start)} تا "
         f"جمعه {_jalali_date_str(week_end)}): برنامه‌ریزی نشده است."
     )
 
@@ -727,13 +815,18 @@ def _clean_mock_page(text: str) -> str:
     return re.sub(r"\s+", " ", out).strip()
 
 
-def _extract_week_mock(user_id: int, week_start: date) -> Optional[dict]:
+def _extract_week_mock(user_id: int, week_start: date, weeks: int = 1) -> Optional[dict]:
     """Find the plan/mock document and pull this week's mock context.
 
     Plan documents are normally text PDFs (e.g. the summer Maz schedule);
     their text is read directly through PyMuPDF — fast and faithful.  Only
     documents with no usable text layer fall back to a vision read of the
     most relevant indexed pages (cached by document + pages).
+
+    ``weeks`` widens the horizon: the plan must sync the student with the
+    next ``weeks`` of mock exams, so the note covers every mock dated inside
+    [week_start, week_start + weeks*7 days) and, for weeks > 1, tells the
+    planner to split each exam across a study week and a test week.
     """
     try:
         from app.config import get_settings
@@ -780,8 +873,20 @@ def _extract_week_mock(user_id: int, week_start: date) -> Optional[dict]:
             if picked:
                 doc_meta["pages"] = [p for p, _ in picked]
                 raw = "\n".join(t for _, t in picked)[:5200]
-                week_end = week_start + timedelta(days=6)
-                note = _week_mock_note(raw, week_start, week_end)
+                week_notes = []
+                for wi in range(max(1, weeks)):
+                    ws = week_start + timedelta(days=7 * wi)
+                    we = ws + timedelta(days=6)
+                    label = "این هفته" if max(1, weeks) == 1 else (
+                        f"هفته {'اول' if wi == 0 else 'دوم' if wi == 1 else wi + 1} (از {ws.isoformat()})"
+                    )
+                    week_notes.append(_week_mock_note(raw, ws, we, label=label))
+                if max(1, weeks) > 1 and any("برنامهریزی نشده" not in n for n in week_notes):
+                    week_notes.append(
+                        "برنامه دو هفتهای بساز: هفته اول مطالعه و یادگیری مباحث آزمون، "
+                        "هفته دوم تست متمرکز و شبیهسازی آزمون روی همان مباحث."
+                    )
+                note = "\n".join(week_notes)
                 norm = _normalize_mock_schedule(doc_meta["document"], raw)
                 doc_meta["summary"] = f"{note}\n\n{norm}".strip()
                 break  # first readable plan document is enough
@@ -924,17 +1029,95 @@ def _mock_cache_write(key: str, summary: str) -> None:
         logger.warning("Mock extraction cache write failed: %s", exc)
 
 
+def _resolve_topic_ranges(
+    user_id: int,
+    subject: str,
+    topics: List[str],
+    wanted: int = 6,
+) -> List[dict]:
+    """Turn (subject, topic) pairs into concrete book/page/question ranges.
+
+    Reuses the OCR'd per-page text store: for each topic we hybrid-search the
+    real book pages and extract the chained question numbers + page span the
+    same way the today-tests recommender does. Returns at most ``wanted``
+    items like {subject, topic, book, page_from, page_to, q_from, q_to}.
+    """
+    out: List[dict] = []
+    seen_books = set()
+    for topic in topics[:wanted]:
+        try:
+            chunks = _retrieve_topic_chunks(subject, topic, user_id, k=6)
+        except Exception as exc:
+            logger.warning("Topic range retrieval failed for %s/%s: %s", subject, topic, exc)
+            continue
+        best = None
+        page_nums: List[int] = []
+        chains: List[tuple] = []
+        for c in chunks:
+            p = _chunk_page(c)
+            if p:
+                page_nums.append(p)
+            chain = _question_chain(c.get("content", ""))
+            if chain:
+                chains.append(chain)
+        if not page_nums and not chains:
+            continue
+        item = {
+            "subject": subject,
+            "topic": topic,
+            "book": (chunks[0].get("document_name") if chunks else "") or "",
+            "page_from": min(page_nums) if page_nums else None,
+            "page_to": max(page_nums) if page_nums else None,
+            "q_from": None,
+            "q_to": None,
+        }
+        if chains:
+            qf, qt = max(chains, key=lambda ch: ch[1] - ch[0])
+            item["q_from"], item["q_to"] = qf, qt
+        out.append(item)
+        if item["book"]:
+            seen_books.add(item["book"])
+        if len(out) >= wanted:
+            break
+    return out
+
+
+def _range_title(count: int, item: dict) -> str:
+    """Concise test-block title carrying the concrete range, e.g.
+    «۲۰ تست اثر داپلر از فیزیک ۱ خیلی سبز، صفحه ۱۵۴ تا ۱۶۲، تست‌های ۴۱ تا ۵۶».
+    """
+    parts = [f"{_fa_digits(count)} تست {item.get('topic') or item.get('subject') or ''}".strip()]
+    if item.get("book"):
+        parts.append(f"از {item['book']}")
+    details = []
+    if item.get("page_from") and item.get("page_to"):
+        details.append(f"صفحه {_fa_digits(item['page_from'])} تا {_fa_digits(item['page_to'])}")
+    if item.get("q_from") and item.get("q_to"):
+        details.append(f"تست‌های {_fa_digits(item['q_from'])} تا {_fa_digits(item['q_to'])}")
+    if details:
+        parts.append("، ".join(details))
+    return "، ".join(p for p in parts if p)
+
+
 def _default_week_plan(
     books: List[str],
     daily_hours: float,
     student: Optional[dict] = None,
     occupied: Optional[List[dict]] = None,
+    weak_topics: Optional[List[str]] = None,
+    week_offset: int = 0,
 ) -> List[dict]:
     """Deterministic standard week used when the LLM output is not parseable.
 
     Each day gets a reading/learning block, a book-grounded test block and a
     short review block, sized so totals never exceed the daily study hours.
     Occupied (static/class) slots are skipped.
+
+    ``weak_topics`` are "درس: مبحث" pairs from the weakness memory; test
+    blocks resolve each to a real page/question range in the OCR'd books so
+    the block title says exactly what to do (e.g. «۲۰ تست ... تست‌های ۴۱ تا
+    ۵۶، صفحه ۱۵۴ تا ۱۶۲»). ``week_offset`` alternates the first/second week
+    of the two-week mock cycle (week 2 = more tests, shorter study).
     """
     occupied = occupied or []
     main_book = books[0] if books else "کتاب منبع کنکور"
@@ -942,10 +1125,46 @@ def _default_week_plan(
     weak_line = f" (اولویت: {'، '.join(weak)})" if weak else ""
     study_h = max(0.5, float(daily_hours) if daily_hours else 4.0)
 
-    read_dur = round(min(study_h * 0.5, 3.0) * 2) / 2
-    test_dur = round(min(study_h * 0.25, 1.5) * 2) / 2
+    read_share = 0.4 if week_offset % 2 else 0.5
+    read_dur = round(min(study_h * read_share, 3.0) * 2) / 2
+    test_dur = round(min(study_h * (0.3 if week_offset % 2 else 0.25), 2.0) * 2) / 2
     review_dur = max(0.5, round((study_h - read_dur - test_dur) * 2) / 2)
-    test_count = max(10, int(study_h * 4))
+    test_count = max(10, int(study_h * (5 if week_offset % 2 else 4)))
+
+    # Resolve real ranges for the weakest topics ("درس: مبحث").
+    ranges: List[dict] = []
+    try:
+        settings = get_settings()
+        pairs = list(weak_topics or [])[:6]
+        for pair in pairs:
+            if ":" in pair:
+                subj, topic = pair.split(":", 1)
+            else:
+                subj, topic = (weak[0] if weak else ""), pair
+            subj = (subj or "").strip()
+            topic = (topic or "").strip()
+            if not subj:
+                continue
+            ranges.append({
+                "subject": subj,
+                "topic": topic or subj,
+                "book": "", "page_from": None, "page_to": None,
+                "q_from": None, "q_to": None,
+            })
+        if ranges:
+            resolved = {}
+            for r in ranges:
+                key = (r["subject"], r["topic"])
+                if key not in resolved:
+                    resolved[key] = _resolve_topic_ranges(
+                        current_user.id, r["subject"], [r["topic"]], wanted=1
+                    )
+            for r in ranges:
+                got = resolved.get((r["subject"], r["topic"])) or []
+                if got:
+                    r.update(got[0])
+    except Exception as exc:
+        logger.warning("Weak-topic range resolution failed: %s", exc)
 
     blocks = []
     idx = 0
@@ -959,10 +1178,15 @@ def _default_week_plan(
             idx += 1
         start = _find_free_start(day, test_dur, occupied, 9.0)
         if start is not None:
+            item = ranges[day % len(ranges)] if ranges else None
+            if item and (item.get("page_from") or item.get("q_from") or item.get("book")):
+                title = _range_title(test_count, item)
+            else:
+                title = f"{test_count} تست از {main_book}"
             blocks.append(_normalize_block({
                 "day": day, "startHour": start, "duration": test_dur, "count": test_count,
                 "type": "test",
-                "title": f"{test_count} تست از {main_book}",
+                "title": title,
             }, idx))
             idx += 1
         if review_dur >= 0.5:
@@ -1417,12 +1641,17 @@ class TodayTestsRequest(BaseModel):
 
 
 @router.post("/today-tests")
-def today_tests_endpoint(request: TodayTestsRequest):
+def today_tests_endpoint(
+    request: TodayTestsRequest,
+    current_user: User = Depends(get_current_user),
+):
+    check_ai_quota(current_user.id, "today_tests")
     rec = recommend_today_tests(
-        get_settings().DEMO_USER_ID,
+        current_user.id,
         request.student,
         request.schedule,
     )
+    record_ai_use(current_user.id, "today_tests")
     return {"answer": rec["answer"], "tests": rec["tests"], "sources": rec["sources"]}
 
 
@@ -1493,6 +1722,7 @@ WEEKLY_PLAN_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنک�
 - startHour: ۶ تا ۲۳.۵ با گام ۰.۵؛ duration: ۰.۵ تا ۶ ساعت.
 - type فقط: study, test, class, break.
 - فقط یک JSON خروجی بده (بدون markdown، بدون کامنت).
+- «ضعف‌های ثبت‌شده» را در اولویت تست‌زنی بگذار؛ برای هر مبحث پرغلط حداقل یک بلوک test اختصاصی بگذار.
 - عنوان بلوک‌های تست باید نام کتاب واقعی از «منابع موجود در سامانه» را داشته باشد (مثلاً «۲۰ تست فیزیک از فیزیک ۱ خیلی سبز»).
 - وقتی «متن‌های مرجع» شامل محتوای واقعی کتاب (فصل، مبحث، شماره سوال، بازه صفحه) است، از همان محتوا استفاده کن و در عنوان بلوک تست بازه صفحه واقعی را بیاور (مثلاً «۲۰ تست حرکت‌شناسی از فیزیک ۱ خیلی سبز، صفحه ۱۵۴ تا ۱۶۲») و موضوع تست را از همان مبحث‌های آزمون انتخاب کن.
 - نام کتاب را فقط از «منابع موجود در سامانه» انتخاب کن؛ برای کتابی که در لیست نیست عنوان ننویس و نپرس کدام کتاب — از همان لیست مناسب‌ترین را بر اساس رشته و پایه دانش‌آموز انتخاب کن.
@@ -1515,16 +1745,23 @@ WEEKLY_PLAN_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنک�
 ساعتهای اشغالشده (بلاک ثابت هر هفته):
 {occupied}
 
+ضعفهای ثبتشده (تستهای غلط و نزده اخیر دانشآموز):
+{weakness}
+
 متنهای مرجع (برای انتخاب کتاب تست):
 {context}
 """
 
 
 @router.post("/weekly-plan")
-def generate_weekly_plan(request: WeeklyPlanRequest):
+def generate_weekly_plan(
+    request: WeeklyPlanRequest,
+    current_user: User = Depends(get_current_user),
+):
     """Generate a standard default weekly plan (study + test blocks) grounded
     in the retrieved Konkoor books, so empty weeks can be auto-filled by the
     schedule page."""
+    check_ai_quota(current_user.id, "weekly_plan")
     settings = get_settings()
     student = request.student or {}
     daily = request.daily_hours
@@ -1542,7 +1779,7 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
     chunks = search.search(
         query_text=search_text,
         query_embedding=q,
-        user_id=settings.DEMO_USER_ID,
+        user_id=current_user.id,
         top_k=6,
     )
     books = _book_list(chunks)
@@ -1563,7 +1800,7 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
     # name the retrieved books from the image store to ground test blocks.
     try:
         from app.rag.pipeline import _retrieve_image_hits
-        img_hits = _retrieve_image_hits(search_text, settings.DEMO_USER_ID, 4)
+        img_hits = _retrieve_image_hits(search_text, current_user.id, 4)
         books = list(dict.fromkeys(books + _book_list(img_hits)))
     except Exception:
         img_hits = []
@@ -1606,8 +1843,14 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
         f"شنبه {_jalali_date_str(week_start)} تا جمعه {_jalali_date_str(week_end)}"
         f" (تاریخ میلادی: {week_start.isoformat()} تا {week_end.isoformat()})"
     )
-    mock = _extract_week_mock(settings.DEMO_USER_ID, week_start)
+    mock = _extract_week_mock(current_user.id, week_start, weeks=2)
     occupied = _occupied_slots(request.statics)
+
+    # The planner's memory: recent wrong/blank answers decide what gets
+    # extra test blocks and which topics the fallback plan resolves into
+    # concrete page/question ranges.
+    weakness = _weakness_summary(student, student_id=current_user.id)
+    weak_topics = weakness.get("topics") or []
 
     prompt = WEEKLY_PLAN_PROMPT.format(
         daily_hours=daily,
@@ -1617,9 +1860,11 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
         week_range=week_range,
         mock=(mock["summary"] if mock else "آزمون هفتگیای این هفته برنامهریزی نشده است."),
         occupied=_occupied_prompt(occupied),
+        weakness=_weakness_prompt(weakness) or "تست غلط ثبت‌شده‌ای نیست.",
         context=book_line + ("\n\n" + reference_block if reference_block else ""),
     )
     answer = get_llm_client().generate([{"role": "user", "content": prompt}], max_tokens=1600)
+    record_ai_use(current_user.id, "weekly_plan")
 
     data = _parse_json_from_text(answer)
     blocks = _plan_blocks(data)
@@ -1627,7 +1872,9 @@ def generate_weekly_plan(request: WeeklyPlanRequest):
         note = str((data or {}).get("note") or "")
         llm_used = True
     else:
-        blocks = _default_week_plan(books, daily, student)
+        blocks = _default_week_plan(
+            books, daily, student, weak_topics=weakness.get("pairs") or [],
+        )
         note = "برنامه استاندارد پیش‌فرض (خروجی مدل قابل تفسیر نبود). llm_used=false"
         llm_used = False
 

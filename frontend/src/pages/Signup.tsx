@@ -9,7 +9,10 @@ export default function Signup({ nav, onComplete }: Props) {
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [debugCode, setDebugCode] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [major, setMajor] = useState("");
   const [grade, setGrade] = useState("");
   const [examYear, setExamYear] = useState("");
@@ -20,32 +23,64 @@ export default function Signup({ nav, onComplete }: Props) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const TOTAL = 9;
+  const TOTAL = 10;
   const progress = Math.max(15, ((step + 1) / TOTAL) * 100);
 
   async function advance() {
-    if (step < TOTAL - 1) { setStep(s => s + 1); return; }
     if (submitting) return;
     setError("");
-    setSubmitting(true);
-    try {
-      const res = await fetch(apiUrl("/api/auth/register"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: phone, password, phone }),
-      });
-      if (!res.ok) {
-        setError(await readApiError(res, "خطا در ثبت‌نام"));
-        return;
+
+    // Phone step: send the SMS verification code, then continue.
+    if (step === 1) {
+      setSubmitting(true);
+      try {
+        const res = await fetch(apiUrl("/api/auth/request-code"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone }),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res, "خطا در ارسال کد"));
+          return;
+        }
+        const data = await res.json();
+        setDebugCode(data.debug_code || "");
+        setStep(2);
+      } catch {
+        setError("خطا در ارتباط با سرور");
+      } finally {
+        setSubmitting(false);
       }
-      const data = await res.json();
-      localStorage.setItem("boom-token", data.access_token);
-      onComplete({ name, phone, major, grade, examYear, targetRank, studyHours, testExams });
-    } catch {
-      setError("خطا در ارتباط با سرور");
-    } finally {
-      setSubmitting(false);
+      return;
     }
+
+    // Password step: verify the code + create the account, then continue.
+    if (step === 3) {
+      setSubmitting(true);
+      try {
+        const res = await fetch(apiUrl("/api/auth/register/complete"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, code, password }),
+        });
+        if (!res.ok) {
+          setError(await readApiError(res, "خطا در تایید کد"));
+          return;
+        }
+        const data = await res.json();
+        localStorage.setItem("boom-token", data.access_token);
+        setStep(4);
+      } catch {
+        setError("خطا در ارتباط با سرور");
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    if (step < TOTAL - 1) { setStep(s => s + 1); return; }
+    // Profile done: everything is already registered + logged in.
+    onComplete({ name, phone, major, grade, examYear, targetRank, studyHours, testExams });
   }
 
   function toggleExam(e: string) {
@@ -64,7 +99,8 @@ export default function Signup({ nav, onComplete }: Props) {
   const canContinue = [
     name.trim().length > 0,
     phone.length >= 10,
-    password.length >= 4,
+    code.replace(/\D/g, "").length === 6,
+    password.length >= 4 && password === confirmPassword,
     major.length > 0,
     grade.length > 0,
     examYear.length > 0,
@@ -99,13 +135,49 @@ export default function Signup({ nav, onComplete }: Props) {
       ),
     },
     {
+      q: "کد تایید پیامک‌شده چیه؟",
+      sub: `کد ۶ رقمی را که به ${phone} پیامک کردیم وارد کنید.`,
+      content: (
+        <div>
+          <input autoFocus type="tel" value={code} dir="ltr"
+            onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            onKeyDown={e => e.key === "Enter" && canContinue && advance()}
+            placeholder="- - - - - -"
+            className="w-full bg-[var(--card)] border-2 border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-2xl px-5 py-4 text-2xl font-bold text-[var(--text)] placeholder:text-[var(--placeholder)] tracking-[0.5em] text-center transition-colors" />
+          {debugCode && (
+            <p className="text-[12px] text-[var(--muted-2)] mt-2 text-center" dir="ltr">
+              debug mode: code = {debugCode}
+            </p>
+          )}
+          <button onClick={advance} disabled={submitting}
+            className="mt-3 text-[12px] font-bold text-[var(--accent)] hover:underline disabled:opacity-40">
+            کد دریافت نکردید؟ ارسال دوباره
+          </button>
+        </div>
+      ),
+    },
+    {
       q: "رمز عبورت چیه؟",
       sub: "حداقل ۴ کاراکتر. برای ورود دوباره ازش استفاده می‌کنی.",
       content: (
-        <input autoFocus type="password" value={password} onChange={e => setPassword(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && canContinue && advance()}
-          placeholder="••••••••"
-          className="w-full bg-[var(--card)] border-2 border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-2xl px-5 py-4 text-lg font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] transition-colors" />
+        <div className="flex flex-col gap-3">
+          <input autoFocus type="password" value={password} onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && canContinue && advance()}
+            placeholder="••••••••"
+            className="w-full bg-[var(--card)] border-2 border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-2xl px-5 py-4 text-lg font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] transition-colors" />
+          <input type="password" value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && canContinue && advance()}
+            placeholder="تکرار رمز عبور"
+            className={`w-full bg-[var(--card)] border-2 outline-none rounded-2xl px-5 py-4 text-lg font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] transition-colors ${
+              confirmPassword && password !== confirmPassword
+                ? "border-red-400"
+                : "border-[var(--border-strong)] focus:border-[var(--accent)]"
+            }`} />
+          {confirmPassword && password !== confirmPassword && (
+            <p className="text-red-500 text-[12px] text-right">رمزها یکسان نیستند</p>
+          )}
+        </div>
       ),
     },
     {
@@ -248,13 +320,15 @@ export default function Signup({ nav, onComplete }: Props) {
         {steps[step].content}
         {error && <p className="text-red-500 text-[13px] mt-3 text-center">{error}</p>}
       </div>
-      {(step === 0 || step === 1 || step === 2 || step === 8) && (
+      {(step === 0 || step === 1 || step === 2 || step === 3 || step === TOTAL - 1) && (
         <div className="px-6 pb-10 pt-3 bg-[var(--surface)]">
           <button disabled={!canContinue || submitting} onClick={advance}
             className={`w-full py-4 rounded-2xl font-bold text-[15px] transition-all active:scale-95 ${
               canContinue && !submitting ? "bg-[var(--accent)] text-[var(--surface)] hover:bg-[#A85C38] shadow-sm" : "bg-[var(--border-strong)] text-[#B0A898] cursor-not-allowed"
             }`}>
-            {step === TOTAL - 1 ? (submitting ? "در حال ثبت‌نام..." : "ثبت‌نام و ورود ←") : "ادامه"}
+            {step === 1 ? (submitting ? "در حال ارسال کد..." : "ادامه")
+              : step === 3 ? (submitting ? "در حال تایید..." : "تایید و ساخت حساب ←")
+              : step === TOTAL - 1 ? "ثبت‌نام و ورود ←" : "ادامه"}
           </button>
         </div>
       )}

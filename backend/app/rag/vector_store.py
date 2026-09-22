@@ -48,6 +48,50 @@ class VectorStore:
             metadata={"hnsw:space": "cosine"}
         )
 
+    def add_chunks_qa(
+        self,
+        document_name: str,
+        chunks: List[str],
+        embeddings: List[List[float]],
+        user_id: int,
+        extra: Optional[List[Dict[str, Any]]] = None,
+        category: str = "question_bank",
+    ) -> int:
+        """Add chunks with per-chunk extra metadata (question bank).
+
+        ``extra[i]`` is merged into chunk i's metadata (book, page,
+        question_number, has_figure, ...).
+        """
+        ids = [
+            f"{user_id}::{document_name}::{i}::{uuid.uuid4().hex[:8]}"
+            for i in range(len(chunks))
+        ]
+        metadatas = []
+        for i in range(len(chunks)):
+            meta = {
+                "document_name": document_name,
+                "chunk_index": i,
+                "user_id": user_id,
+                "category": category,
+            }
+            if extra and i < len(extra) and extra[i]:
+                for k, v in extra[i].items():
+                    # Chroma accepts only str/int/float/bool metadata values
+                    if v is None:
+                        continue
+                    if isinstance(v, (str, int, float, bool)):
+                        meta[k] = v
+                    else:
+                        meta[k] = str(v)
+            metadatas.append(meta)
+        self.collection.add(
+            ids=ids,
+            embeddings=cast(Embeddings, embeddings),
+            documents=chunks,
+            metadatas=cast(List[Metadata], metadatas),
+        )
+        return len(chunks)
+
     def add_chunks(
         self,
         document_name: str,
@@ -106,9 +150,19 @@ class VectorStore:
             )
             return []
 
-        where: Any = {"user_id": user_id}
+        # Shared corpus: books/OCR content embedded under DEMO_USER_ID must be
+        # visible to every account; private docs (uploads, plans) stay scoped.
+        try:
+            from app.config import get_settings
+            owner = int(get_settings().DEMO_USER_ID)
+        except Exception:
+            owner = user_id
+        owners = [user_id] if user_id == owner else [user_id, owner]
+        owner_in = {"user_id": {"$in": owners}}
         if category:
-            where = {"$and": [{"user_id": user_id}, {"category": category}]}
+            where: Any = {"$and": [owner_in, {"category": category}]}
+        else:
+            where = owner_in
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,
@@ -136,16 +190,21 @@ class VectorStore:
             # Convert cosine distance into a similarity score
             score = 1 - distance
 
-            output.append(
-                {
-                    "id": ids[0][i],
-                    "content": documents[0][i],
-                    "document_name": metadatas[0][i]["document_name"],
-                    "chunk_index": metadatas[0][i]["chunk_index"],
-                    "category": str(metadatas[0][i].get("category") or ""),
-                    "score": round(float(score), 4),
-                }
-            )
+            meta = metadatas[0][i] or {}
+            item = {
+                "id": ids[0][i],
+                "content": documents[0][i],
+                "document_name": meta["document_name"],
+                "chunk_index": meta["chunk_index"],
+                "category": str(meta.get("category") or ""),
+                "score": round(float(score), 4),
+            }
+            # pass question-bank metadata through to callers
+            for k in ("book", "page", "question_number", "has_figure",
+                      "page_kind", "lesson_title", "kind", "label"):
+                if k in meta:
+                    item[k] = meta[k]
+            output.append(item)
 
         return output
 
@@ -193,6 +252,21 @@ def get_vector_store() -> VectorStore:
     return VectorStore(
         persist_dir=settings.CHROMA_DIR,
         collection_name=settings.CHROMA_COLLECTION
+    )
+
+
+@lru_cache
+def get_question_vector_store() -> VectorStore:
+    """Separate Chroma collection for structured question-bank chunks.
+
+    Fed by app.rag.question_chunks from the per-page vision transcriptions;
+    kept apart from the plain text store so the two retrieval pipelines
+    never mix.
+    """
+    settings = get_settings()
+    return VectorStore(
+        persist_dir=settings.CHROMA_DIR,
+        collection_name=settings.CHROMA_QA_COLLECTION,
     )
 
 

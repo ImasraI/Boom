@@ -11,11 +11,16 @@ langchain-community==0.2.0
 python-dotenv==1.0.1
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+# passlib 1.7.4 reads bcrypt.__about__, removed in bcrypt 4.1+; pin 4.0.1
+bcrypt==4.0.1
 httpx==0.27.0
 
 #pdfrender 
 PyMuPDF==1.24.14
-easyocr==1.7.2
+# NOTE: easyocr is deliberately NOT here - the server never imports it.
+# It is only used by the laptop-side bulk scan (backend/scripts/bulk_easyocr.py,
+# untracked); install it manually there: pip install easyocr==1.7.2
+# (pulls torch/torchvision, ~1GB - don't pay that on the server for nothing).
 numpy==1.26.4
 
 # Page-as-image RAG pipeline: default "clip" embedding backend + vision LLM images

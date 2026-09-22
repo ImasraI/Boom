@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
-import { apiUrl } from "../api"
+import { apiUrl, authHeaders } from "../api"
 import GroqChart from "../components/GroqChart"
 import {
   addDays,
@@ -473,7 +473,7 @@ export default function Schedule({
     try {
       const resp = await fetch(apiUrl("/api/boom/weekly-plan"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           week_start: key,
           daily_hours: 4,

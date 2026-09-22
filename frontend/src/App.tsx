@@ -12,6 +12,8 @@ import Chat from "./pages/Chat";
 import Profile from "./pages/Profile";
 import Schedule from "./pages/Schedule";
 import Evaluation from "./pages/Evaluation";
+import Mock from "./pages/Mock";
+import Arena from "./pages/Arena";
 
 const USER_KEY = "boom-user-data";
 const TOKEN_KEY = "boom-token";
@@ -24,6 +26,8 @@ const NAV_ITEMS: { screen: Screen; label: string; icon: React.ReactNode }[] = [
    { screen: "plan", label: "برنامه", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
    { screen: "schedule", label: "برنامه هفتگی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
    { screen: "evaluation", label: "ارزیابی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> },
+  { screen: "mock", label: "آزمون هوشمند", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
+  { screen: "arena", label: "دوئل رنکینگ", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h12l3 6-9 12L3 9z"/><path d="M3 9h18"/><path d="M12 21L8 9"/><path d="M12 21l4-12"/></svg> },
    { screen: "profile", label: "پروفایل", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
 ];
 
@@ -178,6 +182,8 @@ export default function App() {
       {screen === "schedule" && <Schedule {...p} userData={userData} />}
       {screen === "chat" && <Chat {...p} userData={userData} />}
       {screen === "evaluation" && <Evaluation {...p} />}
+      {screen === "mock" && <Mock {...p} />}
+      {screen === "arena" && <Arena {...p} />}
       {screen === "profile" && userData && <Profile {...p} userData={userData} {...settingsProps} />}
     </Shell>
   );

@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from "react";
-import { apiUrl } from "../api";
+import { apiUrl, authHeaders } from "../api";
 import { NavFn, SignupData } from "../types";
 
 function BackButton({ onClick }: { onClick: () => void }) {
@@ -106,7 +106,7 @@ export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupDa
         };
         const res = await fetch(apiUrl("/api/boom/study-plan"), {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...authHeaders() },
           body: JSON.stringify(body),
         });
         if (res.ok) {
