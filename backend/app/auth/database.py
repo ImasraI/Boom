@@ -34,6 +34,9 @@ class User(Base):
     phone = Column(String, unique=True, index=True, nullable=True)
     hashed_password = Column(String, nullable=False)
     phone_verified = Column(Boolean, default=False, nullable=False, server_default="0")
+    # Admin flag: gates /api/admin/* (require_admin dependency). Only set
+    # through scripts/manage_admin.py - never through any HTTP endpoint.
+    is_admin = Column(Boolean, default=False, nullable=False, server_default="0")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -54,6 +57,23 @@ class PhoneCode(Base):
     consumed = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
+
+
+class SignupAllowlist(Base):
+    """Phone numbers allowed to sign up with the bypass passcode.
+
+    Stopgap for the SMS-template-approval limbo: until SMS.ir approves the
+    verification template, numbers on this list can complete signup using
+    the shared bypass code (SIGNUP_BYPASS_CODE, default 111111) instead of
+    a texted code. Managed only through the admin panel/CLI.
+    """
+
+    __tablename__ = "signup_allowlist"
+
+    id = Column(Integer, primary_key=True, index=True)
+    phone = Column(String, unique=True, index=True, nullable=False)  # 9xxxxxxxxx
+    note = Column(String, nullable=True)  # who/why, for the admin's own bookkeeping
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Conversation(Base):
@@ -203,6 +223,11 @@ class GeneratedMock(Base):
     grade = Column(String, nullable=True)
     duration_minutes = Column(Integer, nullable=False, default=120)
     questions = Column(Text, nullable=False)  # JSON: [{id, subject, topic, text, options, answer, explanation, page, book}]
+    # "pending_use" = unassigned pool row awaiting a student; "claimed" =
+    # owned by student_id (live-generated, duel, or claimed pool row).
+    status = Column(String, nullable=False, default="claimed",
+                    server_default="claimed")
+    difficulty = Column(String, nullable=False, default="", server_default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -273,6 +298,14 @@ def ensure_schema() -> None:
     # users.phone was added after the first schema create; migrate existing DBs.
     _ensure_column("users", "phone", "VARCHAR")
     _ensure_column("users", "phone_verified", "BOOLEAN DEFAULT 0")
+    _ensure_column("users", "is_admin", "BOOLEAN DEFAULT 0")
+    # Mock pool: "pending_use" rows sit unassigned in the pre-generated pool;
+    # "claimed" rows belong to the student in student_id. Legacy rows (and
+    # arena duel rows) predate the pool and default to "claimed".
+    _ensure_column("generated_mocks", "status", "VARCHAR DEFAULT 'claimed'")
+    # Difficulty the booklet was generated for - pool rows are matched to
+    # requests by (major, difficulty), so it must be persisted.
+    _ensure_column("generated_mocks", "difficulty", "VARCHAR DEFAULT ''")
     # Unique index for phone (SQLite allows multiple NULLs).
     with engine.begin() as conn:
         conn.execute(

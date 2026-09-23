@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiUrl, authHeaders } from "./api";
 import { Screen, SignupData, normalizeSignupData } from "./types";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
@@ -14,6 +15,7 @@ import Schedule from "./pages/Schedule";
 import Evaluation from "./pages/Evaluation";
 import Mock from "./pages/Mock";
 import Arena from "./pages/Arena";
+import Admin from "./pages/Admin";
 
 const USER_KEY = "boom-user-data";
 const TOKEN_KEY = "boom-token";
@@ -35,7 +37,7 @@ function persistUser(data: SignupData) {
   localStorage.setItem(USER_KEY, JSON.stringify(normalizeSignupData(data)));
 }
 
-function DesktopSidebar({ screen, nav }: { screen: Screen; nav: (s: Screen) => void }) {
+function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Screen) => void; isAdmin: boolean }) {
   return (
     <aside className="hidden md:flex flex-col fixed top-0 right-0 bottom-0 w-[220px] bg-[var(--card)] border-r border-[var(--border)] z-30">
       <div className="px-5 pt-7 pb-5 border-b border-[var(--border)]">
@@ -64,6 +66,15 @@ function DesktopSidebar({ screen, nav }: { screen: Screen; nav: (s: Screen) => v
             </button>
           );
         })}
+        {isAdmin && (
+          <button onClick={() => nav("admin")}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-right transition-all ${
+              screen === "admin" ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-strong)]"
+            }`}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span className="font-semibold text-[14px]">مدیریت</span>
+          </button>
+        )}
       </nav>
       <div className="p-4 border-t border-[var(--border)]">
         <button onClick={() => nav("chat")}
@@ -79,11 +90,11 @@ function DesktopSidebar({ screen, nav }: { screen: Screen; nav: (s: Screen) => v
   );
 }
 
-function Shell({ children, screen, nav }: { children: React.ReactNode; screen: Screen; nav: (s: Screen) => void }) {
+function Shell({ children, screen, nav, isAdmin }: { children: React.ReactNode; screen: Screen; nav: (s: Screen) => void; isAdmin: boolean }) {
   const hideSidebar = ["landing", "login", "signup"].includes(screen);
   return (
     <div dir="rtl" className="min-h-screen bg-[var(--page-bg)]">
-      {!hideSidebar && <DesktopSidebar screen={screen} nav={nav} />}
+      {!hideSidebar && <DesktopSidebar screen={screen} nav={nav} isAdmin={isAdmin} />}
       <div className={`min-h-screen ${!hideSidebar ? "md:mr-[220px]" : ""}`}>
         <div className="w-full max-w-[430px] mx-auto md:max-w-none min-h-screen bg-[var(--surface)] md:shadow-none">
           {children}
@@ -97,10 +108,22 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("landing");
   const [dark, setDark] = useState(() => { const stored = localStorage.getItem("boom-theme"); return stored ? stored === "dark" : true; });
   const [userData, setUserData] = useState<SignupData | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
+
+  // Ask the server who we are (is_admin lives server-side; the sidebar
+  // entry is only cosmetic - /api/admin/* enforces it for real).
+  useEffect(() => {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) return;
+    fetch(apiUrl("/api/auth/me"), { headers: authHeaders(token) })
+      .then(res => (res.ok ? res.json() : null))
+      .then(me => setIsAdmin(Boolean(me?.is_admin)))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY);
@@ -170,7 +193,7 @@ export default function App() {
   const settingsProps = { dark, toggleDark, onSave: handleSaveProfile, logout };
 
   return (
-    <Shell screen={screen} nav={nav}>
+    <Shell screen={screen} nav={nav} isAdmin={isAdmin}>
       {screen === "landing" && <Landing {...p} />}
       {screen === "login" && <Login {...p} onLogin={handleLogin} />}
       {screen === "signup" && <Signup {...p} onComplete={handleSignupComplete} />}
@@ -184,6 +207,7 @@ export default function App() {
       {screen === "evaluation" && <Evaluation {...p} />}
       {screen === "mock" && <Mock {...p} />}
       {screen === "arena" && <Arena {...p} />}
+      {screen === "admin" && <Admin {...p} />}
       {screen === "profile" && userData && <Profile {...p} userData={userData} {...settingsProps} />}
     </Shell>
   );

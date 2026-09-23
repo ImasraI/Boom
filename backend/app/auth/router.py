@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from ..auth.database import get_db, User, PhoneCode
+from ..auth.database import get_db, User, PhoneCode, SignupAllowlist
 from ..auth.security import (
     get_password_hash,
     verify_password,
@@ -44,6 +44,7 @@ class RequestCodeResponse(BaseModel):
     ok: bool = True
     resend_after: int = REQUEST_COOLDOWN_SECONDS
     debug_code: str | None = None  # only when SMS_DEBUG_ECHO=true (dev)
+    bypass_mode: bool = False  # allowlisted number: enter SIGNUP_BYPASS_CODE instead
 
 
 class CompleteSignupRequest(BaseModel):
@@ -74,12 +75,32 @@ def request_code(
 
     settings = get_settings()
     echo_mode = settings.SMS_DEBUG_ECHO and settings.APP_ENV != "production"
+    now = datetime.now(timezone.utc)
+
+    # SMS-template-approval stopgap: allowlisted numbers can sign up without
+    # SMS by using the shared bypass passcode. We store a PhoneCode row
+    # hashed from the bypass code, so register/complete validates it with
+    # the exact same path as a texted code (attempt cap, expiry, consume).
+    # Checked BEFORE the SMS-config guard: this exists precisely for the
+    # period when SMS is not configured/approved yet.
+    bypass_code = (settings.SIGNUP_BYPASS_CODE or "").strip()
+    if bypass_code and db.query(SignupAllowlist).filter(
+            SignupAllowlist.phone == mobile).first() is not None:
+        db.add(PhoneCode(
+            phone=mobile,
+            code_hash=_hash_code(bypass_code),
+            purpose="signup",
+            expires_at=now + timedelta(seconds=CODE_TTL_SECONDS),
+        ))
+        db.commit()
+        return RequestCodeResponse(resend_after=0, debug_code=bypass_code,
+                                   bypass_mode=True)
+
     if not echo_mode and (not settings.SMS_API_KEY or not settings.SMS_VERIFY_TEMPLATE_ID):
         raise HTTPException(
             status_code=503, detail="سرویس پیامک پیکربندی نشده است"
         )
 
-    now = datetime.now(timezone.utc)
     recent = (
         db.query(PhoneCode)
         .filter(
@@ -211,4 +232,5 @@ def me(current_user: User = Depends(get_current_user)):
         "username": current_user.username,
         "phone": current_user.phone,
         "phone_verified": bool(current_user.phone_verified),
+        "is_admin": bool(current_user.is_admin),
     }

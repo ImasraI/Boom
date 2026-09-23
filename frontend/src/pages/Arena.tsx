@@ -144,11 +144,23 @@ function DuelRunner({ match, onDone, onExit }: {
   const answersRef = useRef(answers)
   answersRef.current = answers
 
+  // The duel booklet is AI-generated right after the match is reserved, so
+  // it can take a couple of minutes; poll until real questions arrive.
   useEffect(() => {
-    fetch(apiUrl(`/api/mocks/${match.mock_id}`), { headers: authHeaders() })
-      .then(r => r.json())
-      .then(d => setQuestions(d.questions || []))
-      .catch(() => setQuestions([]))
+    let alive = true
+    const load = () =>
+      fetch(apiUrl(`/api/mocks/${match.mock_id}`), { headers: authHeaders() })
+        .then(r => (r.ok ? r.json() : null))
+        .then(d => {
+          if (alive && d?.questions?.length) setQuestions(d.questions)
+        })
+        .catch(() => {})
+    load()
+    const t = setInterval(load, 5000)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
   }, [match.mock_id])
 
   useEffect(() => {

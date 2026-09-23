@@ -34,3 +34,10 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
+def require_admin(current_user: User = Depends(get_current_user)):
+    """Gate for every /api/admin/* endpoint: 403 unless users.is_admin.
+    Enforced server-side; the frontend page hiding is cosmetic only."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="دسترسی مدیر لازم است")
+    return current_user

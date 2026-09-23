@@ -10,6 +10,7 @@ export default function Signup({ nav, onComplete }: Props) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
+  const [bypassMode, setBypassMode] = useState(false);
   const [debugCode, setDebugCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -45,6 +46,7 @@ export default function Signup({ nav, onComplete }: Props) {
         }
         const data = await res.json();
         setDebugCode(data.debug_code || "");
+        setBypassMode(Boolean(data.bypass_mode));
         setStep(2);
       } catch {
         setError("خطا در ارتباط با سرور");
@@ -135,8 +137,10 @@ export default function Signup({ nav, onComplete }: Props) {
       ),
     },
     {
-      q: "کد تایید پیامک‌شده چیه؟",
-      sub: `کد ۶ رقمی را که به ${phone} پیامک کردیم وارد کنید.`,
+      q: bypassMode ? "کد عبور موقت چیه؟" : "کد تایید پیامک‌شده چیه؟",
+      sub: bypassMode
+        ? `شماره ${phone} توسط پشتیبانی تأیید شده. کد عبور موقتی که به تو داده شده را وارد کن.`
+        : `کد ۶ رقمی را که به ${phone} پیامک کردیم وارد کنید.`,
       content: (
         <div>
           <input autoFocus type="tel" value={code} dir="ltr"
@@ -144,7 +148,12 @@ export default function Signup({ nav, onComplete }: Props) {
             onKeyDown={e => e.key === "Enter" && canContinue && advance()}
             placeholder="- - - - - -"
             className="w-full bg-[var(--card)] border-2 border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-2xl px-5 py-4 text-2xl font-bold text-[var(--text)] placeholder:text-[var(--placeholder)] tracking-[0.5em] text-center transition-colors" />
-          {debugCode && (
+          {bypassMode && (
+            <p className="text-[12px] text-[var(--muted-2)] mt-2 text-center">
+              پیامک موقتاً غیرفعال است؛ ورود با کد پشتیبانی
+            </p>
+          )}
+          {!bypassMode && debugCode && (
             <p className="text-[12px] text-[var(--muted-2)] mt-2 text-center" dir="ltr">
               debug mode: code = {debugCode}
             </p>

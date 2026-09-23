@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     SMS_VERIFY_TEMPLATE_ID: str = ""
     SECRET_KEY: str = ""  # JWT + code-hashing secret (set it in .env!)
     SMS_BASE_URL: str = "https://api.sms.ir"
+    # SMS-template-approval stopgap: numbers on the admin-managed signup
+    # allowlist can complete signup with this shared passcode instead of a
+    # texted code. Change it in .env once SMS is live (or set it empty to
+    # disable bypass entirely). 6 digits to match the SMS code UI.
+    SIGNUP_BYPASS_CODE: str = "111111"
     # Dev convenience: when True (and APP_ENV != production) the request-code
     # endpoint returns the code in the response instead of sending an SMS.
     SMS_DEBUG_ECHO: bool = False
@@ -57,6 +62,11 @@ class Settings(BaseSettings):
     AI_DAILY_WEEKLY_PLAN: int = 20
     AI_DAILY_TODAY_TESTS: int = 30
     AI_DAILY_MOCK_GENERATE: int = 10
+    AI_DAILY_ARENA_JOIN: int = 3
+    # Rough daily per-user token budget across ALL AI features (prompt +
+    # completion). ~200k tokens ≈ a full mock booklet + a few dozen chats.
+    # Set 0 (or negative) in .env for unlimited.
+    AI_DAILY_TOKEN_BUDGET: int = 200000
 
     # Upload limits (per file): reject anything bigger without reading it all.
     MAX_UPLOAD_MB: int = 20

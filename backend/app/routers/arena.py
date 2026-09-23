@@ -18,7 +18,6 @@ after 30 minutes so matchmaking never pairs with a ghost.
 """
 
 import json
-import random
 import threading
 from datetime import datetime, timedelta
 from typing import Optional
@@ -33,12 +32,15 @@ from app.auth.database import (
     ArenaQueueEntry,
     GeneratedMock,
     MockAttempt,
+    SessionLocal,
     User,
     record_match_rating,
     user_elo,
 )
 from app.auth.deps import get_current_user, get_db
-from app.routers.mocks import _KONKUR_SUBJECTS, _major_key, _score
+from app.auth.limits import check_ai_quota, record_ai_use
+from app.rag import mock_generation
+from app.routers.mocks import _score
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/api/arena", tags=["arena"])
@@ -80,7 +82,12 @@ class SubmitPayload(BaseModel):
 
 
 def _try_pair(db: Session, entry: ArenaQueueEntry, student: Optional[dict]):
-    """Match two human queue entries whose ratings are within the band."""
+    """Match two human queue entries whose ratings are within the band.
+
+    Reserves the match atomically (lock-safe) and generates the real AI
+    booklet right after, OUTSIDE the matchmaking lock: a 60-420s LLM call
+    must never block other players' join/status requests.
+    """
     other = (
         db.execute(
             select(ArenaQueueEntry)
@@ -97,22 +104,46 @@ def _try_pair(db: Session, entry: ArenaQueueEntry, student: Optional[dict]):
     if not other:
         return None
 
-    plan = [
-        {**s, "questions": max(3, s["questions"] // 3)}
-        for s in _KONKUR_SUBJECTS[_major_key((student or {}).get("major") or "")]
-    ]
+    match = _reserve_match(db, entry, other, student)
+    # Real booklet generation in a daemon thread: join_queue holds _LOCK, and
+    # an LLM call can take minutes — the lock must free up immediately so
+    # other players' join/status requests never block.
+    plan = mock_generation.scale_plan(
+        mock_generation.default_plan((student or {}).get("major") or ""),
+        divisor=3, minimum=3,
+    )
+    threading.Thread(
+        target=_generate_duel_booklet, args=(match, plan), daemon=True,
+        name=f"arena-booklet-{match.id}",
+    ).start()
+    return match
+
+
+def _reserve_match(db: Session, entry: ArenaQueueEntry, other: ArenaQueueEntry,
+                   student: Optional[dict]) -> ArenaMatch:
+    """Atomically pair two queue entries and reserve a placeholder match.
+
+    Runs under _LOCK so two joiners can never grab the same opponent; the
+    (slow) booklet generation happens later, outside the lock, in
+    _generate_duel_booklet. The placeholder booklet keeps /status reporting
+    "matched" for both players while the real questions are generated.
+    """
+    plan = mock_generation.scale_plan(
+        mock_generation.default_plan((student or {}).get("major") or ""),
+        divisor=3, minimum=3,
+    )
     questions = []
     i = 0
     for s in plan:
         for _ in range(s["questions"]):
             i += 1
             questions.append({
-                "_id": str(i),
+                "_id": i,
                 "subject": s["name"],
                 "topic": "",
-                "text": f"سوال {i} ({s['name']})",
-                "options": ["۱", "۲", "۳", "۴"],
-                "answer": random.randint(0, 3),
+                "text": "",
+                "options": ["", "", "", ""],
+                "answer": 0,
                 "explanation": "",
             })
 
@@ -123,6 +154,7 @@ def _try_pair(db: Session, entry: ArenaQueueEntry, student: Optional[dict]):
         grade="",
         duration_minutes=sum(s["minutes"] for s in plan) // 3 or 10,
         questions=json.dumps(questions, ensure_ascii=False),
+        status="claimed",  # duel placeholder rows are never pool candidates
     )
     db.add(mock)
     db.flush()
@@ -140,9 +172,36 @@ def _try_pair(db: Session, entry: ArenaQueueEntry, student: Optional[dict]):
     db.delete(entry)
     db.commit()
     db.refresh(match)
-    logger.info("Arena match %d: %d vs %d",
+    logger.info("Arena match %d reserved: %d vs %d (booklet generating)",
                 match.id, match.student_a_id, match.student_b_id)
     return match
+
+
+def _generate_duel_booklet(match: ArenaMatch, plan: list) -> None:
+    """Fill the reserved duel's GeneratedMock with real AI-generated questions.
+
+    Must be called OUTSIDE _LOCK (a real LLM call can take minutes). On
+    failure the match survives with the placeholder booklet and the error is
+    logged; submit scoring of an all-blank booklet yields 0 for both.
+    """
+    try:
+        mock_db = SessionLocal()
+        try:
+            mock = mock_db.get(GeneratedMock, match.mock_id)
+            if not mock:
+                return
+            questions = mock_generation.generate_booklet(
+                match.student_b_id, plan, topics=[], difficulty="konkur",
+            )
+            if questions:
+                mock.questions = json.dumps(questions, ensure_ascii=False)
+                mock_db.commit()
+                logger.info("Arena match %d: real booklet ready (%d questions)",
+                            match.id, len(questions))
+        finally:
+            mock_db.close()
+    except Exception:
+        logger.exception("Arena match %d: booklet generation failed", match.id)
 
 
 @router.post("/join")
@@ -151,6 +210,9 @@ def join_queue(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # Ranked games burn an AI-generated booklet, so they share the per-user
+    # daily quota mechanism (AI_DAILY_ARENA_JOIN, .env-adjustable).
+    check_ai_quota(current_user.id, "arena_join")
     with _LOCK:
         db.execute(delete(ArenaQueueEntry)
                    .where(ArenaQueueEntry.student_id == current_user.id))
@@ -164,6 +226,10 @@ def join_queue(
         match = _try_pair(db, entry, payload.student)
         found = match is not None
         db.commit()
+    # Counted only after a successful outcome: a real match OR a queue spot.
+    # The 429 check above ran outside _LOCK, so a rejected joiner never
+    # touched the queue at all.
+    record_ai_use(current_user.id, "arena_join")
     return {
         "queued": not found,
         "match_id": match.id if match else None,

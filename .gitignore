@@ -19,31 +19,22 @@ dist/
 Thumbs.db
 
 # Local data
-# Raw PDFs: too large + user-supplied — transfer to VM via scp/rsync (one-time).
-backend/data/raw/
-# Rendered page images (PNG): ~7 GB at full corpus size, impossible in git;
-# re-rendered on the server from raw PDFs by the background ingest thread,
-# or transferred alongside via scp/rsync. Do NOT commit.
-backend/data/1/
-backend/data/page_images/
-backend/data/uploads/
-# OCR output (EasyOCR baseline .txt + vision page .json): laptop-side scan
-# artifact, grows with the corpus. Ship to the server via scp alongside
-# data/chroma_db when needed - never through git.
-backend/data/ocr/
-# Runtime scratch cache (generated-mock extraction etc.)
-backend/data/cache/
-# Runtime scratch (progress mocks etc.) — not part of the deployable artifact
-backend/data/mock_*
-backend/data/*_progress.json
+# ---------------------------------------------------------------------------
+# EVERYTHING under backend/data/ is generated or user-supplied runtime data.
+# It lives on disk (laptop + server), never in git:
+#   - raw/        raw book PDFs (user-supplied; scp/rsync to the server once)
+#   - 1/, page_images/, uploads/   rendered/uploaded page images (~GBs)
+#   - chroma_db/  Chroma vector store (127MB+ sqlite + binaries; rebuilt by
+#                 ingest, or scp'd to the server - see DEPLOYMENT.md)
+#   - ocr/        bulk OCR text corpus
+#   - rag_data.db the app's SQLite (users, mocks, attempts) - server-local
+# Transfer any of these to the server via scp/rsync, never through git.
+# ---------------------------------------------------------------------------
+backend/data/
 
-# SQLite — ignore app DBs but keep Chroma's store (vectors + text + images)
+# SQLite safety net (any stray app DB outside backend/data/)
 *.sqlite3
 *.db
-!backend/data/chroma_db/*.sqlite3
-!backend/data/chroma_db/*.db
-!backend/data/chroma_db/*.bin
-!backend/data/chroma_db/*.pickle
 
 # Runtime logs
 *.log
@@ -70,7 +61,11 @@ scanned-pending/
 # Laptop-only scripts (GPU EasyOCR fleet / bulk transcription drivers).
 # The server needs none of these - retrieval runs off the committed data.
 backend/scripts/bulk_easyocr.py
+backend/scripts/bulk_tesseract.py
 backend/scripts/run_question_bank.py
+backend/scripts/bench_ocr_engines.py
+# OCR engine benchmark artifacts (per-page txt dumps)
+backend/scripts/bench_out/
 
 # AI-assistant workspace docs (for coding agents, not the app)
 frontend/AGENTS.md
@@ -82,4 +77,3 @@ frontend/CLAUDE.md
 # ---------------------------------------------------------------------------
 worker.env
 ocr-kit/keys.txt
-

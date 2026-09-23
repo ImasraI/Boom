@@ -1,12 +1,21 @@
-"""SMS.ir (Melipayamak) verification-code sender.
+"""SMS.ir verification-code sender.
 
 Uses the SMS.ir "send verify" REST endpoint with a panel-side template:
     POST {SMS_BASE_URL}/v1/send/verify
     headers: x-api-key: <SMS_API_KEY>, Content-Type: application/json
-    body:    {"mobile": "9xxxxxxxxx", "templateId": "<id>", "parameters": [{"name": "CODE", "value": "123456"}]}
+    body:    {"mobile": "9xxxxxxxxx", "templateId": 123456,
+              "parameters": [{"name": "Code", "value": "12345"}]}
 
-The template must contain the {CODE} parameter (create it in the SMS.ir
-panel under the verification-templates section).
+Notes (matched to the SMS.ir docs / panel template):
+- "templateId" must be a NUMBER, not a string.
+- The parameter name must match the template's placeholder name exactly
+  (SMS.ir's default template uses "Code", capital C).
+- SMS.ir replies HTTP 200 even when the send fails; success is only
+  "status": 1 in the JSON body, so that is what we validate.
+
+The template must contain the {Code} parameter (create it in the SMS.ir
+panel under the verification-templates section and put its numeric id in
+SMS_VERIFY_TEMPLATE_ID).
 """
 
 from __future__ import annotations
@@ -50,10 +59,19 @@ def send_verification_code(mobile: str, code: str) -> None:
     """
     settings = get_settings()
     url = f"{settings.SMS_BASE_URL.rstrip('/')}/v1/send/verify"
+    template_id = settings.SMS_VERIFY_TEMPLATE_ID.strip()
+    if not template_id.isdigit():
+        # Config error, not a user error - log the raw value, keep the
+        # user-facing message generic.
+        logger.error(
+            "SMS_VERIFY_TEMPLATE_ID must be the numeric template id from "
+            "the SMS.ir panel (got %r)", template_id,
+        )
+        raise RuntimeError("ارسال پیامک ناموفق بود")
     payload = {
         "mobile": mobile,
-        "templateId": settings.SMS_VERIFY_TEMPLATE_ID,
-        "parameters": [{"name": "CODE", "value": code}],
+        "templateId": int(template_id),  # API expects a number
+        "parameters": [{"name": "Code", "value": code}],
     }
     try:
         resp = requests.post(
@@ -71,4 +89,18 @@ def send_verification_code(mobile: str, code: str) -> None:
 
     if resp.status_code != 200:
         logger.error("SMS.ir verify failed %s: %s", resp.status_code, resp.text[:300])
+        raise RuntimeError("ارسال پیامک ناموفق بود")
+
+    # SMS.ir returns HTTP 200 even when the send failed; success is only
+    # visible as "status": 1 in the body (see docs: {"status": 1,
+    # "message": "موفق", "data": {"messageId": ..., "cost": ...}}).
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    if body.get("status") != 1:
+        logger.error(
+            "SMS.ir verify rejected: status=%s message=%s data=%s",
+            body.get("status"), body.get("message"), str(body.get("data"))[:200],
+        )
         raise RuntimeError("ارسال پیامک ناموفق بود")

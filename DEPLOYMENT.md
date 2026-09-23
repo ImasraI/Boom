@@ -365,6 +365,45 @@ sudo systemctl restart boom-backend
 0 3 * * * tar -czf /backup/chroma-$(date +\%F).tar.gz -C /data chroma_db
 ```
 
+### Mock pool worker
+
+Pre-generated Konkur mocks (`generated_mocks.status = 'pending_use'`) are
+what lets `/api/mocks/generate` serve users instantly. The stock is
+maintained by `backend/scripts/mock_pool_worker.py` (default target: 5
+booklets per major × difficulty, each answer-verified before insertion).
+
+**Windows / dev:** `start-mock-pool.bat` (repo root) opens the worker in
+continuous mode; `run_boom.bat` already starts it alongside the site.
+
+**Oracle VM:** do NOT run the continuous loop as a service - it would idle
+between sweeps and compete with the backend for LLM quota. Prefer one
+`--once` sweep per hour from a systemd timer or cron; each sweep tops up
+only what is missing and exits:
+
+```bash
+# cron example: hourly top-up sweep (off-peak-ish, after the 3 AM backup)
+0 4 * * * cd /opt/boom/backend && .venv/bin/python scripts/mock_pool_worker.py --once >> /var/log/boom-pool.log 2>&1
+
+# or a systemd timer (OnCalendar=hourly) running:
+#   /opt/boom/backend/.venv/bin/python /opt/boom/backend/scripts/mock_pool_worker.py --once
+```
+
+Useful flags:
+
+```bash
+--target 5               # pending rows kept per (major, difficulty)
+--majors riazi,tajrobi   # restrict to specific majors
+--difficulties konkur    # restrict difficulties (easy|konkur|hard)
+--dry-run                # print deficits without generating
+--interval 60            # (continuous mode only) seconds between sweeps
+```
+
+One sweep makes one LLM call per subject plus one verification call per
+question, so a full top-up after a dry spell can take a while - the cron
+frequency matters more than the target size. Watch `boom-backend`'s logs or
+`SELECT major, difficulty, COUNT(*) FROM generated_mocks WHERE status='pending_use' GROUP BY 1,2;`
+to confirm shelves stay stocked.
+
 ### Disk Space
 ```bash
 df -h /data

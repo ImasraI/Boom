@@ -9,6 +9,7 @@ from app.routers import chat, documents
 from app.routers import insights
 from app.routers import mocks
 from app.routers import arena
+from app.routers import admin
 from app.routers.tasks import router as tasks_router
 from .auth.database import ensure_schema
 from .auth.router import router as auth_router
@@ -90,6 +91,7 @@ app.include_router(tasks_router)
 app.include_router(insights.router)
 app.include_router(mocks.router)
 app.include_router(arena.router)
+app.include_router(admin.router)
 
 # Health check endpoint
 @app.get("/api/health", tags=["health"])

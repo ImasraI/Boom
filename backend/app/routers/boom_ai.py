@@ -13,7 +13,8 @@ from app.rag.hybrid_search import get_hybrid_search
 from app.rag.llm import get_llm_client, get_vision_llm_client
 from app.auth.database import Assessment, User
 from app.auth.deps import get_current_user
-from app.auth.limits import check_ai_quota, record_ai_use
+from app.auth.limits import (check_ai_quota, record_ai_use,
+                             check_token_budget)
 from app.config import get_settings
 from app.schemas import ChatMessage
 from app.utils.logger import get_logger
@@ -610,6 +611,7 @@ def boom_chat(
 ):
     """Authenticated Boom chat (RAG + LLM) for the signed-in user."""
     check_ai_quota(current_user.id, "chat")
+    check_token_budget(current_user.id)  # reject over-budget users pre-call
     history = [ChatMessage(**h) for h in (request.history or [])]
     result = answer_question(
         question=request.question,

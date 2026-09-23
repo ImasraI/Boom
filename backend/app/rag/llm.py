@@ -11,7 +11,7 @@ The implementation is selected through the LLM_PROVIDER setting in .env.
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Dict, Generator, Optional, Sequence
+from typing import Any, List, Dict, Generator, NamedTuple, Optional, Sequence
 import json
 import time
 import httpx
@@ -24,6 +24,31 @@ logger = get_logger(__name__)
 
 LLMMessage = Dict[str, Any]
 ImageInput = str | bytes
+
+
+class TokenUsage(NamedTuple):
+    """Token accounting for the most recent successful generate() call.
+
+    Clients expose it as `self.last_usage`; generate()'s string return type
+    and signature are unchanged (purely additive bookkeeping).
+    """
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
+ZERO_USAGE = TokenUsage(0, 0, 0)
+
+
+def _usage_from_openai(data: dict) -> TokenUsage:
+    """Parse the OpenAI-compatible top-level 'usage' object
+    ({prompt_tokens, completion_tokens, total_tokens}) returned by Groq,
+    generic OpenAI-compatible providers, and Gemini's /openai endpoint."""
+    usage = data.get("usage") or {}
+    prompt = int(usage.get("prompt_tokens") or 0)
+    completion = int(usage.get("completion_tokens") or 0)
+    total = int(usage.get("total_tokens") or (prompt + completion))
+    return TokenUsage(prompt, completion, total)
 
 
 class BaseLLMClient(ABC):
@@ -227,6 +252,8 @@ class GroqLLMClient(BaseLLMClient):
                 "Content-Type": "application/json",
             },
         )
+        # Token usage of the last SUCCESSFUL generate(); zeros until then.
+        self.last_usage = ZERO_USAGE
 
     @property
     def _is_reasoning_model(self) -> bool:
@@ -272,6 +299,7 @@ class GroqLLMClient(BaseLLMClient):
         # Groq occasionally returns an empty completion (HTTP 200, no usable
         # content) or a rate-limit/5xx error.  Retry briefly so a single
         # flaky call doesn't degrade weekly-planning to the default fallback.
+        self.last_usage = ZERO_USAGE  # stays zero unless a response succeeds
         last = ""
         for attempt in range(4):
             try:
@@ -282,6 +310,7 @@ class GroqLLMClient(BaseLLMClient):
                     choice = data["choices"][0]
                     content = choice["message"]["content"]
                     if content:
+                        self.last_usage = _usage_from_openai(data)
                         return content
                     finish = choice.get("finish_reason")
                     last = ""

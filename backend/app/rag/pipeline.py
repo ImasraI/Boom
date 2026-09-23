@@ -6,6 +6,17 @@ from app.config import get_settings
 from app.rag.embeddings import get_embedding_model
 from app.rag.vector_store import get_vector_store, get_image_vector_store
 from app.rag.llm import get_llm_client, get_vision_llm_client, MockLLMClient
+from app.auth import limits as _limits
+
+
+def _record_call_tokens(user_id: int, client) -> None:
+    """Charge the tokens of the last generate()/generate_stream() on `client`
+    to the user's daily token budget. Success-only: MockLLMClient and failed
+    calls report zero usage, so they never consume budget."""
+    try:
+        _limits.record_token_use(user_id, int(client.last_usage.total_tokens))
+    except Exception:  # accounting must never break the AI response
+        logger.exception("token accounting failed")
 from app.schemas import ChatMessage, SourceChunk
 from app.utils.logger import get_logger
 from app.rag.hybrid_search import get_hybrid_search, HybridSearch
@@ -262,7 +273,7 @@ QUERY_REWRITE_PROMPT = """تو یک دستیار بازنویسی سوال بر�
 پاسخ بازنویسی‌شده:"""
 
 
-def rewrite_query(question: str) -> str:
+def rewrite_query(question: str, user_id: Optional[int] = None) -> str:
     """Rewrite a user query into a formal, keyword-rich search query."""
     llm_client = get_llm_client()
 
@@ -280,6 +291,8 @@ def rewrite_query(question: str) -> str:
         # اصلی کاربر برگردیم.
         rewritten = llm_client.generate(
             messages, max_tokens=150, timeout=60).strip()
+        if user_id is not None:
+            _record_call_tokens(user_id, llm_client)
 
         looks_invalid = (
             not rewritten
@@ -542,7 +555,7 @@ def answer_question(
     embedding_model = get_embedding_model()
     hybrid_search = get_hybrid_search()
 
-    search_query = rewrite_query(question)
+    search_query = rewrite_query(question, user_id=user_id)
     query_embedding = embedding_model.embed_query(search_query)
 
     # Text retrieval: covers TXT/MD, plus any PDFs ingested in text mode
@@ -565,10 +578,6 @@ def answer_question(
 
     # Image retrieval: covers PDFs ingested in "page-as-image" mode
     image_hits = _retrieve_image_hits(search_query, user_id, settings.IMAGE_TOP_K)
-
-    # OCR text hits point at exact page images (figures/formulas intact).
-    # Use them so a question about a specific exercise is answered from the
-    # real page image even when CLIP didn't rank the page on top.
     if not image_hits and retrieved_chunks:
         image_hits = _resolve_ocr_page_images(retrieved_chunks, user_id) or []
 
@@ -590,6 +599,7 @@ def answer_question(
         image_paths = [get_object(key) for key in image_keys]
         messages = _build_image_messages(question, image_hits, retrieved_chunks, history, schedule)
         answer_text = vision_llm.generate(messages, images=image_paths)
+        _record_call_tokens(user_id, vision_llm)
 
         sources = [
             SourceChunk(
@@ -614,6 +624,7 @@ def answer_question(
     llm_client = get_llm_client()
     messages = _build_messages(question, retrieved_chunks, history, student, schedule)
     answer_text = llm_client.generate(messages)
+    _record_call_tokens(user_id, llm_client)
     sources = [
         SourceChunk(
             document_name=hit["document_name"],
@@ -685,7 +696,7 @@ def answer_question_stream(
 
     # STEP 1: Status - Query Rewriting
     yield json.dumps({"type": "status", "data": "در حال بازنویسی و تحلیل پرسش..."}) + "\n"
-    search_query = rewrite_query(question)
+    search_query = rewrite_query(question, user_id=user_id)
 
     # STEP 2: Status - Search
     yield json.dumps({"type": "status", "data": "در حال جستجو در اسناد و قوانین دانشگاه..."}) + "\n"
@@ -749,6 +760,7 @@ def answer_question_stream(
 
         for text_chunk in vision_llm.generate_stream(messages, images=image_paths):
             yield json.dumps({"type": "text", "data": text_chunk}) + "\n"
+        _record_call_tokens(user_id, vision_llm)
         return
 
     # No relevant page images -> original text-only pipeline
@@ -781,6 +793,7 @@ def answer_question_stream(
     # Stream response text chunks from LLM line by line
     for text_chunk in llm_client.generate_stream(messages):
         yield json.dumps({"type": "text", "data": text_chunk}) + "\n"
+    _record_call_tokens(user_id, llm_client)
 
 
 # Process a document and store its chunks in the vector database
