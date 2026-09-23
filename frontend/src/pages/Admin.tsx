@@ -12,6 +12,7 @@ interface UserRow {
 interface UsersPayload { day: string; token_budget: number; limits: Record<string, number>; users: UserRow[] }
 interface Shelf { major_key: string; major: string; difficulty: string; available: number }
 interface PoolPayload { target: number; shelves: Shelf[] }
+interface SmsCredit { credit: number; configured: boolean; detail: string; bypass_active: boolean }
 
 const FEATURE_FA: Record<string, string> = {
   chat: "چت", study_plan: "برنامه درسی", weekly_plan: "برنامه هفتگی",
@@ -25,6 +26,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [entries, setEntries] = useState<AllowEntry[]>([]);
   const [payload, setPayload] = useState<UsersPayload | null>(null);
   const [pool, setPool] = useState<PoolPayload | null>(null);
+  const [sms, setSms] = useState<SmsCredit | null>(null);
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState("");
@@ -35,15 +37,17 @@ export default function Admin({ nav }: { nav: NavFn }) {
 
   const load = useCallback(async () => {
     try {
-      const [a, u, p] = await Promise.all([
+      const [a, u, p, s] = await Promise.all([
         fetch(apiUrl("/api/admin/allowlist"), { headers: { ...authHeaders() } }),
         fetch(apiUrl("/api/admin/users"), { headers: { ...authHeaders() } }),
         fetch(apiUrl("/api/admin/pool"), { headers: { ...authHeaders() } }),
+        fetch(apiUrl("/api/admin/sms-credit"), { headers: { ...authHeaders() } }),
       ]);
-      if (a.status === 403 || u.status === 403 || p.status === 403) { nav("home"); return; }
+      if (a.status === 403 || u.status === 403 || p.status === 403 || s.status === 403) { nav("home"); return; }
       setEntries(a.ok ? await a.json() : []);
       setPayload(u.ok ? await u.json() : null);
       setPool(p.ok ? await p.json() : null);
+      setSms(s.ok ? await s.json() : null);
     } catch { setErr("خطا در دریافت اطلاعات"); }
   }, [nav]);
 
@@ -136,6 +140,26 @@ export default function Admin({ nav }: { nav: NavFn }) {
 
       {msg && <p className="text-xs text-emerald-400">{msg}</p>}
       {err && <p className="text-xs text-red-400">{err}</p>}
+
+      {/* ------------------------------------------------ sms credit ---- */}
+      <section className="rounded-3xl bg-[var(--card)] border border-[var(--border)] p-4 flex items-center gap-3">
+        <div>
+          <div className="text-[10px] text-[var(--muted-2)]">اعتبار پیامک (sms.ir)</div>
+          <div className={`font-display text-xl ${sms && sms.credit > 0 ? "text-[var(--text)]" : "text-red-400"}`} dir="ltr">
+            {sms ? sms.credit.toLocaleString("fa-IR") : "—"}
+          </div>
+          <div className="text-[10px] text-[var(--muted-2)] mt-0.5">
+            هر کد تأیید ≈ ۱ واحد
+            {sms?.bypass_active && " · کد عبور ۱۱۱۱۱۱ فعال است"}
+            {sms && !sms.configured && ` · ${sms.detail}`}
+            {sms?.configured && sms.credit === 0 && sms.detail && ` · ${sms.detail}`}
+          </div>
+        </div>
+        <button onClick={load} disabled={busy}
+          className="ms-auto text-[11px] px-3 py-1.5 rounded-xl bg-[var(--surface-2)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40">
+          به‌روزرسانی
+        </button>
+      </section>
 
       {/* ------------------------------------------------ allowlist ---- */}
       <section className="rounded-3xl bg-[var(--card)] border border-[var(--border)] p-5 space-y-3">

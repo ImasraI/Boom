@@ -104,3 +104,34 @@ def send_verification_code(mobile: str, code: str) -> None:
             body.get("status"), body.get("message"), str(body.get("data"))[:200],
         )
         raise RuntimeError("ارسال پیامک ناموفق بود")
+
+
+def sms_credit() -> dict:
+    """Remaining SMS.ir panel credit: {"credit": int, "configured": bool}.
+
+    Never raises: the admin panel wants a number to display, not an error
+    page - unreachable/broken setups report credit=0 + a reason instead.
+    Uses GET /v1/credit with the same x-api-key header as sending.
+    """
+    settings = get_settings()
+    if not settings.SMS_API_KEY.strip():
+        return {"credit": 0, "configured": False, "detail": "کلید API تنظیم نشده"}
+    try:
+        resp = requests.get(
+            f"{settings.SMS_BASE_URL.rstrip('/')}/v1/credit",
+            headers={"x-api-key": settings.SMS_API_KEY,
+                     "Accept": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return {"credit": 0, "configured": True,
+                    "detail": f"خطای {resp.status_code} از سرویس"}
+        body = resp.json()
+        if body.get("status") != 1:
+            return {"credit": 0, "configured": True,
+                    "detail": body.get("message") or "پاسخ نامعتبر"}
+        return {"credit": int(body.get("data") or 0), "configured": True,
+                "detail": ""}
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("SMS credit check failed: %s", exc)
+        return {"credit": 0, "configured": True, "detail": "سرویس در دسترس نیست"}

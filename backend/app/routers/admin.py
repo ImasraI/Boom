@@ -7,6 +7,7 @@ Sections:
     a quota reset button (clears the user's in-memory daily counters).
   - Mock pool levels (pending_use stock per major/difficulty shelf) + a
     manual restock trigger that runs one pool_core.sweep inline.
+  - SMS credit (remaining sms.ir panel balance) for the verification codes.
 
 Everything here is server-side gated: 403 for any non-admin token, no
 endpoint can create or promote admins (that's scripts/manage_admin.py only).
@@ -131,6 +132,19 @@ def reset_quota(user_id: int, db: Session = Depends(get_db)):
     logger.info("Admin reset daily AI quota for user %d (%s).",
                 user_id, user.username)
     return {"ok": True, "user_id": user_id}
+
+
+@router.get("/sms-credit")
+def sms_credit_view():
+    """Remaining sms.ir credit (each verification SMS costs ~1 unit).
+    Fetched live from sms.ir; never raises - reports 0 + a reason instead."""
+    from ..auth.sms import sms_credit
+    from ..config import get_settings
+
+    result = sms_credit()
+    result["bypass_active"] = bool(
+        (get_settings().SIGNUP_BYPASS_CODE or "").strip())
+    return result
 
 
 @router.get("/pool")
