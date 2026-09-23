@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
     GROQ_VISION_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"
 
+    # Pre-generated mock pool: pending_use booklets kept per (major,
+    # difficulty) shelf by the pool worker (and the admin restock button).
+    MOCK_POOL_TARGET: int = 5
+
     # ================= Question-bank transcription (vision RAG) ==========
     # Structured per-page transcription of the scanned books (questions,
     # options, figure descriptions, lesson prose) stored as JSON under

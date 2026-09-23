@@ -1,14 +1,18 @@
 """Admin-only management endpoints (gated by deps.require_admin).
 
-Currently:
+Sections:
   - Signup allowlist CRUD: numbers allowed to bypass the (not yet approved)
     SMS verification template using the shared SIGNUP_BYPASS_CODE.
-  - Read-only user overview for a quick who's-registered look.
+  - User overview + per-user AI usage (today's feature counts + tokens) and
+    a quota reset button (clears the user's in-memory daily counters).
+  - Mock pool levels (pending_use stock per major/difficulty shelf) + a
+    manual restock trigger that runs one pool_core.sweep inline.
 
 Everything here is server-side gated: 403 for any non-admin token, no
 endpoint can create or promote admins (that's scripts/manage_admin.py only).
 """
 
+import threading
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,8 +20,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..auth.database import SignupAllowlist, User, get_db
+from ..auth import limits
+from ..auth.database import GeneratedMock, SignupAllowlist, User, get_db
 from ..auth.deps import require_admin
+from ..rag import pool_core
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -85,18 +91,102 @@ def delete_allowlist(entry_id: int, db: Session = Depends(get_db)):
 
 @router.get("/users")
 def users_overview(db: Session = Depends(get_db)):
-    """Quick who's-registered view (read-only; no mutations over HTTP)."""
+    """Quick who's-registered view, enriched with today's AI usage and
+    per-feature limits so the panel renders usage inline per user."""
+    usage = limits.all_usage()
+    by_uid = {u["user_id"]: u for u in usage["users"]}
     rows = db.execute(
         select(User).order_by(User.created_at.desc()).limit(200)
     ).scalars().all()
-    return [
-        {
-            "id": u.id,
-            "username": u.username,
-            "phone": u.phone,
-            "phone_verified": bool(u.phone_verified),
-            "is_admin": bool(u.is_admin),
-            "created_at": u.created_at.isoformat() if u.created_at else None,
-        }
-        for u in rows
-    ]
+    return {
+        "day": usage["day"],
+        "token_budget": usage["token_budget"],
+        "limits": usage["limits"],
+        "users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "phone": u.phone,
+                "phone_verified": bool(u.phone_verified),
+                "is_admin": bool(u.is_admin),
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "usage": by_uid.get(u.id, {"features": {}, "tokens_used_today": 0}),
+            }
+            for u in rows
+        ],
+    }
+
+
+@router.post("/users/{user_id}/reset-quota")
+def reset_quota(user_id: int, db: Session = Depends(get_db)):
+    """Clear one user's daily AI counters (features + tokens) immediately.
+
+    Counters are process-local and reset at UTC midnight anyway; this just
+    gives the user their full budget back right now.
+    """
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر پیدا نشد")
+    limits.reset_user_quota(user_id)
+    logger.info("Admin reset daily AI quota for user %d (%s).",
+                user_id, user.username)
+    return {"ok": True, "user_id": user_id}
+
+
+@router.get("/pool")
+def pool_levels(db: Session = Depends(get_db)):
+    """pending_use stock per (major, difficulty) shelf + the target the
+    worker/restock button aims for."""
+    from ..config import get_settings
+
+    return {
+        "target": get_settings().MOCK_POOL_TARGET,
+        "shelves": pool_core.pool_levels(db),
+    }
+
+
+@router.post("/pool/restock")
+def pool_restock(db: Session = Depends(get_db)):
+    """Run ONE pool sweep inline (targeted at shelves below target).
+
+    Each booklet = one LLM call per subject + one verification call per
+    question, so a sweep of several empty shelves can take minutes - the
+    request runs the sweep in a background thread and returns immediately;
+    poll GET /api/admin/pool to watch the shelves fill.
+    """
+    with _restock_lock:
+        if _restock_running:
+            raise HTTPException(status_code=409,
+                                detail="یک restock در حال اجرا است؛ صبر کنید")
+        globals()['_restock_running'] = True
+
+    def _run() -> None:
+        global _restock_running
+        # The request's session is closed by get_db as soon as this endpoint
+        # returns - the background thread MUST open its own (like the worker).
+        from ..auth.database import SessionLocal
+        sweep_db = SessionLocal()
+        try:
+            produced = pool_core.sweep(sweep_db, _pool_target(),
+                                       pool_core.POOL_MAJORS,
+                                       pool_core.POOL_DIFFICULTIES)
+            logger.info("Admin-triggered restock produced %d row(s).", produced)
+        except Exception:
+            logger.exception("Admin-triggered restock failed.")
+        finally:
+            sweep_db.close()
+            globals()['_restock_running'] = False
+
+    threading.Thread(target=_run, daemon=True, name="admin-restock").start()
+    return {"ok": True, "started": True}
+
+
+# Restock single-flight guard (per process; the worker script is the other
+# producer and SQLite serializes the inserts themselves).
+_restock_running = False
+_restock_lock = threading.Lock()
+
+
+def _pool_target() -> int:
+    from ..config import get_settings
+    return get_settings().MOCK_POOL_TARGET

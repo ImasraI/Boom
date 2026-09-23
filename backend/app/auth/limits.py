@@ -58,6 +58,12 @@ class _DailyCounters:
             self._rollover()
             self._counts[user_id][feature] = self._counts[user_id].get(feature, 0) + 1
 
+    def clear_user(self, user_id: int) -> None:
+        """Admin reset: drop every counter (features + tokens) for one user."""
+        with self._lock:
+            self._rollover()
+            self._counts.pop(user_id, None)
+
 
 _counters = _DailyCounters()
 
@@ -132,6 +138,44 @@ def usage_snapshot(user_id: int) -> dict:
             "mock_generate": get_settings().AI_DAILY_MOCK_GENERATE,
             "arena_join": get_settings().AI_DAILY_ARENA_JOIN,
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin-facing helpers (used by /api/admin/usage*)
+# ---------------------------------------------------------------------------
+
+
+def reset_user_quota(user_id: int) -> None:
+    """Clear ALL of one user's daily counters (features + tokens).
+
+    The user can immediately use every AI feature again today; the UTC
+    midnight rollover still applies as normal afterwards.
+    """
+    _counters.clear_user(user_id)
+
+
+def all_usage() -> dict:
+    """Today's usage for every user who has consumed anything in THIS
+    process, plus the configured limits. Counters are process-local: after
+    a restart the map is empty until users make requests again (see the
+    module docstring) - usage_snapshot(user_id) stays per-user correct."""
+    settings = get_settings()
+    with _counters._lock:
+        _counters._rollover()
+        rows = []
+        for uid, counts in sorted(_counters._counts.items()):
+            features = {k: v for k, v in counts.items() if k != "_tokens"}
+            rows.append({
+                "user_id": uid,
+                "features": features,
+                "tokens_used_today": int(counts.get("_tokens", 0)),
+            })
+    return {
+        "day": _today_key(),
+        "token_budget": settings.AI_DAILY_TOKEN_BUDGET,
+        "limits": usage_snapshot(0)["limits"],
+        "users": rows,
     }
 
 
