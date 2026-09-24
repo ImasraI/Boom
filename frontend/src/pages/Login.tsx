@@ -1,16 +1,7 @@
 import { useState } from "react";
 import { apiUrl, authHeaders, readApiError } from "../api";
 import { NavFn, SignupData, normalizeSignupData } from "../types";
-
-function BackBtn({ onClick }: { onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="w-10 h-10 rounded-2xl bg-[var(--border)] flex items-center justify-center text-[var(--muted)] hover:bg-[var(--border-strong)] transition-colors">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: "scaleX(-1)" }}>
-        <path d="M19 12H5M12 5l-7 7 7 7" />
-      </svg>
-    </button>
-  );
-}
+import { AuthOrbs, BackButton, ErrorBanner, PhoneInput, PasswordInput, PrimaryButton } from "../components/ui";
 
 function profileForPhone(phone: string): SignupData {
   try {
@@ -74,55 +65,53 @@ export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: s
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--surface)] px-6 pt-14 pb-10">
-      <BackBtn onClick={() => nav("landing")} />
-      <div className="mt-10">
-        <p className="text-xs font-bold tracking-[0.2em] text-[var(--accent)] mb-1">خوش برگشتی</p>
-        <h1 className="font-display text-4xl text-[var(--text)] leading-snug">ورود به حساب</h1>
-        <p className="text-[13px] text-[var(--muted)] mt-2">شماره موبایل و رمز عبورت رو وارد کن.</p>
-      </div>
+    <div className="min-h-screen flex flex-col bg-[var(--page-bg)]">
+      <AuthOrbs />
+      <div className="relative flex-1 flex flex-col px-5 pt-6 pb-8">
+        <div className="anim-fade-in"><BackButton onClick={() => nav("landing")} /></div>
 
-      <div className="mt-10 space-y-3">
-        <div className="flex items-center bg-[var(--card)] border-2 border-[var(--border-strong)] focus-within:border-[var(--accent)] rounded-2xl overflow-hidden transition-colors" dir="ltr">
-          <div className="flex items-center px-4 py-4 bg-[var(--surface-2)] border-l border-[var(--border-strong)] flex-shrink-0 gap-1">
-            <span className="text-[15px] font-bold text-[var(--brown-text)]">+98</span>
+        <div className="flex-1 flex flex-col justify-center max-w-md w-full mx-auto">
+          <div className="card-elevated p-7 sm:p-8 anim-fade-up shadow-float">
+            <div className="flex flex-col items-center text-center">
+              <div className="logo-badge w-14 h-14 rounded-2xl flex items-center justify-center mb-4">
+                <span className="font-display text-2xl text-[var(--surface)] leading-none">ب</span>
+              </div>
+              <p className="text-xs font-bold tracking-[0.2em] text-[var(--accent)] mb-1">خوش برگشتی</p>
+              <h1 className="font-display text-4xl text-[var(--text)] leading-snug">ورود به حساب</h1>
+              <p className="text-[13px] text-[var(--muted)] mt-2">شماره موبایل و رمز عبورت رو وارد کن.</p>
+            </div>
+
+            <div className="mt-7 space-y-3.5">
+              <PhoneInput value={phone} onChange={setPhone} autoFocus />
+              <PasswordInput value={password} onChange={setPassword} placeholder="رمز عبور" onEnter={handleSubmit} />
+            </div>
+
+            <ErrorBanner message={error} />
+
+            <div className="mt-7">
+              <PrimaryButton
+                onClick={handleSubmit}
+                disabled={!phone || !password}
+                loading={loading}
+                loadingText="در حال ورود..."
+              >
+                ورود
+              </PrimaryButton>
+            </div>
+
+            <div className="mt-6 flex items-center gap-3">
+              <div className="flex-1 h-px bg-[var(--border-strong)]" />
+              <span className="text-[12px] text-[var(--muted-2)]">یا</span>
+              <div className="flex-1 h-px bg-[var(--border-strong)]" />
+            </div>
+
+            <p className="mt-5 text-center text-[13px] text-[var(--muted)]">
+              هنوز ثبت‌نام نکردی؟{" "}
+              <button onClick={() => nav("signup")} className="text-[var(--accent)] font-bold underline underline-offset-2">ثبت‌نام</button>
+            </p>
           </div>
-          <input autoFocus type="tel" value={phone}
-            onChange={e => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-            placeholder="912 345 6789"
-            className="flex-1 bg-transparent outline-none text-[17px] font-bold text-[var(--text)] placeholder:text-[var(--placeholder)] tracking-widest py-4 px-4 text-left" />
         </div>
-
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && handleSubmit()}
-          placeholder="رمز عبور"
-          className="w-full bg-[var(--card)] border-2 border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-2xl px-5 py-4 text-[17px] font-bold text-[var(--text)] placeholder:text-[var(--placeholder)] transition-colors" />
       </div>
-
-      {error && <p className="text-red-500 text-[13px] mt-3 text-center">{error}</p>}
-
-      <div className="mt-8">
-        <button disabled={!phone || !password || loading} onClick={handleSubmit}
-          className={`w-full py-4 rounded-2xl font-bold text-[15px] transition-all active:scale-95 ${
-            phone && password && !loading
-              ? "bg-[var(--accent)] text-[var(--surface)] hover:bg-[#A85C38] shadow-sm"
-              : "bg-[var(--border-strong)] text-[#B0A898] cursor-not-allowed"
-          }`}>
-          {loading ? "در حال ورود..." : "ورود"}
-        </button>
-      </div>
-
-      <div className="mt-6 flex items-center gap-3">
-        <div className="flex-1 h-px bg-[var(--border-strong)]" />
-        <span className="text-[12px] text-[var(--muted-2)]">یا</span>
-        <div className="flex-1 h-px bg-[var(--border-strong)]" />
-      </div>
-
-      <p className="mt-5 text-center text-[13px] text-[var(--muted)]">
-        هنوز ثبت‌نام نکردی؟{" "}
-        <button onClick={() => nav("signup")} className="text-[var(--accent)] font-bold underline underline-offset-2">ثبت‌نام</button>
-      </p>
     </div>
   );
 }
-

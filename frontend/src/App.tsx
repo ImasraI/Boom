@@ -56,7 +56,7 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
           const active = screen === item.screen;
           return (
             <button key={item.screen} onClick={() => nav(item.screen)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-right transition-all ${
+              className={`press w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-right transition-all ${
                 active ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-strong)]"
               }`}
             >
@@ -68,7 +68,7 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
         })}
         {isAdmin && (
           <button onClick={() => nav("admin")}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-right transition-all ${
+            className={`press w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-right transition-all ${
               screen === "admin" ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-strong)]"
             }`}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -78,7 +78,7 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
       </nav>
       <div className="p-4 border-t border-[var(--border)]">
         <button onClick={() => nav("chat")}
-          className="w-full py-3.5 rounded-2xl bg-[var(--text)] text-[var(--surface)] font-bold text-[13px] flex items-center justify-center gap-2 hover:bg-[var(--text-strong)] transition-colors"
+          className="press w-full py-3.5 rounded-2xl bg-[var(--text)] text-[var(--surface)] font-bold text-[13px] flex items-center justify-center gap-2 hover:bg-[var(--text-strong)] transition-colors"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>

@@ -25,6 +25,12 @@
   --success-text: #6B9E7A;
   --neutral-chip: #F5F5F5;
   --block-shadow: #1b1c1a;
+  /* Elevation + focus (UI refresh) */
+  --accent-rgb: 196 113 74;
+  --shadow-sm: 0 1px 2px rgb(26 17 8 / 0.05), 0 2px 8px rgb(26 17 8 / 0.05);
+  --shadow-md: 0 2px 6px rgb(26 17 8 / 0.06), 0 12px 32px -8px rgb(26 17 8 / 0.14);
+  --shadow-lg: 0 4px 12px rgb(26 17 8 / 0.07), 0 24px 56px -12px rgb(26 17 8 / 0.18);
+  --glow: 0 8px 24px -6px rgb(var(--accent-rgb) / 0.45);
 }
 
 html.dark {
@@ -51,6 +57,11 @@ html.dark {
   --success-text: #8FCB9B;
   --neutral-chip: #2A241E;
   --block-shadow: #f5efe8;
+  --accent-rgb: 212 132 92;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
+  --shadow-md: 0 2px 6px rgb(0 0 0 / 0.45), 0 12px 32px -8px rgb(0 0 0 / 0.55);
+  --shadow-lg: 0 4px 12px rgb(0 0 0 / 0.5), 0 24px 56px -12px rgb(0 0 0 / 0.65);
+  --glow: 0 8px 24px -6px rgb(var(--accent-rgb) / 0.35);
 }
 
 .font-display { font-family: 'Lalezar', 'Vazirmatn', serif; }
@@ -62,6 +73,15 @@ body {
   -webkit-font-smoothing: antialiased;
   background: var(--page-bg);
   color: var(--text);
+}
+
+::selection { background: rgb(var(--accent-rgb) / 0.30); }
+
+/* Visible keyboard focus everywhere (accessibility) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 /* Remap hardcoded light surfaces / text so dark mode covers the whole app */
@@ -186,6 +206,137 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 1px 4px rgba(0,0,0,0.18);
 }
 input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; }
+
+/* Hide number-input spinners (clean step forms) */
+.no-spin::-webkit-outer-spin-button,
+.no-spin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.no-spin { -moz-appearance: textfield; appearance: textfield; }
+
+/* ===================== UI-refresh layer ===================== */
+
+/* Entrance animations (staggered with delay helpers) */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes pop-in {
+  0%   { opacity: 0; transform: scale(0.85); }
+  70%  { transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes floaty {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-7px); }
+}
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+@keyframes spin-slow { to { transform: rotate(360deg); } }
+
+.anim-fade-up   { animation: fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-fade-in   { animation: fade-in 0.5s ease-out both; }
+.anim-pop       { animation: pop-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-shake     { animation: shake-x 0.4s ease-in-out both; }
+.floaty         { animation: floaty 4.5s ease-in-out infinite; }
+.delay-1 { animation-delay: 0.08s; }
+.delay-2 { animation-delay: 0.16s; }
+.delay-3 { animation-delay: 0.26s; }
+.delay-4 { animation-delay: 0.38s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade-up, .anim-fade-in, .anim-pop, .anim-shake, .floaty {
+    animation: none !important;
+  }
+}
+
+/* Elevation helpers (theme-aware via --shadow-* vars) */
+.card-elevated {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  box-shadow: var(--shadow-md);
+}
+.shadow-soft   { box-shadow: var(--shadow-sm); }
+.shadow-raised { box-shadow: var(--shadow-md); }
+.shadow-float  { box-shadow: var(--shadow-lg); }
+.glow-accent   { box-shadow: var(--glow); }
+
+/* Tactile press feedback */
+.press { transition: transform 0.12s ease, box-shadow 0.12s ease, background-color 0.15s ease; }
+.press:active:not(:disabled) { transform: scale(0.97); }
+
+/* Gradient text + logo badge */
+.text-gradient {
+  background: linear-gradient(120deg, var(--accent), #E8A070 60%, var(--accent));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.logo-badge {
+  background:
+    radial-gradient(120% 120% at 20% 15%, #E8A070 0%, var(--accent) 55%, #A85C38 100%);
+  box-shadow: var(--glow);
+}
+
+/* Animated ambient orbs for auth screens */
+.orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(70px);
+  pointer-events: none;
+}
+
+/* OTP boxes */
+.otp-box {
+  width: 46px;
+  height: 56px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+  background: var(--card);
+  border: 2px solid var(--border-strong);
+  border-radius: 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.otp-box:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgb(var(--accent-rgb) / 0.18);
+  transform: translateY(-2px);
+}
+.otp-box.filled { border-color: var(--accent-soft-border); }
+
+/* Password-strength meter segments */
+.strength-seg {
+  height: 5px;
+  flex: 1;
+  border-radius: 99px;
+  background: var(--border-strong);
+  transition: background-color 0.25s ease;
+}
+
+/* Segmented progress (signup) */
+.progress-seg {
+  height: 6px;
+  flex: 1;
+  border-radius: 99px;
+  background: var(--border-strong);
+  overflow: hidden;
+  transition: background-color 0.3s ease;
+}
+.progress-seg.done { background: var(--accent); }
+.progress-seg.current { background: rgb(var(--accent-rgb) / 0.35); }
+
+/* ===================== end UI-refresh layer ===================== */
 
 .schedule-block {
   background-color: var(--block-color, #e2c983);

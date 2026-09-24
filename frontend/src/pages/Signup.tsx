@@ -2,8 +2,31 @@ import { useState } from "react";
 import { apiUrl, readApiError } from "../api";
 import { NavFn, SignupData } from "../types";
 import { MAJORS, GRADES, EXAM_YEARS, TARGET_RANKS, STUDY_HOURS_OPTIONS, TEST_EXAM_OPTIONS } from "../data";
+import {
+  AuthOrbs, BackButton, ErrorBanner, StepHeading, PrimaryButton,
+  PhoneInput, PasswordInput, StrengthMeter, OtpInput, ChoiceButton,
+} from "../components/ui";
 
 interface Props { nav: NavFn; onComplete: (data: SignupData) => void; }
+
+const MAJOR_ICONS: Record<string, string> = {
+  "ریاضی فیزیک": "📐",
+  "علوم تجربی": "🧬",
+  "علوم انسانی": "📚",
+  "هنر": "🎨",
+};
+
+const GRADE_ICONS: Record<string, string> = {
+  "دهم": "🌱",
+  "یازدهم": "🌿",
+  "دوازدهم": "🌳",
+  "فارغ‌التحصیل": "🎓",
+};
+
+/** Stagger delay class for the i-th choice in a list. */
+function stagger(i: number): string {
+  return ["", "delay-1", "delay-2", "delay-3", "delay-4"][i % 5] || "";
+}
 
 export default function Signup({ nav, onComplete }: Props) {
   const [step, setStep] = useState(0);
@@ -26,7 +49,6 @@ export default function Signup({ nav, onComplete }: Props) {
   const [submitting, setSubmitting] = useState(false);
 
   const TOTAL = 10;
-  const progress = Math.max(15, ((step + 1) / TOTAL) * 100);
 
   async function advance() {
     if (submitting) return;
@@ -151,23 +173,13 @@ export default function Signup({ nav, onComplete }: Props) {
       content: (
         <input autoFocus value={name} onChange={e => setName(e.target.value)}
           placeholder="مثلاً پریسا" onKeyDown={e => e.key === "Enter" && canContinue && advance()}
-          className="w-full bg-[var(--card)] border-2 border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-2xl px-5 py-4 text-lg font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] transition-colors" />
+          className="w-full bg-[var(--card)] border-2 border-[var(--border-strong)] focus:border-[var(--accent)] focus:shadow-soft outline-none rounded-2xl px-5 py-4 text-lg font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] placeholder:font-medium transition-all" />
       ),
     },
     {
       q: "شماره موبایلت چیه؟",
       sub: "برای ورود به حسابت ازش استفاده می‌کنی.",
-      content: (
-        <div className="flex items-center bg-[var(--card)] border-2 border-[var(--border-strong)] focus-within:border-[var(--accent)] rounded-2xl overflow-hidden transition-colors" dir="ltr">
-          <div className="flex items-center px-4 py-4 bg-[var(--surface-2)] border-l border-[var(--border-strong)] flex-shrink-0">
-            <span className="text-[15px] font-bold text-[var(--brown-text)]">+98</span>
-          </div>
-          <input autoFocus type="tel" value={phone}
-            onChange={e => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-            placeholder="912 345 6789"
-            className="flex-1 bg-transparent outline-none text-[17px] font-bold text-[var(--text)] placeholder:text-[var(--placeholder)] tracking-widest py-4 px-4 text-left" />
-        </div>
-      ),
+      content: <PhoneInput value={phone} onChange={setPhone} autoFocus onEnter={() => canContinue && advance()} />,
     },
     {
       q: bypassMode ? "کد عبور موقت چیه؟" : "کد تایید پیامک‌شده چیه؟",
@@ -176,25 +188,23 @@ export default function Signup({ nav, onComplete }: Props) {
         : `کد ۶ رقمی را که به ${phone} پیامک کردیم وارد کنید.`,
       content: (
         <div>
-          <input autoFocus type="tel" value={code} dir="ltr"
-            onChange={e => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            onKeyDown={e => e.key === "Enter" && canContinue && advance()}
-            placeholder="- - - - - -"
-            className="w-full bg-[var(--card)] border-2 border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-2xl px-5 py-4 text-2xl font-bold text-[var(--text)] placeholder:text-[var(--placeholder)] tracking-[0.5em] text-center transition-colors" />
+          <OtpInput value={code} onChange={setCode} onComplete={() => canContinue && advance()} />
           {bypassMode && (
-            <p className="text-[12px] text-[var(--muted-2)] mt-2 text-center">
+            <p className="text-[12px] text-[var(--muted-2)] mt-3 text-center">
               پیامک موقتاً غیرفعال است؛ ورود با کد پشتیبانی
             </p>
           )}
           {!bypassMode && debugCode && (
-            <p className="text-[12px] text-[var(--muted-2)] mt-2 text-center" dir="ltr">
+            <p className="text-[12px] text-[var(--muted-2)] mt-3 text-center" dir="ltr">
               debug mode: code = {debugCode}
             </p>
           )}
-          <button onClick={resendCode} disabled={submitting}
-            className="mt-3 text-[12px] font-bold text-[var(--accent)] hover:underline disabled:opacity-40">
-            کد دریافت نکردید؟ ارسال دوباره
-          </button>
+          <div className="mt-4 text-center">
+            <button onClick={resendCode} disabled={submitting}
+              className="text-[12.5px] font-bold text-[var(--accent)] hover:underline disabled:opacity-40 transition-opacity">
+              کد دریافت نکردید؟ ارسال دوباره
+            </button>
+          </div>
         </div>
       ),
     },
@@ -203,19 +213,14 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "حداقل ۴ کاراکتر. برای ورود دوباره ازش استفاده می‌کنی.",
       content: (
         <div className="flex flex-col gap-3">
-          <input autoFocus type="password" value={password} onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && canContinue && advance()}
-            placeholder="••••••••"
-            className="w-full bg-[var(--card)] border-2 border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-2xl px-5 py-4 text-lg font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] transition-colors" />
-          <input type="password" value={confirmPassword}
-            onChange={e => setConfirmPassword(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && canContinue && advance()}
+          <PasswordInput value={password} onChange={setPassword} placeholder="••••••••" autoFocus />
+          <StrengthMeter pw={password} />
+          <PasswordInput
+            value={confirmPassword} onChange={setConfirmPassword}
             placeholder="تکرار رمز عبور"
-            className={`w-full bg-[var(--card)] border-2 outline-none rounded-2xl px-5 py-4 text-lg font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] transition-colors ${
-              confirmPassword && password !== confirmPassword
-                ? "border-red-400"
-                : "border-[var(--border-strong)] focus:border-[var(--accent)]"
-            }`} />
+            error={Boolean(confirmPassword && password !== confirmPassword)}
+            onEnter={() => canContinue && advance()}
+          />
           {confirmPassword && password !== confirmPassword && (
             <p className="text-red-500 text-[12px] text-right">رمزها یکسان نیستند</p>
           )}
@@ -227,11 +232,10 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "برنامه‌ی درسی‌ات رو بر اساسش تنظیم می‌کنیم.",
       content: (
         <div className="flex flex-col gap-2">
-          {MAJORS.map(m => (
-            <button key={m} onClick={() => pick(setMajor, m)}
-              className={`py-3.5 px-5 rounded-2xl text-right font-semibold text-[14px] transition-all ${
-                major === m ? "bg-[var(--accent)] text-[var(--surface)]" : "bg-[var(--card)] border border-[var(--border-strong)] text-[var(--text-strong)] hover:border-[var(--accent)]"
-              }`}>{m}</button>
+          {MAJORS.map((m, i) => (
+            <ChoiceButton key={m} selected={major === m} onClick={() => pick(setMajor, m)} delay={stagger(i)}>
+              <span className="me-2">{MAJOR_ICONS[m] || "🎓"}</span>{m}
+            </ChoiceButton>
           ))}
         </div>
       ),
@@ -241,11 +245,10 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "بر اساسش زمان‌بندی‌ات رو تنظیم می‌کنیم.",
       content: (
         <div className="flex flex-col gap-2">
-          {GRADES.map(g => (
-            <button key={g} onClick={() => pick(setGrade, g)}
-              className={`py-3.5 px-5 rounded-2xl text-right font-semibold text-[14px] transition-all ${
-                grade === g ? "bg-[var(--accent)] text-[var(--surface)]" : "bg-[var(--card)] border border-[var(--border-strong)] text-[var(--text-strong)] hover:border-[var(--accent)]"
-              }`}>{g}</button>
+          {GRADES.map((g, i) => (
+            <ChoiceButton key={g} selected={grade === g} onClick={() => pick(setGrade, g)} delay={stagger(i)}>
+              <span className="me-2">{GRADE_ICONS[g] || "🏫"}</span>{g}
+            </ChoiceButton>
           ))}
         </div>
       ),
@@ -254,11 +257,13 @@ export default function Signup({ nav, onComplete }: Props) {
       q: "کدوم سال می‌خوای کنکور بدی؟",
       sub: "افق برنامه‌ریزی‌ات رو مشخص می‌کنه.",
       content: (
-        <div className="grid grid-cols-2 gap-2">
-          {EXAM_YEARS.map(y => (
+        <div className="grid grid-cols-2 gap-2.5">
+          {EXAM_YEARS.map((y, i) => (
             <button key={y} onClick={() => pick(setExamYear, y)}
-              className={`py-4 rounded-2xl font-bold text-xl text-center transition-all ${
-                examYear === y ? "bg-[var(--accent)] text-[var(--surface)]" : "bg-[var(--card)] border border-[var(--border-strong)] text-[var(--text-strong)] hover:border-[var(--accent)]"
+              className={`press anim-fade-up ${stagger(i)} py-6 rounded-2xl font-bold text-2xl text-center font-display transition-all ${
+                examYear === y
+                  ? "bg-[var(--accent)] text-[var(--surface)] glow-accent"
+                  : "bg-[var(--card)] border border-[var(--border-strong)] text-[var(--text-strong)] hover:border-[var(--accent)] shadow-soft"
               }`}>{y}</button>
           ))}
         </div>
@@ -269,11 +274,10 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "صادقانه بگو — سطح و سرعت برنامه‌ات رو تعیین می‌کنه.",
       content: (
         <div className="flex flex-col gap-2">
-          {TARGET_RANKS.map(r => (
-            <button key={r} onClick={() => pick(setTargetRank, r)}
-              className={`py-3.5 px-5 rounded-2xl text-right font-semibold text-[14px] transition-all ${
-                targetRank === r ? "bg-[var(--accent)] text-[var(--surface)]" : "bg-[var(--card)] border border-[var(--border-strong)] text-[var(--text-strong)] hover:border-[var(--accent)]"
-              }`}>{r}</button>
+          {TARGET_RANKS.map((r, i) => (
+            <ChoiceButton key={r} selected={targetRank === r} onClick={() => pick(setTargetRank, r)} delay={stagger(i)}>
+              <span className="me-2">🎯</span>{r}
+            </ChoiceButton>
           ))}
         </div>
       ),
@@ -283,11 +287,10 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "یه روز معمولی — نه بهترین و نه بدترین روزت.",
       content: (
         <div className="flex flex-col gap-2">
-          {STUDY_HOURS_OPTIONS.map(h => (
-            <button key={h} onClick={() => pick(setStudyHours, h)}
-              className={`py-3.5 px-5 rounded-2xl text-right font-semibold text-[14px] transition-all ${
-                studyHours === h ? "bg-[var(--accent)] text-[var(--surface)]" : "bg-[var(--card)] border border-[var(--border-strong)] text-[var(--text-strong)] hover:border-[var(--accent)]"
-              }`}>{h}</button>
+          {STUDY_HOURS_OPTIONS.map((h, i) => (
+            <ChoiceButton key={h} selected={studyHours === h} onClick={() => pick(setStudyHours, h)} delay={stagger(i)}>
+              <span className="me-2">⏱</span>{h}
+            </ChoiceButton>
           ))}
         </div>
       ),
@@ -297,84 +300,79 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "همه رو انتخاب کن. نتایجت رو باهاشون هماهنگ می‌کنیم.",
       content: (
         <div className="flex flex-col gap-2">
-          {TEST_EXAM_OPTIONS.map(e => (
-            <button key={e} onClick={() => toggleExam(e)}
-              className={`py-3 px-5 rounded-2xl text-right font-semibold text-[14px] transition-all flex items-center gap-3 ${
-                testExams.includes(e) ? "bg-[var(--accent)] text-[var(--surface)]" : "bg-[var(--card)] border border-[var(--border-strong)] text-[var(--text-strong)] hover:border-[var(--accent)]"
-              }`}>
-              <div className={`w-5 h-5 rounded-lg border-2 flex items-center justify-center flex-shrink-0 ${
-                testExams.includes(e) ? "border-white/50 bg-[var(--card)]/20" : "border-[var(--placeholder)]"
-              }`}>
-                {testExams.includes(e) && (
-                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                    <path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-                  </svg>
-                )}
-              </div>
-              <span className="flex-1 text-right">{e}</span>
-            </button>
+          {TEST_EXAM_OPTIONS.map((e, i) => (
+            <ChoiceButton key={e} selected={testExams.includes(e)} onClick={() => toggleExam(e)} delay={stagger(i)}>
+              <span className="me-2">📝</span>{e}
+            </ChoiceButton>
           ))}
           {testExams.filter(e => !TEST_EXAM_OPTIONS.includes(e)).map(e => (
-            <button key={e} onClick={() => toggleExam(e)}
-              className="py-3 px-5 rounded-2xl text-right font-semibold text-[14px] bg-[var(--accent)] text-[var(--surface)] flex items-center gap-3 transition-all">
-              <div className="w-5 h-5 rounded-lg border-2 border-white/50 bg-[var(--card)]/20 flex items-center justify-center flex-shrink-0">
-                <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </div>
-              <span className="flex-1 text-right">{e}</span>
-              <span className="text-white/60 text-xs">سفارشی</span>
-            </button>
+            <ChoiceButton key={e} selected onClick={() => toggleExam(e)}>
+              <span className="me-2">✏️</span>{e}
+              <span className="text-[11px] opacity-70 ms-2">(سفارشی)</span>
+            </ChoiceButton>
           ))}
-          <div className="flex gap-2 mt-1">
+          <div className="flex gap-2 mt-1.5">
             <button onClick={addCustom} disabled={!customExam.trim()}
-              className="px-4 py-2.5 rounded-xl bg-[var(--border)] text-[var(--muted)] font-bold text-[13px] hover:bg-[var(--border-strong)] disabled:opacity-40 transition-colors flex-shrink-0">افزودن</button>
+              className="press px-4 py-2.5 rounded-xl bg-[var(--border)] text-[var(--muted)] font-bold text-[13px] hover:bg-[var(--border-strong)] disabled:opacity-40 transition-colors flex-shrink-0">افزودن</button>
             <input value={customExam} onChange={e => setCustomExam(e.target.value)}
               onKeyDown={e => e.key === "Enter" && addCustom()}
               placeholder="آزمون دیگه‌ای داری؟"
-              className="flex-1 bg-[var(--card)] border border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-xl px-4 py-2.5 text-[13px] font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] transition-colors text-right" />
+              className="flex-1 min-w-0 bg-[var(--card)] border border-[var(--border-strong)] focus:border-[var(--accent)] outline-none rounded-xl px-4 py-2.5 text-[13px] font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] transition-colors text-right" />
           </div>
         </div>
       ),
     },
   ];
 
+  const showCta = step === 0 || step === 1 || step === 2 || step === 3 || step === TOTAL - 1;
+  const ctaLabel =
+    step === 1 ? (submitting ? "در حال ارسال کد..." : "ادامه")
+    : step === 3 ? (submitting ? "در حال تایید..." : "تایید و ساخت حساب ←")
+    : step === TOTAL - 1 ? "ثبت‌نام و ورود ←"
+    : "ادامه";
+
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--surface)]">
-      <div className="sticky top-0 z-10 bg-[var(--surface)] px-5 pt-5 pb-3">
-        <div className="h-3 bg-[var(--border)] rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-500 ease-out"
-            style={{ width: `${progress}%`, background: "linear-gradient(to left, #E8A070, var(--accent))" }} />
+    <div className="min-h-screen flex flex-col bg-[var(--page-bg)]">
+      <AuthOrbs />
+      {/* Segmented progress + counter + back */}
+      <div className="sticky top-0 z-10 bg-[var(--page-bg)]/90 backdrop-blur-sm px-5 pt-5 pb-3">
+        <div className="max-w-lg mx-auto">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[12px] font-bold text-[var(--muted-2)] tabular-nums">{step + 1} از {TOTAL}</span>
+            <BackButton
+              onClick={() => (step === 0 ? nav("landing") : setStep(s => ((authDisabled && s === 3) ? 1 : s - 1)))}
+            />
+          </div>
+          <div className="flex gap-1.5">
+            {Array.from({ length: TOTAL }).map((_, i) => (
+              <span key={i} className={`progress-seg ${i < step ? "done" : i === step ? "current" : ""}`} />
+            ))}
+          </div>
         </div>
       </div>
-      <div className="flex items-center justify-between px-5 pb-2">
-        <span className="text-[12px] font-bold text-[var(--muted-2)]">{step + 1} از {TOTAL}</span>
-        <button onClick={() => step === 0 ? nav("landing") : setStep(s => (authDisabled && s === 3) ? 1 : s - 1)}
-          className="w-9 h-9 rounded-xl bg-[var(--border)] flex items-center justify-center text-[var(--muted)] hover:bg-[var(--border-strong)] transition-colors">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: "scaleX(-1)" }}>
-            <path d="M19 12H5M12 5l-7 7 7 7" />
-          </svg>
-        </button>
-      </div>
-      <div className="flex-1 flex flex-col px-6 pt-3 pb-8 overflow-y-auto">
-        <div className="mb-6">
-          <h2 className="font-display text-3xl text-[var(--text)] leading-snug">{steps[step].q}</h2>
-          <p className="text-[13px] text-[var(--muted)] mt-1">{steps[step].sub}</p>
+
+      <div className="relative flex-1 flex flex-col px-5 pt-4 pb-8 overflow-y-auto">
+        <div className="w-full max-w-lg mx-auto flex flex-col flex-1">
+          <div key={step} className="anim-fade-up">
+            <StepHeading title={steps[step].q} sub={steps[step].sub} />
+            <div className="mt-6">{steps[step].content}</div>
+            <ErrorBanner message={error} />
+          </div>
+
+          {showCta && (
+            <div className="mt-auto pt-8">
+              <PrimaryButton
+                onClick={advance}
+                disabled={!canContinue}
+                loading={submitting && (step === 1 || step === 3)}
+                loadingText={ctaLabel}
+              >
+                {ctaLabel}
+              </PrimaryButton>
+            </div>
+          )}
         </div>
-        {steps[step].content}
-        {error && <p className="text-red-500 text-[13px] mt-3 text-center">{error}</p>}
       </div>
-      {(step === 0 || step === 1 || step === 2 || step === 3 || step === TOTAL - 1) && (
-        <div className="px-6 pb-10 pt-3 bg-[var(--surface)]">
-          <button disabled={!canContinue || submitting} onClick={advance}
-            className={`w-full py-4 rounded-2xl font-bold text-[15px] transition-all active:scale-95 ${
-              canContinue && !submitting ? "bg-[var(--accent)] text-[var(--surface)] hover:bg-[#A85C38] shadow-sm" : "bg-[var(--border-strong)] text-[#B0A898] cursor-not-allowed"
-            }`}>
-            {step === 1 ? (submitting ? "در حال ارسال کد..." : "ادامه")
-              : step === 3 ? (submitting ? "در حال تایید..." : "تایید و ساخت حساب ←")
-              : step === TOTAL - 1 ? "ثبت‌نام و ورود ←" : "ادامه"}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
-
