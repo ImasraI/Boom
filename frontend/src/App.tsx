@@ -47,7 +47,7 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
           </div>
           <div>
             <p className="font-display text-2xl text-[var(--text)] leading-none">بوم</p>
-            <p className="text-[10px] text-[var(--muted-2)] font-medium mt-0.5">برنامهریز کنکور</p>
+            <p className="text-[10px] text-[var(--muted-2)] font-medium mt-0.5">برنامه ریز کنکور</p>
           </div>
         </div>
       </div>

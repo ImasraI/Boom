@@ -4,19 +4,19 @@ Uses the SMS.ir "send verify" REST endpoint with a panel-side template:
     POST {SMS_BASE_URL}/v1/send/verify
     headers: x-api-key: <SMS_API_KEY>, Content-Type: application/json
     body:    {"mobile": "9xxxxxxxxx", "templateId": 123456,
-              "parameters": [{"name": "Code", "value": "12345"}]}
+              "parameters": [{"name": "OTP", "value": "12345"}]}
 
 Notes (matched to the SMS.ir docs / panel template):
-- "templateId" must be a NUMBER, not a string.
-- The parameter name must match the template's placeholder name exactly
-  (SMS.ir's default template uses "Code", capital C).
-- SMS.ir replies HTTP 200 even when the send fails; success is only
-  "status": 1 in the JSON body, so that is what we validate.
+    - "templateId" must be a NUMBER, not a string.
+    - The parameter name must match the template's placeholder name exactly
+      (e.g., if template has #OTP#, use "OTP"; if {CODE}, use "CODE").
+    - SMS.ir replies HTTP 200 even when the send fails; success is only
+      "status": 1 in the JSON body, so that is what we validate.
 
-The template must contain the {Code} parameter (create it in the SMS.ir
-panel under the verification-templates section and put its numeric id in
-SMS_VERIFY_TEMPLATE_ID).
-"""
+    The template must contain the #OTP# parameter (create it in the SMS.ir
+    panel under the verification-templates section and put its numeric id in
+    SMS_VERIFY_TEMPLATE_ID).
+    """
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def send_verification_code(mobile: str, code: str) -> None:
     payload = {
         "mobile": mobile,
         "templateId": int(template_id),  # API expects a number
-        "parameters": [{"name": "Code", "value": code}],
+        "parameters": [{"name": "OTP", "value": code}],
     }
     try:
         resp = requests.post(

@@ -113,6 +113,11 @@ echo '/dev/oracleoci/oraclevdb /data ext4 defaults 0 2' | sudo tee -a /etc/fstab
 sudo chown -R ubuntu:ubuntu /data
 ```
 > **Note**: The mount point **must be `/data`** — the backend expects `CHROMA_DIR=data/chroma_db`, `UPLOAD_DIR=data/uploads`, `IMAGES_DIR=data/page_images` all under `/data`.
+> If you actually mount the block volume at `/data`, either symlink it
+> (`ln -s /data ~/boom/backend/data`) or set the `*_DIR` vars to absolute
+> `/data/…` paths. The systemd unit's `WorkingDirectory` is
+> `/home/ubuntu/boom/backend`, so **relative** `*_DIR` values resolve to
+> `~/boom/backend/data/`, **not** `/data`.
 
 ### 1.4 Install System Dependencies
 ```bash
@@ -167,7 +172,8 @@ EMBEDDING_MODEL_NAME=nomic-embed-text
 EMBEDDING_BASE_URL=http://localhost:11434
 EMBEDDING_DEVICE=cpu
 
-# Storage paths (all under /data)
+# Storage paths — relative to the systemd unit's WorkingDirectory
+# (/home/ubuntu/boom/backend), i.e. these resolve to ~/boom/backend/data/…
 CHROMA_DIR=data/chroma_db
 UPLOAD_DIR=data/uploads
 IMAGES_DIR=data/page_images
@@ -182,6 +188,60 @@ SECRET_KEY=generate-with-openssl-rand-base64-32
 ```
 
 > **Note**: No R2 variables needed — all storage is local disk.
+
+---
+
+## STEP 2.5 — Reference Data: Book Library, Vector Store & OCR Corpus
+
+The planning AI grounds its test blocks in the **real books** on the server —
+that's why a locally generated plan names concrete sources like
+«۲۰ تست حرکت‌شناسی از فیزیک ۱ خیلی سبز، صفحه ۱۵۴ تا ۱۶۲» while a bare server
+only manages generic titles like «۱۶ تست از منابع کنکور».
+
+`backend/data/` is **not in git** (see `.gitignore`) — it must be transferred
+to the VM once, before the first backend start (startup auto-ingests whatever
+it finds). All paths assume the repo lives at `/home/ubuntu/boom`; relative
+paths in `.env` resolve against the systemd unit's `WorkingDirectory`, i.e.
+`~/boom/backend/data/`.
+
+Run these **from your laptop**, inside the repo:
+
+```bash
+ssh ubuntu@<VM> "mkdir -p ~/boom/backend/data"
+
+# 1. Raw book PDFs — the on-disk catalog the planner names as sources.
+#    Layout: data/raw/<category>/<grade>/<subject>/<Book Name>.pdf with
+#    category one of: test-books, ministerial-books, custom-sources, plans
+rsync -avP backend/data/raw/ ubuntu@<VM>:~/boom/backend/data/raw/
+
+# 2. Chroma vector store (precomputed page-image + OCR-text embeddings).
+#    Copying it skips a multi-hour re-embed on the free-tier CPU.
+rsync -avP backend/data/chroma_db/ ubuntu@<VM>:~/boom/backend/data/chroma_db/
+
+# 3. OCR text corpus + rendered page images (vision path + pending OCR).
+rsync -avP backend/data/ocr/ ubuntu@<VM>:~/boom/backend/data/ocr/
+rsync -avP backend/data/page_images/ ubuntu@<VM>:~/boom/backend/data/page_images/
+```
+
+On a slow connection, items 2+3 are the big ones — shipping just `raw/`
+also works, but the VM then re-renders and re-embeds every book on first
+startup (hours on the Always-Free CPU, and bulk OCR is capped per day by
+`GEMINI_OCR_DAILY_CAP`).
+
+**Verify** after the backend has started once:
+
+```bash
+ssh ubuntu@<VM> 'cd ~/boom/backend && .venv/bin/python -m app.rag.store_status'
+```
+
+- `Raw PDFs available:` must list your books — this feeds the planner's
+  «منابع موجود در سامانه» catalog; empty means generic titles again.
+- The **IMAGE store** should show all raw books embedded as page images;
+  the **TEXT store** fills in as OCR completes (`python -m app.rag.ocr_corpus`).
+
+**No books anywhere?** The planner still works, but falls back to
+`_default_week_plan()` with titles like «۲۰ تست از منابع کنکور» — that
+generic output is the symptom; this missing data is the cause.
 
 ---
 
@@ -424,6 +484,7 @@ journalctl --vacuum-time=7d
 | CORS error in browser | Wrong `CORS_ORIGINS` | Match exact frontend domain(s) |
 | Schedule changes not visible | Frontend ignores `plan_update` | Ensure `Chat.tsx` handles `data.plan_update` |
 | `KeyError: '_type'` in Chroma | Old DB schema | Delete `/data/chroma_db` and re-ingest |
+| Plan blocks say «تست از منابع کنکور» instead of real book/page | `backend/data/` (raw PDFs / chroma store) never copied to the VM | Transfer `backend/data/raw/` + `chroma_db/` (STEP 2.5), restart backend |
 | Caddy cert not issued | Port 80 blocked | Open port 80 in Oracle security list |
 
 ---
@@ -449,6 +510,8 @@ journalctl --vacuum-time=7d
 - [ ] `boom-backend.service` running, logs clean
 - [ ] Ollama running (`ollama serve`), `nomic-embed-text` pulled
 - [ ] `.env` configured on backend (Groq key, CORS origins)
+- [ ] `backend/data/raw/` + `chroma_db/` transferred to the VM (STEP 2.5)
+- [ ] `python -m app.rag.store_status` lists all books & image-embedded pages
 - [ ] Frontend deployed to Cloudflare Pages, `VITE_API_URL` set
 - [ ] Cloudflare DNS: A records for `api` and `app`, proxied
 - [ ] SSL: Full (strict), Always Use HTTPS on
