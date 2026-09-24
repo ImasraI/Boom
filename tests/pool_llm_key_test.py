@@ -32,6 +32,7 @@ def _settings(**over):
         GEMINI_BASE_URL="",
         POOL_LLM_API_KEY="",
         POOL_LLM_MODEL_NAME="",
+        POOL_LLM_PROVIDER="",
     )
     base.update(over)
     return SimpleNamespace(**base)

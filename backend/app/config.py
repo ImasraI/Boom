@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # to share the main LLM_API_KEY (old behavior).
     POOL_LLM_API_KEY: str = ""
     POOL_LLM_MODEL_NAME: str = ""  # empty = LLM_MODEL_NAME
+    # Optional provider override for MOCK GENERATION only (e.g. "cerebras"
+    # while the chatbot runs on another provider). Empty = LLM_PROVIDER.
+    POOL_LLM_PROVIDER: str = ""
     VISION_LLM_PROVIDER: str = "gemini"  # Options: "gemini", "groq", "ollama", "mock"
     VISION_LLM_MODEL_NAME: str = "gemini-3.6-flash"
 
@@ -45,6 +48,14 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     GEMINI_MODEL_NAME: str = "gemini-3.6-flash"
+
+    # Cerebras Inference (wafer-scale hardware, OpenAI-compatible API).
+    # Free tier: ~30 RPM / ~1M tokens per day - the most generous free token
+    # budget of the three providers, and extremely fast (>1000 tok/s), so it
+    # suits the interactive chatbot and the token-heavy mock generation.
+    CEREBRAS_API_KEY: str = ""
+    CEREBRAS_BASE_URL: str = "https://api.cerebras.ai/v1"
+    CEREBRAS_MODEL_NAME: str = "gpt-oss-120b"
 
     # SMS signup verification (SMS.ir / Melipayamak panel).
     # Create a verification template containing {CODE} in the panel, then put

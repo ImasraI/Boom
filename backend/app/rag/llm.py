@@ -1,13 +1,19 @@
 """
-LLM layer - Direct Ollama API client.
+LLM layer - pluggable OpenAI-compatible providers.
 
-Two implementations are available:
+Available implementations:
 1. MockLLMClient: Used for initial frontend/backend testing without an API key.
 2. OllamaLLMClient: Direct HTTP client for Ollama's chat completion API.
 3. GroqLLMClient: Client for Groq's OpenAI-compatible API.
-4. OpenAICompatibleClient: Generic OpenAI-compatible client.
+4. GeminiLLMClient: Gemini's /v1beta/openai endpoint (vision capable,
+   optional GEMINI_PROXY for geo-blocked regions).
+5. CerebrasLLMClient: Cerebras Inference (fastest free tier, ~1M tokens/day).
+6. OpenAICompatibleClient: Generic OpenAI-compatible client.
 
-The implementation is selected through the LLM_PROVIDER setting in .env.
+The chat/planning provider is selected through LLM_PROVIDER in .env; mock
+(pool) generation can use a different provider/key via POOL_LLM_PROVIDER /
+POOL_LLM_API_KEY so the token-heavy booklet builds never starve the
+chatbot's quota. Vision keeps its own VISION_LLM_PROVIDER (usually Gemini).
 """
 
 from abc import ABC, abstractmethod
@@ -442,20 +448,34 @@ class GeminiLLMClient(BaseLLMClient):
         temperature: float,
         max_tokens: int,
         timeout: float = 300.0,
+        proxy: str = "",
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
+        self.proxy = (proxy or "").strip()
         self.client = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
+            proxy=self.proxy or None,  # Gemini is geo-blocked in some regions
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
         )
+        # Token usage of the last SUCCESSFUL generate(); zeros until then.
+        self.last_usage = ZERO_USAGE
+
+    @property
+    def _is_thinking_model(self) -> bool:
+        # Gemini 3.x flash/pro "think" before answering: hidden thinking
+        # tokens silently consume the max_tokens completion budget (observed:
+        # 207 of a 220-token budget spent thinking, empty visible answer).
+        # Pinning thinking off gives predictable output size and ~4x lower
+        # latency on the free tier.
+        return self.model.startswith("gemini-3")
 
     def _encode_images(
         self, images: Sequence[ImageInput]
@@ -515,6 +535,7 @@ class GeminiLLMClient(BaseLLMClient):
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": max_tokens or self.max_tokens,
+            **({"reasoning_effort": "none"} if self._is_thinking_model else {}),
         }
 
     def generate(
@@ -528,19 +549,24 @@ class GeminiLLMClient(BaseLLMClient):
         payload = self._prepare_payload(messages, max_tokens=max_tokens, images=images)
         req_timeout = timeout if timeout is not None else self.timeout
 
+        self.last_usage = ZERO_USAGE  # stays zero unless a response succeeds
         last_error = ""
         for attempt in range(1, 5):
+            wait_s = 2 * attempt  # default short backoff
             try:
                 resp = self.client.post(url, json=payload, timeout=req_timeout)
                 if resp.status_code == 429 or resp.status_code >= 500:
                     last_error = f"HTTP {resp.status_code}"
-                    time.sleep(2 * attempt)
+                    if resp.status_code == 429:
+                        wait_s = _retry_after_seconds(resp, fallback=wait_s)
+                    time.sleep(wait_s)
                     continue
                 resp.raise_for_status()
                 data = resp.json()
                 if "choices" in data and len(data["choices"]) > 0:
                     content = data["choices"][0].get("message", {}).get("content")
                     if content:
+                        self.last_usage = _usage_from_openai(data)
                         return content
                     # 200 with empty content -> treat as a retryable hiccup
                     last_error = "empty completion"
@@ -550,13 +576,14 @@ class GeminiLLMClient(BaseLLMClient):
                 last_error = "timeout"
             except httpx.HTTPStatusError as e:
                 last_error = f"HTTP {e.response.status_code}" if e.response is not None else str(e)
-                if resp.status_code not in (429, 500, 502, 503, 504):
+                status = e.response.status_code if e.response is not None else 0
+                if status not in (429, 500, 502, 503, 504):
                     break
             except Exception as e:
                 last_error = str(e)
             logger.warning("Gemini request attempt %d failed (%s); retrying...",
                            attempt, last_error)
-            time.sleep(2 * attempt)
+            time.sleep(wait_s)
 
         logger.warning("Gemini request failed after retries: %s", last_error)
         return ""
@@ -570,25 +597,223 @@ class GeminiLLMClient(BaseLLMClient):
         payload = self._prepare_payload(messages, images=images)
         payload["stream"] = True
 
-        try:
-            with self.client.stream("POST", url, json=payload) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line or line == "data: [DONE]":
-                        continue
-                    if line.startswith("data: "):
-                        line = line[6:]
-                    try:
-                        chunk = json.loads(line)
-                        if "choices" in chunk and len(chunk["choices"]) > 0:
-                            content = chunk["choices"][0].get("delta", {}).get("content", "")
-                            if content:
-                                yield content
-                    except json.JSONDecodeError:
-                        continue
-        except Exception as e:
-            logger.warning(f"Gemini streaming request failed: {e}")
-            yield f"خطا: {e}"
+        # Retry only the connection phase (same contract as Groq): a 429
+        # fires before any content is yielded, so a retry never duplicates
+        # output. Once streaming has started, errors surface as before.
+        for attempt in range(1, 4):
+            try:
+                with self.client.stream("POST", url, json=payload) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line or line == "data: [DONE]":
+                            continue
+                        if line.startswith("data: "):
+                            line = line[6:]
+                        try:
+                            chunk = json.loads(line)
+                            if "choices" in chunk and len(chunk["choices"]) > 0:
+                                content = chunk["choices"][0].get("delta", {}).get("content", "")
+                                if content:
+                                    yield content
+                        except json.JSONDecodeError:
+                            continue
+                return
+            except httpx.HTTPStatusError as e:
+                retryable = (
+                    e.response is not None and e.response.status_code == 429
+                )
+                if not retryable or attempt >= 3:
+                    logger.warning(f"Gemini streaming request failed: {e}")
+                    yield f"خطا: {e}"
+                    return
+                wait = _retry_after_seconds(e.response, fallback=2.0 * attempt)
+                logger.warning(
+                    "Gemini stream rate-limited (429); waiting %.0fs (attempt %d).",
+                    wait, attempt,
+                )
+                time.sleep(wait)
+            except Exception as e:
+                logger.warning(f"Gemini streaming request failed: {e}")
+                yield f"خطا: {e}"
+                return
+
+
+class CerebrasLLMClient(BaseLLMClient):
+    """HTTP client for Cerebras Inference's OpenAI-compatible API.
+
+    The free tier is the most generous of the supported providers (~30 RPM,
+    ~1M tokens/day) and the wafer-scale hardware streams >1000 tok/s, so it
+    suits both the interactive chatbot and token-heavy booklet generation.
+    gpt-oss models emit hidden analysis tokens like Groq's, so the same
+    reasoning_effort=low + completion-floor handling applies.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        temperature: float,
+        max_tokens: int,
+        timeout: float = 300.0,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        self.client = httpx.Client(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        # Token usage of the last SUCCESSFUL generate(); zeros until then.
+        self.last_usage = ZERO_USAGE
+
+    @property
+    def _is_reasoning_model(self) -> bool:
+        # gpt-oss emits hidden "analysis" tokens that consume the completion
+        # budget before the visible answer is written (same as Groq).
+        return self.model.startswith("gpt-oss") or self.model.startswith("openai/gpt-oss")
+
+    def _prepare_payload(
+        self,
+        messages: List[LLMMessage],
+        max_tokens: Optional[int] = None,
+    ):
+        budget = max_tokens or self.max_tokens
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": self.temperature,
+        }
+        if self._is_reasoning_model:
+            # Small budgets can be eaten entirely by reasoning -> empty
+            # content with finish_reason=length (see GroqLLMClient).
+            payload["reasoning_effort"] = "low"
+            payload["max_completion_tokens"] = max(budget, 1024)
+        else:
+            payload["max_tokens"] = budget
+        return payload
+
+    def generate(
+        self,
+        messages: List[LLMMessage],
+        max_tokens: Optional[int] = None,
+        timeout: Optional[float] = None,
+        images: Optional[Sequence[ImageInput]] = None,
+    ) -> str:
+        if images:
+            logger.warning("Cerebras does not support image inputs. Ignoring images.")
+        url = f"{self.base_url}/chat/completions"
+        payload = self._prepare_payload(messages, max_tokens=max_tokens)
+        req_timeout = timeout if timeout is not None else self.timeout
+
+        self.last_usage = ZERO_USAGE  # stays zero unless a response succeeds
+        last_error = ""
+        for attempt in range(1, 5):
+            wait_s = 2 * attempt  # default short backoff
+            try:
+                resp = self.client.post(url, json=payload, timeout=req_timeout)
+                # 429/5xx handled inline so Retry-After is honored before any
+                # raise_for_status() turn it into a generic failure.
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    last_error = f"HTTP {resp.status_code}"
+                    if resp.status_code == 429:
+                        wait_s = _retry_after_seconds(resp, fallback=wait_s)
+                    time.sleep(wait_s)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                if "choices" in data and len(data["choices"]) > 0:
+                    choice = data["choices"][0]
+                    content = choice.get("message", {}).get("content")
+                    if content:
+                        self.last_usage = _usage_from_openai(data)
+                        return content
+                    # 200 with empty content -> retryable hiccup; when hidden
+                    # reasoning ate the budget, retry with a bigger one.
+                    last_error = "empty completion"
+                    if choice.get("finish_reason") == "length":
+                        payload = self._prepare_payload(
+                            messages,
+                            max_tokens=(max_tokens or self.max_tokens) * (2 ** attempt),
+                        )
+                else:
+                    last_error = "unexpected response format"
+            except httpx.TimeoutException:
+                last_error = "timeout"
+            except httpx.HTTPStatusError as e:
+                # 429/5xx never reach raise_for_status() (handled inline), so
+                # anything here is a permanent client error: stop retrying.
+                last_error = f"HTTP {e.response.status_code}" if e.response is not None else str(e)
+                break
+            except Exception as e:
+                last_error = str(e)
+            logger.warning("Cerebras request attempt %d failed (%s); retrying...",
+                           attempt, last_error)
+            time.sleep(wait_s)
+
+        logger.warning("Cerebras request failed after retries: %s", last_error)
+        return ""
+
+    def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        images: Optional[List[str]] = None,
+    ) -> Generator[str, None, None]:
+        if images:
+            logger.warning("Cerebras does not support image inputs. Ignoring images.")
+        url = f"{self.base_url}/chat/completions"
+        payload = self._prepare_payload(messages)
+        payload["stream"] = True
+
+        # Retry only the connection phase (same contract as Groq/Gemini): a
+        # 429 fires before any content is yielded, so a retry never
+        # duplicates output. Once streaming has started, errors surface.
+        for attempt in range(1, 4):
+            try:
+                with self.client.stream("POST", url, json=payload) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line or line == "data: [DONE]":
+                            continue
+                        if line.startswith("data: "):
+                            line = line[6:]
+                        try:
+                            chunk = json.loads(line)
+                            if "choices" in chunk and len(chunk["choices"]) > 0:
+                                content = chunk["choices"][0].get("delta", {}).get("content", "")
+                                if content:
+                                    yield content
+                        except json.JSONDecodeError:
+                            continue
+                return
+            except httpx.HTTPStatusError as e:
+                retryable = (
+                    e.response is not None and e.response.status_code == 429
+                )
+                if not retryable or attempt >= 3:
+                    logger.warning(f"Cerebras streaming request failed: {e}")
+                    yield f"خطا: {e}"
+                    return
+                wait = _retry_after_seconds(e.response, fallback=2.0 * attempt)
+                logger.warning(
+                    "Cerebras stream rate-limited (429); waiting %.0fs (attempt %d).",
+                    wait, attempt,
+                )
+                time.sleep(wait)
+            except httpx.TimeoutException:
+                logger.warning("Cerebras streaming request timed out.")
+                yield "خطا: زمان پاسخدهی به پایان رسید."
+                return
+            except Exception as e:
+                logger.warning(f"Cerebras streaming request failed: {e}")
+                yield f"خطا: {e}"
+                return
 
 
 class OpenAICompatibleClient(BaseLLMClient):
@@ -692,17 +917,20 @@ class OpenAICompatibleClient(BaseLLMClient):
 
 def get_llm_client(
     *,
+    provider: Optional[str] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,
 ) -> BaseLLMClient:
     """Build the chat/planning LLM client from settings.
 
-    ``api_key`` / ``model`` override the provider's default key/model - used
-    by get_pool_llm_client() so mock generation can run on its own key
-    instead of competing with the chatbot for the same rate limits.
+    ``provider`` overrides settings.LLM_PROVIDER - used by
+    get_pool_llm_client() so mock generation can run on a different
+    provider than the chatbot. ``api_key`` / ``model`` override the
+    provider's default key/model - used so pool generation can run on its
+    own key instead of competing with the chatbot for the same rate limits.
     """
     settings = get_settings()
-    provider = settings.LLM_PROVIDER
+    provider = (provider or settings.LLM_PROVIDER or "").strip().lower()
 
     if provider == "groq":
         key = api_key if api_key is not None else settings.LLM_API_KEY
@@ -750,6 +978,21 @@ def get_llm_client(
             logger.warning("Ollama selected but base_url is not local. Using mock.")
             return MockLLMClient()
 
+    if provider == "cerebras":
+        key = api_key if api_key is not None else settings.CEREBRAS_API_KEY
+        model_name = model if model is not None else settings.CEREBRAS_MODEL_NAME
+        if not key:
+            logger.warning("Cerebras selected but no API key is set. Using mock.")
+            return MockLLMClient()
+        logger.info(f"Using CerebrasLLMClient with model={model_name}")
+        return CerebrasLLMClient(
+            api_key=key,
+            base_url=settings.CEREBRAS_BASE_URL,
+            model=model_name,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+        )
+
     if provider == "gemini":
         key = api_key if api_key is not None else settings.GEMINI_API_KEY
         model_name = model if model is not None else settings.GEMINI_MODEL_NAME
@@ -763,6 +1006,7 @@ def get_llm_client(
             model=model_name,
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
+            proxy=settings.GEMINI_PROXY,
         )
 
     logger.info("Using MockLLMClient (test mode without a real LLM).")
@@ -780,11 +1024,16 @@ def get_pool_llm_client() -> BaseLLMClient:
     """
     settings = get_settings()
     pool_key = (settings.POOL_LLM_API_KEY or "").strip()
-    if not pool_key:
+    pool_provider = (settings.POOL_LLM_PROVIDER or "").strip().lower()
+    if not pool_key and not pool_provider:
         return get_llm_client()
     pool_model = (settings.POOL_LLM_MODEL_NAME or "").strip() or None
-    logger.info("Using the dedicated pool LLM key/model for mock generation.")
-    return get_llm_client(api_key=pool_key, model=pool_model)
+    logger.info("Using the dedicated pool LLM provider/key/model for mock generation.")
+    return get_llm_client(
+        provider=pool_provider or None,
+        api_key=pool_key or None,
+        model=pool_model,
+    )
 
 
 def get_vision_llm_client() -> BaseLLMClient:
@@ -808,6 +1057,7 @@ def get_vision_llm_client() -> BaseLLMClient:
             model=settings.GEMINI_MODEL_NAME,
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
+            proxy=settings.GEMINI_PROXY,
         )
 
     if provider == "groq":
