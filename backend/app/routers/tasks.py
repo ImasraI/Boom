@@ -1,4 +1,4 @@
-﻿from datetime import date
+from datetime import date
 from typing import Any, Optional, cast
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -170,27 +170,27 @@ def update_plan_with_ai(
     ).all()
     
     task_context = "\n".join([
-        f"- {t.date.isoformat()}: {t.subject} - {t.description} ({t.duration_minutes} Ø¯Ù‚ÛŒÙ‚Ù‡)"
+        f"- {t.date.isoformat()}: {t.subject} - {t.description} ({t.duration_minutes} دقیقه)"
         for t in tasks
     ])
     
-    prompt = f"""ØªÙˆ Â«Ø¨ÙˆÙ…Â» Ù‡Ø³ØªÛŒØ› Ø¯Ø³ØªÛŒØ§Ø± Ø¨Ø±Ù†Ø§Ù…Ù‡Ø±ÛŒØ²ÛŒ Ù…Ø·Ø§Ù„Ø¹Ù‡.
-Ú©Ø§Ø±Ø¨Ø± Ù…ÛŒØ®ÙˆØ§Ù‡Ø¯ Ø¨Ø±Ù†Ø§Ù…Ù‡Ø§Ø´ Ø±Ø§ ØªØºÛŒÛŒØ± Ø¯Ù‡Ø¯.
+    prompt = f"""تو «بوم» هستی؛ دستیار برنامه‌ریزی مطالعه.
+کاربر می‌خواهد برنامه‌اش را تغییر دهد.
 
-ÙˆØ¸Ø§ÛŒÙ ÙØ¹Ù„ÛŒ Ù‡ÙØªÙ‡ Ø¢ÛŒÙ†Ø¯Ù‡:
-{task_context or 'Ø¨Ø±Ù†Ø§Ù…Ù‡Ø§ÛŒ ÙˆØ¬ÙˆØ¯ Ù†Ø¯Ø§Ø±Ø¯'}
+وظایف فعلی هفته آینده:
+{task_context or 'برنامه‌ای وجود ندارد'}
 
-Ø¯Ø±Ø®ÙˆØ§Ø³Øª Ú©Ø§Ø±Ø¨Ø±: {request.instruction}
+درخواست کاربر: {request.instruction}
 
-Ø¨Ø± Ø§Ø³Ø§Ø³ Ø§ÛŒÙ† Ø¯Ø±Ø®ÙˆØ§Ø³ØªØŒ ØªØºÛŒÛŒØ±Ø§Øª Ù…ÙˆØ±Ø¯ Ù†ÛŒØ§Ø² Ø±Ø§ Ø¨Ù‡ ØµÙˆØ±Øª JSON Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†:
+بر اساس این درخواست، تغییرات مورد نیاز را به صورت JSON برگردان:
 {{
-  "action": "delete" ÛŒØ§ "update" ÛŒØ§ "add",
+  "action": "delete" یا "update" یا "add",
   "changes": [
-    {{"task_id": Ø´Ù†Ø§Ø³Ù‡ ÙˆØ¸ÛŒÙÙ‡ (Ø¨Ø±Ø§ÛŒ delete/update), "date": "YYYY-MM-DD", "subject": "Ù†Ø§Ù… Ø¯Ø±Ø³", "description": "Ø´Ø±Ø­", "duration_minutes": Ø¹Ø¯Ø¯}}
+    {{"task_id": شناسه وظیفه (برای delete/update), "date": "YYYY-MM-DD", "subject": "نام درس", "description": "شرح", "duration_minutes": عدد}}
   ]
 }}
 
-ÙÙ‚Ø· JSON Ø¨Ø±Ú¯Ø±Ø¯Ø§Ù†ØŒ Ø¨Ø¯ÙˆÙ† ØªÙˆØ¶ÛŒØ­ Ø§Ø¶Ø§ÙÙ‡."""
+فقط JSON برگردان، بدون توضیح اضافه."""
 
     try:
         llm_response = get_llm_client().generate(
@@ -218,7 +218,7 @@ def update_plan_with_ai(
                     ).first()
                     if task:
                         db.delete(task)
-                        applied.append(f"Ø­Ø°Ù: {task.description}")
+                        applied.append(f"حذف: {task.description}")
                 
                 elif action == "update" and "task_id" in mod:
                     task = db.query(DailyTask).filter(
@@ -230,7 +230,7 @@ def update_plan_with_ai(
                             task.description = mod["description"]
                         if "duration_minutes" in mod:
                             task.duration_minutes = mod["duration_minutes"]
-                        applied.append(f"Ø¨Ù‡Ø±ÙˆØ²Ø±Ø³Ø§Ù†ÛŒ: {task.description}")
+                        applied.append(f"به‌روزرسانی: {task.description}")
                 
                 elif action == "add":
                     new_task = DailyTask(
@@ -242,16 +242,16 @@ def update_plan_with_ai(
                         duration_minutes=mod.get("duration_minutes", 60)
                     )
                     db.add(new_task)
-                    applied.append(f"Ø§Ø¶Ø§ÙÙ‡: {new_task.description}")
+                    applied.append(f"افزوده: {new_task.description}")
             
             db.commit()
             return {
                 "success": True,
-                "message": f"{len(applied)} ØªØºÛŒÛŒØ± Ø§Ø¹Ù…Ø§Ù„ Ø´Ø¯",
+                "message": f"{len(applied)} تغییر اعمال شد",
                 "applied": applied
             }
         
-        return {"success": False, "message": "Ù¾Ø§Ø³Ø® Ù†Ø§Ù…Ø¹ØªØ¨Ø± Ø§Ø² AI", "raw": llm_response}
+        return {"success": False, "message": "پاسخ نامعتبر از AI", "raw": llm_response}
     
     except Exception as e:
         logger.error(f"AI plan update failed: {e}")

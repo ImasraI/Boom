@@ -36,11 +36,6 @@ class WrongAnswerIn(BaseModel):
     source: Optional[str] = None  # mock / arena / practice
 
 
-class WrongAnswerOut(WrongAnswerIn):
-    id: int
-    created_at: Optional[str] = None
-
-
 @router.post("/wrong-answers")
 def record_wrong_answers(
     payload: List[WrongAnswerIn],

@@ -66,9 +66,11 @@ class Settings(BaseSettings):
     SMS_BASE_URL: str = "https://api.sms.ir"
     # SMS-template-approval stopgap: numbers on the admin-managed signup
     # allowlist can complete signup with this shared passcode instead of a
-    # texted code. Change it in .env once SMS is live (or set it empty to
-    # disable bypass entirely). 6 digits to match the SMS code UI.
-    SIGNUP_BYPASS_CODE: str = "111111"
+    # texted code. Set it explicitly in .env (6 digits to match the SMS code
+    # UI); leave it empty to disable bypass signup entirely (fail-closed:
+    # a fresh deployment without a chosen secret must not ship a known
+    # shared passcode to the internet).
+    SIGNUP_BYPASS_CODE: str = ""
     # Dev convenience: when True (and APP_ENV != production) the request-code
     # endpoint returns the code in the response instead of sending an SMS.
     SMS_DEBUG_ECHO: bool = False
@@ -96,11 +98,6 @@ class Settings(BaseSettings):
     # which are geo-blocked in some regions. Groq/Ollama stay direct.
     # Example: http://127.0.0.1:10809 (v2rayN HTTP port)
     GEMINI_PROXY: str = ""
-
-    # OpenRouter (geo-unblocked alternative to Gemini; free-tier vision models)
-    OPENROUTER_API_KEY: str = ""
-    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-    OPENROUTER_VISION_MODEL: str = "qwen/qwen2.5-vl-72b-instruct:free"
 
     # Groq (fast LPU inference; free tier includes llama-4 vision models)
     GROQ_API_KEY: str = ""

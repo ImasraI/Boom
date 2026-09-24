@@ -68,10 +68,6 @@ class _DailyCounters:
 _counters = _DailyCounters()
 
 
-class QuotaExceeded(Exception):
-    pass
-
-
 def check_ai_quota(user_id: int, feature: str) -> None:
     """Raise 429 if over the per-feature request cap. Feature keys: chat,
     study_plan, weekly_plan, today_tests, mock_generate, arena_join."""

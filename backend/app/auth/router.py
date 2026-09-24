@@ -97,8 +97,10 @@ def request_code(
             expires_at=now + timedelta(seconds=CODE_TTL_SECONDS),
         ))
         db.commit()
-        return RequestCodeResponse(resend_after=0, debug_code=bypass_code,
-                                   bypass_mode=True)
+        # Never echo the bypass code back: it is a shared secret. Anyone who
+        # knows an allowlisted phone could otherwise read it here and reset
+        # that account's password. The legit user got it from support.
+        return RequestCodeResponse(resend_after=0, bypass_mode=True)
 
     if auth_disabled:
         return RequestCodeResponse(resend_after=0, auth_disabled=True)

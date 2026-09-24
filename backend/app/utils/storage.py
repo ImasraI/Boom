@@ -24,11 +24,3 @@ def get_object(key: str) -> bytes:
         raise FileNotFoundError(f"Local file not found: {local_path}")
     with open(local_path, "rb") as f:
         return f.read()
-
-
-def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
-    """Generate a file:// URL for the local file."""
-    local_path = os.path.join("data", key.lstrip("/"))
-    if not os.path.exists(local_path):
-        raise FileNotFoundError(f"Local file not found: {local_path}")
-    return f"file://{os.path.abspath(local_path)}"

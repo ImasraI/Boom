@@ -44,15 +44,6 @@ class SourceChunk(BaseModel):
     score: float
 
 
-# Response model returned by the chatbot
-class ChatResponse(BaseModel):
-    # Generated answer from the LLM
-    answer: str
-
-    # Retrieved sources used to generate the answer
-    sources: List[SourceChunk]
-
-
 # Information about an uploaded document
 class DocumentInfo(BaseModel):
     # Document file name

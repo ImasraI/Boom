@@ -1,6 +1,6 @@
 from passlib.context import CryptContext
 from jose import JWTError, jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -29,11 +29,6 @@ def get_password_hash(password: str) -> str:
 def needs_rehash(hashed_password: str) -> bool:
     """True when `hashed_password` uses a legacy scheme (login should upgrade)."""
     return pwd_context.needs_update(hashed_password)
-
-
-# app/auth/security.py
-
-from datetime import datetime, timedelta, timezone  # add timezone
 
 
 def create_access_token(data: dict):

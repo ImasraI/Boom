@@ -61,10 +61,6 @@ def clear_cancel() -> None:
     _cancel_event.clear()
 
 
-def shelf_key(major_key: str, difficulty: str) -> str:
-    return f"{major_key}/{difficulty}"
-
-
 def pool_levels(db) -> list:
     """pending_use count for every (major, difficulty) shelf."""
     counts = {}
