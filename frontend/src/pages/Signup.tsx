@@ -11,6 +11,7 @@ export default function Signup({ nav, onComplete }: Props) {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [bypassMode, setBypassMode] = useState(false);
+  const [authDisabled, setAuthDisabled] = useState(false);
   const [debugCode, setDebugCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -33,26 +34,7 @@ export default function Signup({ nav, onComplete }: Props) {
 
     // Phone step: send the SMS verification code, then continue.
     if (step === 1) {
-      setSubmitting(true);
-      try {
-        const res = await fetch(apiUrl("/api/auth/request-code"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone }),
-        });
-        if (!res.ok) {
-          setError(await readApiError(res, "خطا در ارسال کد"));
-          return;
-        }
-        const data = await res.json();
-        setDebugCode(data.debug_code || "");
-        setBypassMode(Boolean(data.bypass_mode));
-        setStep(2);
-      } catch {
-        setError("خطا در ارتباط با سرور");
-      } finally {
-        setSubmitting(false);
-      }
+      await sendCode();
       return;
     }
 
@@ -98,10 +80,61 @@ export default function Signup({ nav, onComplete }: Props) {
     setTimeout(advance, 180);
   }
 
+  async function sendCode() {
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch(apiUrl("/api/auth/request-code"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      if (!res.ok) {
+        setError(await readApiError(res, "خطا در ارسال کد"));
+        return;
+      }
+      const data = await res.json();
+      setDebugCode(data.debug_code || "");
+      setBypassMode(Boolean(data.bypass_mode));
+      setAuthDisabled(Boolean(data.auth_disabled));
+      // Dev convenience (DISABLE_AUTH=true): skip the code entry step and go
+      // straight to setting a password.
+      setStep(Boolean(data.auth_disabled) ? 3 : 2);
+    } catch {
+      setError("خطا در ارتباط با سرور");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function resendCode() {
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await fetch(apiUrl("/api/auth/request-code"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone }),
+      });
+      if (!res.ok) {
+        setError(await readApiError(res, "خطا در ارسال کد"));
+        return;
+      }
+      const data = await res.json();
+      setDebugCode(data.debug_code || "");
+      setBypassMode(Boolean(data.bypass_mode));
+      setAuthDisabled(Boolean(data.auth_disabled));
+    } catch {
+      setError("خطا در ارتباط با سرور");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const canContinue = [
     name.trim().length > 0,
     phone.length >= 10,
-    code.replace(/\D/g, "").length === 6,
+    code.replace(/\D/g, "").length === 6 || authDisabled,
     password.length >= 4 && password === confirmPassword,
     major.length > 0,
     grade.length > 0,
@@ -158,7 +191,7 @@ export default function Signup({ nav, onComplete }: Props) {
               debug mode: code = {debugCode}
             </p>
           )}
-          <button onClick={advance} disabled={submitting}
+          <button onClick={resendCode} disabled={submitting}
             className="mt-3 text-[12px] font-bold text-[var(--accent)] hover:underline disabled:opacity-40">
             کد دریافت نکردید؟ ارسال دوباره
           </button>
@@ -314,7 +347,7 @@ export default function Signup({ nav, onComplete }: Props) {
       </div>
       <div className="flex items-center justify-between px-5 pb-2">
         <span className="text-[12px] font-bold text-[var(--muted-2)]">{step + 1} از {TOTAL}</span>
-        <button onClick={() => step === 0 ? nav("landing") : setStep(s => s - 1)}
+        <button onClick={() => step === 0 ? nav("landing") : setStep(s => (authDisabled && s === 3) ? 1 : s - 1)}
           className="w-9 h-9 rounded-xl bg-[var(--border)] flex items-center justify-center text-[var(--muted)] hover:bg-[var(--border-strong)] transition-colors">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: "scaleX(-1)" }}>
             <path d="M19 12H5M12 5l-7 7 7 7" />

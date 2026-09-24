@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # Dev convenience: when True (and APP_ENV != production) the request-code
     # endpoint returns the code in the response instead of sending an SMS.
     SMS_DEBUG_ECHO: bool = False
+    # Dev convenience: when True (and APP_ENV != production) signup skips SMS
+    # code verification entirely - the client goes straight from the phone
+    # step to setting a password. Never enable this in production.
+    DISABLE_AUTH: bool = False
 
     # ====== Per-user daily AI quotas (0 or negative = unlimited) =========
     # Counts successful AI requests per user per UTC day; adjust in .env.

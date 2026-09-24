@@ -45,6 +45,7 @@ class RequestCodeResponse(BaseModel):
     resend_after: int = REQUEST_COOLDOWN_SECONDS
     debug_code: str | None = None  # only when SMS_DEBUG_ECHO=true (dev)
     bypass_mode: bool = False  # allowlisted number: enter SIGNUP_BYPASS_CODE instead
+    auth_disabled: bool = False  # DISABLE_AUTH=true (dev): skip code entry entirely
 
 
 class CompleteSignupRequest(BaseModel):
@@ -75,6 +76,9 @@ def request_code(
 
     settings = get_settings()
     echo_mode = settings.SMS_DEBUG_ECHO and settings.APP_ENV != "production"
+    # Dev convenience: DISABLE_AUTH=true (and not production) skips SMS
+    # verification entirely - the client goes straight to setting a password.
+    auth_disabled = settings.DISABLE_AUTH and settings.APP_ENV != "production"
     now = datetime.now(timezone.utc)
 
     # SMS-template-approval stopgap: allowlisted numbers can sign up without
@@ -95,6 +99,9 @@ def request_code(
         db.commit()
         return RequestCodeResponse(resend_after=0, debug_code=bypass_code,
                                    bypass_mode=True)
+
+    if auth_disabled:
+        return RequestCodeResponse(resend_after=0, auth_disabled=True)
 
     if not echo_mode and (not settings.SMS_API_KEY or not settings.SMS_VERIFY_TEMPLATE_ID):
         raise HTTPException(
@@ -146,32 +153,37 @@ def register_complete(request: CompleteSignupRequest, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="رمز عبور باید حداقل ۴ کاراکتر باشد")
 
     now = datetime.now(timezone.utc)
-    rec = (
-        db.query(PhoneCode)
-        .filter(
-            PhoneCode.phone == mobile,
-            PhoneCode.purpose == "signup",
-            PhoneCode.consumed.is_(False),
-            PhoneCode.expires_at > now,
+    settings = get_settings()
+    auth_disabled = settings.DISABLE_AUTH and settings.APP_ENV != "production"
+
+    rec = None
+    if not auth_disabled:
+        rec = (
+            db.query(PhoneCode)
+            .filter(
+                PhoneCode.phone == mobile,
+                PhoneCode.purpose == "signup",
+                PhoneCode.consumed.is_(False),
+                PhoneCode.expires_at > now,
+            )
+            .order_by(PhoneCode.created_at.desc())
+            .first()
         )
-        .order_by(PhoneCode.created_at.desc())
-        .first()
-    )
-    if not rec:
-        raise HTTPException(
-            status_code=400, detail="کد منقضی شده است؛ کد جدید بگیرید"
-        )
-    if rec.attempts >= MAX_VERIFY_ATTEMPTS:
+        if not rec:
+            raise HTTPException(
+                status_code=400, detail="کد منقضی شده است؛ کد جدید بگیرید"
+            )
+        if rec.attempts >= MAX_VERIFY_ATTEMPTS:
+            rec.consumed = True
+            db.commit()
+            raise HTTPException(
+                status_code=429, detail="تلاش‌های ناموفق زیاد؛ کد جدید بگیرید"
+            )
+        if not secrets.compare_digest(rec.code_hash, _hash_code(request.code or "")):
+            rec.attempts += 1
+            db.commit()
+            raise HTTPException(status_code=400, detail="کد وارد شده درست نیست")
         rec.consumed = True
-        db.commit()
-        raise HTTPException(
-            status_code=429, detail="تلاش‌های ناموفق زیاد؛ کد جدید بگیرید"
-        )
-    if not secrets.compare_digest(rec.code_hash, _hash_code(request.code or "")):
-        rec.attempts += 1
-        db.commit()
-        raise HTTPException(status_code=400, detail="کد وارد شده درست نیست")
-    rec.consumed = True
 
     existing = (
         db.query(User)
