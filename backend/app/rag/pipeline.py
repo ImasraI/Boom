@@ -314,6 +314,37 @@ def rewrite_query(question: str, user_id: Optional[int] = None) -> str:
         return question
 
 
+def _load_page_images(
+    image_hits: List[dict],
+) -> tuple[List[dict], List[bytes]]:
+    """Load page-image bytes for image hits, skipping missing files.
+
+    Retrieval matches vector-store entries, but the underlying PNG can be
+    missing (fresh checkout / server without the synced data/page_images
+    tree). One missing file must never 500 the whole chat: hits without a
+    readable image are dropped with a warning. Returns (usable_hits, bytes).
+    If nothing loads at all, both lists come back empty and the caller
+    should fall back to text-only answering.
+    """
+    from app.utils.storage import get_object
+
+    loaded: List[bytes] = []
+    usable_hits: List[dict] = []
+    for hit in image_hits:
+        try:
+            loaded.append(get_object(hit["content"]))
+            usable_hits.append(hit)
+        except FileNotFoundError:
+            logger.warning(
+                "Page image missing on disk, skipping: %s", hit["content"]
+            )
+        except Exception as exc:  # unreadable/corrupt file: same treatment
+            logger.warning(
+                "Page image unreadable (%s), skipping: %s", exc, hit["content"]
+            )
+    return usable_hits, loaded
+
+
 def _retrieve_image_hits(
     search_query: str,
     user_id: int,
@@ -591,12 +622,18 @@ def answer_question(
     use_vision = bool(image_hits) and not isinstance(vision_llm, MockLLMClient)
 
     if use_vision:
-        # At least one relevant page image was found -> use the vision LLM,
-        # with any text chunks attached as supplementary context.
-        from app.utils.storage import get_object
-
-        image_keys = [hit["content"] for hit in image_hits]
-        image_paths = [get_object(key) for key in image_keys]
+        # Load the images defensively: one missing file must not 500 the
+        # whole chat (regression: FileNotFoundError crashed boom_chat).
+        image_hits, image_paths = _load_page_images(image_hits)
+        if not image_hits:
+            logger.warning(
+                "Vision path had image hit(s) but no image files exist on "
+                "disk; falling back to text-only answering."
+            )
+            # Hits already dropped by the helper, so the text-only path
+            # below cannot cite pages the model never actually saw.
+            use_vision = False
+    if use_vision:
         messages = _build_image_messages(question, image_hits, retrieved_chunks, history, schedule)
         answer_text = vision_llm.generate(messages, images=image_paths)
         _record_call_tokens(user_id, vision_llm)
@@ -734,7 +771,19 @@ def answer_question_stream(
     )
 
     if use_vision:
-        image_paths = [hit["content"] for hit in image_hits]
+        # Load the images defensively: one missing file must not break the
+        # stream, and keys are storage keys - load bytes via storage, not
+        # open() (regression: previously paths were passed through unread,
+        # so the vision model silently received no images at all).
+        image_hits, image_paths = _load_page_images(image_hits)
+        if not image_hits:
+            logger.warning(
+                "Vision path had image hit(s) but no image files exist on "
+                "disk; falling back to text-only answering (streaming)."
+            )
+            use_vision = False
+
+    if use_vision:
         messages = _build_image_messages(question, image_hits, retrieved_chunks, history, schedule)
 
         sources_data = [
