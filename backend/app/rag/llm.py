@@ -228,6 +228,22 @@ class OllamaLLMClient(BaseLLMClient):
             yield f"خطا: {e}"
 
 
+def _retry_after_seconds(response: httpx.Response, fallback: float,
+                         cap: float = 90.0) -> float:
+    """Seconds to wait after a 429, honoring the Retry-After header (capped).
+
+    Groq's per-minute rate-limit windows are ~60s; a fixed 2-6s backoff can
+    never clear one, so every retry burns quota and fails again. When the
+    server tells us how long to wait, actually wait (bounded by `cap` so a
+    bogus header can't stall a request thread for minutes).
+    """
+    try:
+        raw = response.headers.get("retry-after")
+        return min(max(float(raw), 0.0), cap) if raw else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
 class GroqLLMClient(BaseLLMClient):
     """HTTP client for Groq's OpenAI-compatible API."""
 
@@ -302,6 +318,7 @@ class GroqLLMClient(BaseLLMClient):
         self.last_usage = ZERO_USAGE  # stays zero unless a response succeeds
         last = ""
         for attempt in range(4):
+            wait_s = 2 * (attempt + 1)  # default short backoff
             try:
                 resp = self.client.post(url, json=payload, timeout=req_timeout)
                 resp.raise_for_status()
@@ -333,6 +350,11 @@ class GroqLLMClient(BaseLLMClient):
                 logger.warning(
                     "Groq request failed (attempt %d): %s", attempt + 1, e,
                 )
+                # Rate limited: Groq tells us how long to wait - honor it
+                # (capped), otherwise the fixed short backoff can never clear
+                # a 60s rate-limit window and every attempt fails again.
+                if e.response is not None and e.response.status_code == 429:
+                    wait_s = _retry_after_seconds(e.response, fallback=wait_s)
             except httpx.TimeoutException:
                 last = ""
                 logger.warning(
@@ -345,8 +367,7 @@ class GroqLLMClient(BaseLLMClient):
                     "Groq request failed (attempt %d): %s", attempt + 1, e,
                 )
             if attempt < 3:
-                import time
-                time.sleep(2 * (attempt + 1))
+                time.sleep(wait_s)
         return last
 
     def generate_stream(
@@ -360,28 +381,49 @@ class GroqLLMClient(BaseLLMClient):
         payload = self._prepare_payload(messages)
         payload["stream"] = True
 
-        try:
-            with self.client.stream("POST", url, json=payload) as response:
-                response.raise_for_status()
-                for line in response.iter_lines():
-                    if not line or line == "data: [DONE]":
-                        continue
-                    if line.startswith("data: "):
-                        line = line[6:]
-                    try:
-                        chunk = json.loads(line)
-                        if "choices" in chunk and len(chunk["choices"]) > 0:
-                            content = chunk["choices"][0].get("delta", {}).get("content", "")
-                            if content:
-                                yield content
-                    except json.JSONDecodeError:
-                        continue
-        except httpx.TimeoutException:
-            logger.warning("Groq streaming request timed out.")
-            yield "خطا: زمان پاسخدهی به پایان رسید."
-        except Exception as e:
-            logger.warning(f"Groq streaming request failed: {e}")
-            yield f"خطا: {e}"
+        # Retry only the connection phase: a 429/raise_for_status fires
+        # before any content is yielded, so a retry never duplicates output.
+        # Once streaming has started, errors surface as before.
+        for attempt in range(1, 4):
+            try:
+                with self.client.stream("POST", url, json=payload) as response:
+                    response.raise_for_status()
+                    for line in response.iter_lines():
+                        if not line or line == "data: [DONE]":
+                            continue
+                        if line.startswith("data: "):
+                            line = line[6:]
+                        try:
+                            chunk = json.loads(line)
+                            if "choices" in chunk and len(chunk["choices"]) > 0:
+                                content = chunk["choices"][0].get("delta", {}).get("content", "")
+                                if content:
+                                    yield content
+                        except json.JSONDecodeError:
+                            continue
+                return
+            except httpx.HTTPStatusError as e:
+                retryable = (
+                    e.response is not None and e.response.status_code == 429
+                )
+                if not retryable or attempt >= 3:
+                    logger.warning(f"Groq streaming request failed: {e}")
+                    yield f"خطا: {e}"
+                    return
+                wait = _retry_after_seconds(e.response, fallback=2.0 * attempt)
+                logger.warning(
+                    "Groq stream rate-limited (429); waiting %.0fs (attempt %d).",
+                    wait, attempt,
+                )
+                time.sleep(wait)
+            except httpx.TimeoutException:
+                logger.warning("Groq streaming request timed out.")
+                yield "خطا: زمان پاسخدهی به پایان رسید."
+                return
+            except Exception as e:
+                logger.warning(f"Groq streaming request failed: {e}")
+                yield f"خطا: {e}"
+                return
 
 
 class GeminiLLMClient(BaseLLMClient):
