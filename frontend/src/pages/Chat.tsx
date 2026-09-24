@@ -2,6 +2,34 @@ import { useState, useRef, useEffect } from "react";
 import { apiUrl, authHeaders } from "../api";
 import { NavFn, SignupData } from "../types";
 import { weeklyScheduleContext, loadWeekBlocks, saveWeekBlocks, getWeekISO, StoredBlock } from "../scheduleStore";
+import katex from "katex";
+import "katex/dist/katex.min.css";
+
+function renderMath(text: string): React.ReactNode {
+  // Split by $$...$$ (display math) and $...$ (inline math)
+  const parts = text.split(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g).filter(p => p !== "");
+  return parts.map((part, i) => {
+    if (part.startsWith("$$") && part.endsWith("$$")) {
+      // Display math
+      try {
+        const latex = part.slice(2, -2);
+        return <div key={i} className="my-2 overflow-x-auto" dangerouslySetInnerHTML={{ __html: katex.renderToString(latex, { displayMode: true, throwOnError: false }) }} />;
+      } catch {
+        return <span key={i}>{part}</span>;
+      }
+    }
+    if (part.startsWith("$") && part.endsWith("$")) {
+      // Inline math
+      try {
+        const latex = part.slice(1, -1);
+        return <span key={i} dangerouslySetInnerHTML={{ __html: katex.renderToString(latex, { displayMode: false, throwOnError: false }) }} />;
+      } catch {
+        return <span key={i}>{part}</span>;
+      }
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
 
 interface Msg { role: "user" | "ai"; text: string; }
 const NEW_CHAT_NAME = "گفتگوی جدید";
@@ -80,12 +108,26 @@ function isPlanRequest(t: string) {
 // **bold**, "# / ## " headings, "* / -" bullets and "1." numbered lists.
 // Avoids pulling in a full markdown library for a handful of patterns.
 function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g).filter(p => p !== "");
-  return parts.map((part, i) => {
-    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return <strong key={`${keyPrefix}-${i}`} className="font-bold">{part.slice(2, -2)}</strong>;
+  // First render math, then bold
+  const withMath = renderMath(text);
+  // Since renderMath returns React.ReactNode (array-like), convert to array and process bold
+  const nodes = Array.isArray(withMath) ? withMath : [withMath];
+  return nodes.map((node, i) => {
+    if (typeof node === "object" && node !== null && "props" in node) {
+      const props = node.props as any;
+      if (props.children && typeof props.children === "string") {
+        // Split by **...** for bold
+        const boldParts: string[] = props.children.split(/(\*\*[^*]+\*\*)/g).filter((p: string) => p !== "");
+        if (boldParts.length > 1) {
+          return <span key={`${keyPrefix}-${i}`}>{boldParts.map((part, j) => 
+            part.startsWith("**") && part.endsWith("**") && part.length > 4
+              ? <strong key={j} className="font-bold">{part.slice(2, -2)}</strong>
+              : <span key={j}>{part}</span>
+          )}</span>;
+        }
+      }
     }
-    return <span key={`${keyPrefix}-${i}`}>{part}</span>;
+    return <span key={`${keyPrefix}-${i}`}>{node}</span>;
   });
 }
 
