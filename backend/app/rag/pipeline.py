@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import List, Dict, Optional, Generator
 import json
+import re
 
 from app.config import get_settings
 from app.rag.embeddings import get_embedding_model
@@ -162,6 +163,55 @@ def _schedule_context(schedule: Optional[dict]) -> str:
 
 
 # Build the message list sent to the LLM
+# --- Simple-message gate -------------------------------------------------
+# Greetings and short chit-chat ("سلام", "ممنون", "خوبی؟") and simple
+# self-contained questions ("مشتق 2x چی میشه؟", "آب چند درجه میجوشه؟")
+# need no book retrieval. Running the full RAG path for them wasted an
+# LLM query-rewrite call + embeddings + searches per message, which is
+# exactly how free-tier rate limits (429) got hit. Heuristic only - it
+# errs toward retrieval, so real study/book/plan questions still go
+# through the grounded path.
+_SIMPLE_GREETINGS = (
+    "سلام", "درود", "هی", "های", "hi", "hello", "hey",
+    "ممنون", "مرسی", "دستت درد نکنه", "خواهش", "مچکریم",
+    "خوبی", "چطوری", "چه خبر", "خسته نباشی", "عصر بخیر", "صبح بخیر",
+    "بدرود", "خداحافظ", "bye", "اوکی", "اوکیه", "باشه", "چشم",
+)
+_SIMPLE_QUESTION_RE = re.compile(
+    r"^[\s\w\d؟?.,!+\-*/^()=<>%ضصثقفغعهخحجچشسیبلاتنمکگظطزرذدپوءأئؤإآ]*$"
+)
+# Words that mark a message as needing grounded retrieval even when it is
+# short: planning/schedule/books/tests - things only this system's data can
+# answer. Plain concept questions ("مشتق 2x چی میشه؟") stay direct: the LLM
+# knows them without any book.
+_GROUNDED_HINTS = re.compile(
+    r"کنکور|کتاب|تست|برنامه|آزمون|ماز|قلم‌چی|سنجش|مبحث|فصل|صفحه|درس|"
+    r"سرفصل|مرور|جمع‌بندی|خلاصه|تدریس|روزانه|هفتگی|تقویم|زمان‌بندی"
+)
+
+
+def _is_simple_message(question: str) -> bool:
+    """True when the question needs no book retrieval (short chit-chat or a
+    simple self-contained question). Conservative by design."""
+    q = (question or "").strip()
+    if not q:
+        return True
+    if len(q) > 60:
+        return False
+    lowered = q.lower()
+    # Greetings/thanks - exact token match on any whitespace-separated word
+    tokens = re.split(r"[\s،,!?.؟]+", lowered)
+    if any(t in _SIMPLE_GREETINGS for t in tokens if t):
+        return True
+    # Anything mentioning study topics/plans/books always goes to RAG.
+    if _GROUNDED_HINTS.search(q):
+        return False
+    # Short plain questions without book-ish keywords: simple.
+    if len(q) <= 30 and _SIMPLE_QUESTION_RE.match(q):
+        return True
+    return False
+
+
 def _build_messages(
     question: str,
     context_chunks: List[dict],
@@ -583,6 +633,17 @@ def answer_question(
         except Exception:
             pass
 
+    # Simple messages (greetings, short self-contained questions) skip the
+    # whole retrieval machinery: no query-rewrite LLM call, no embeddings,
+    # no book/image search. They burn quota without helping the answer.
+    if _is_simple_message(question):
+        logger.info("Simple message detected; skipping retrieval for user %s.", user_id)
+        messages = _build_messages(question, [], history, student, schedule)
+        llm_client = get_llm_client()
+        answer_text = llm_client.generate(messages)
+        _record_call_tokens(user_id, llm_client)
+        return {"answer": answer_text, "sources": []}
+
     embedding_model = get_embedding_model()
     hybrid_search = get_hybrid_search()
 
@@ -727,6 +788,19 @@ def answer_question_stream(
                 return
         except Exception:
             pass
+
+    # Simple messages (greetings, short self-contained questions) skip the
+    # whole retrieval machinery - same rationale as the non-streaming path.
+    if _is_simple_message(question):
+        logger.info("Simple message detected; skipping retrieval (streaming) for user %s.", user_id)
+        yield json.dumps({"type": "sources", "data": []}) + "\n"
+        yield json.dumps({"type": "status", "data": "در حال نگارش پاسخ..."}) + "\n"
+        llm_client = get_llm_client()
+        messages = _build_messages(question, [], history, None, None)
+        for text_chunk in llm_client.generate_stream(messages):
+            yield json.dumps({"type": "text", "data": text_chunk}) + "\n"
+        _record_call_tokens(user_id, llm_client)
+        return
 
     embedding_model = get_embedding_model()
     hybrid_search = get_hybrid_search()

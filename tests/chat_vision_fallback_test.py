@@ -74,6 +74,9 @@ def test_load_page_images_all_missing(monkeypatch):
     assert usable == [] and blobs == []
 
 
+BOOK_Q = "کتاب شیمی، مبحث استوکیومتری صفحه ۱۰۸ رو توضیح بده"  # grounded: must run retrieval
+
+
 def test_answer_question_falls_back_to_text_when_images_missing(monkeypatch):
     """The exact user-reported crash: vision hit whose PNG is absent must
     produce a text answer, not FileNotFoundError."""
@@ -94,7 +97,7 @@ def test_answer_question_falls_back_to_text_when_images_missing(monkeypatch):
     )
     monkeypatch.setattr(pipeline, "get_llm_client", lambda: text_client)
 
-    result = pipeline.answer_question("مشتق 2x چی میشه؟", user_id=1)
+    result = pipeline.answer_question(BOOK_Q, user_id=1)
     assert result["answer"] == "پاسخ متنی بدون تصویر"
     # The dropped image hit must not be cited as a source.
     assert all(
@@ -126,6 +129,6 @@ def test_answer_question_uses_vision_when_images_exist(monkeypatch):
 
     monkeypatch.setattr(pipeline, "get_vision_llm_client", lambda: Vision())
 
-    result = pipeline.answer_question("مشتق 2x چی میشه؟", user_id=1)
+    result = pipeline.answer_question(BOOK_Q, user_id=1)
     assert result["answer"] == "پاسخ تصویری"
     assert calls["images"] == [b"png-bytes"]
