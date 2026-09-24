@@ -11,7 +11,7 @@ interface UserRow {
 }
 interface UsersPayload { day: string; token_budget: number; limits: Record<string, number>; users: UserRow[] }
 interface Shelf { major_key: string; major: string; difficulty: string; available: number }
-interface PoolPayload { target: number; shelves: Shelf[] }
+interface PoolPayload { target: number; shelves: Shelf[]; running?: boolean; cancel_requested?: boolean }
 interface SmsCredit { credit: number; configured: boolean; detail: string; bypass_active: boolean }
 
 const FEATURE_FA: Record<string, string> = {
@@ -33,6 +33,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [restocking, setRestocking] = useState(false);
+  const [cancelRequested, setCancelRequested] = useState(false);
   const poolTimer = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -54,12 +55,23 @@ export default function Admin({ nav }: { nav: NavFn }) {
   useEffect(() => { load(); }, [load]);
 
   // While a restock is running, poll the shelves so the numbers move live.
+  // The payload also carries the server's run state, so a cancel (or a
+  // backend restart) flips the UI back to idle even if this tab missed it.
   useEffect(() => {
     if (!restocking) return;
     poolTimer.current = window.setInterval(async () => {
       try {
         const res = await fetch(apiUrl("/api/admin/pool"), { headers: { ...authHeaders() } });
-        if (res.ok) setPool(await res.json());
+        if (res.ok) {
+          const data: PoolPayload = await res.json();
+          setPool(data);
+          if (data.running === false) {
+            setRestocking(false);
+            setCancelRequested(false);
+          } else {
+            setCancelRequested(Boolean(data.cancel_requested));
+          }
+        }
       } catch { /* keep polling */ }
     }, 3000);
     return () => { if (poolTimer.current) window.clearInterval(poolTimer.current); };
@@ -114,15 +126,29 @@ export default function Admin({ nav }: { nav: NavFn }) {
       });
       if (!res.ok) throw new Error(await readApiError(res, "شروع restock ناموفق بود"));
       setRestocking(true);
+      setCancelRequested(false);
       setMsg("restock شروع شد؛ قفسه‌ها همین‌جا پر می‌شوند...");
     } catch (e) { setErr(e instanceof Error ? e.message : "خطا"); }
     finally { setBusy(false); }
+  }
+
+  async function cancelRestock() {
+    setErr("");
+    try {
+      const res = await fetch(apiUrl("/api/admin/pool/cancel"), {
+        method: "POST", headers: { ...authHeaders() },
+      });
+      if (!res.ok) throw new Error(await readApiError(res, "لغو ناموفق بود"));
+      setCancelRequested(true);
+      setMsg("لغو درخواست شد؛ دفترچه فعلی تمام می‌شود و بقیه تولید متوقف می‌شود...");
+    } catch (e) { setErr(e instanceof Error ? e.message : "خطا"); }
   }
 
   // Stop the live poll once every shelf has reached the target again.
   useEffect(() => {
     if (restocking && pool && pool.shelves.every(s => s.available >= pool.target)) {
       setRestocking(false);
+      setCancelRequested(false);
       setMsg("همه قفسه‌ها پر شد");
     }
   }, [pool, restocking]);
@@ -254,6 +280,17 @@ export default function Admin({ nav }: { nav: NavFn }) {
             className="text-[11px] px-3 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--surface)] font-bold disabled:opacity-40">
             {restocking ? "در حال تولید..." : "تولید فوری"}
           </button>
+          {restocking && !cancelRequested && (
+            <button onClick={cancelRestock}
+              className="text-[11px] px-3 py-1.5 rounded-xl border border-red-400/60 text-red-400 font-bold hover:bg-red-400/10">
+              لغو تولید
+            </button>
+          )}
+          {cancelRequested && (
+            <span className="text-[10px] text-[var(--muted-2)]">
+              در حال توقف پس از دفترچه فعلی...
+            </span>
+          )}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {pool?.shelves.map(s => {

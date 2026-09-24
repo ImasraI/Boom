@@ -11,6 +11,7 @@ inserted with status="pending_use".
 """
 
 import json
+import threading
 from datetime import datetime
 
 from sqlalchemy import select
@@ -34,6 +35,30 @@ POOL_DIFFICULTIES = ["easy", "konkur", "hard"]
 
 # student_id sentinel for unassigned pool rows (no real user has id 0).
 POOL_OWNER_ID = 0
+
+
+# --- Cooperative cancellation --------------------------------------------
+# A sweep runs many multi-minute LLM booklets; the only safe way to stop it
+# is at a booklet boundary. request_cancel() sets a flag that sweep() checks
+# between booklets, so the in-flight booklet finishes and every already-
+# produced row is kept.
+_cancel_event = threading.Event()
+
+
+def request_cancel() -> None:
+    """Ask the running sweep to stop after its current booklet."""
+    _cancel_event.set()
+
+
+def cancel_requested() -> bool:
+    """True when a cancel has been requested but the sweep may still be
+    finishing its current booklet."""
+    return _cancel_event.is_set()
+
+
+def clear_cancel() -> None:
+    """Reset the flag before starting a new sweep (never call mid-sweep)."""
+    _cancel_event.clear()
 
 
 def shelf_key(major_key: str, difficulty: str) -> str:
@@ -117,10 +142,16 @@ def sweep(db, target: int, majors=None, difficulties=None,
     difficulties = list(difficulties or POOL_DIFFICULTIES)
     produced = 0
     for major_key in majors:
+        if _cancel_event.is_set():
+            logger.info("Pool sweep canceled after %d row(s).", produced)
+            return produced
         if major_key not in CANONICAL_MAJOR:
             logger.warning("Unknown major key %r - skipping.", major_key)
             continue
         for difficulty in difficulties:
+            if _cancel_event.is_set():
+                logger.info("Pool sweep canceled after %d row(s).", produced)
+                return produced
             deficit = pool_deficit(db, major_key, difficulty, target)
             if deficit == 0:
                 continue
@@ -130,6 +161,11 @@ def sweep(db, target: int, majors=None, difficulties=None,
             logger.info("Pool low: %s/%s needs %d more.",
                         major_key, difficulty, deficit)
             for _ in range(deficit):
+                # Cancellation lands here, between booklets: the in-flight
+                # booklet finishes normally and its row is kept.
+                if _cancel_event.is_set():
+                    logger.info("Pool sweep canceled after %d row(s).", produced)
+                    return produced
                 if generate_one(db, major_key, difficulty):
                     produced += 1
     return produced

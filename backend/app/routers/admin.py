@@ -150,12 +150,19 @@ def sms_credit_view():
 @router.get("/pool")
 def pool_levels(db: Session = Depends(get_db)):
     """pending_use stock per (major, difficulty) shelf + the target the
-    worker/restock button aims for."""
+    worker/restock button aims for.
+
+    ``running`` tells the UI whether the admin-triggered sweep is still
+    producing; ``cancel_requested`` covers the short window after a cancel
+    while the current booklet finishes (shelves may still tick up once).
+    """
     from ..config import get_settings
 
     return {
         "target": get_settings().MOCK_POOL_TARGET,
         "shelves": pool_core.pool_levels(db),
+        "running": _restock_running,
+        "cancel_requested": pool_core.cancel_requested(),
     }
 
 
@@ -173,6 +180,9 @@ def pool_restock(db: Session = Depends(get_db)):
             raise HTTPException(status_code=409,
                                 detail="یک restock در حال اجرا است؛ صبر کنید")
         globals()['_restock_running'] = True
+    # A previous run may have been canceled just before it exited; a fresh
+    # start must not inherit that flag.
+    pool_core.clear_cancel()
 
     def _run() -> None:
         global _restock_running
@@ -204,3 +214,22 @@ _restock_lock = threading.Lock()
 def _pool_target() -> int:
     from ..config import get_settings
     return get_settings().MOCK_POOL_TARGET
+
+
+@router.post("/pool/cancel")
+def pool_cancel():
+    """Ask the running admin restock to stop after its current booklet.
+
+    Cooperative: the in-flight booklet (several LLM calls) finishes and is
+    KEPT - only the remaining work is skipped. Raises 409 when nothing is
+    running; the UI can also poll /pool's cancel_requested to show the
+    finishing state.
+    """
+    with _restock_lock:
+        running = _restock_running
+    if not running:
+        raise HTTPException(status_code=409,
+                            detail="restock در حال اجرا نیست")
+    pool_core.request_cancel()
+    logger.info("Admin requested pool-restock cancel.")
+    return {"ok": True, "cancel_requested": True}
