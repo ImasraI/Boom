@@ -132,6 +132,28 @@ export default function Admin({ nav }: { nav: NavFn }) {
     finally { setBusy(false); }
   }
 
+  async function wipeUser(u: UserRow) {
+    // Type-to-confirm: the admin must retype the user's username (phone).
+    const typed = window.prompt(
+      `حذف کامل داده‌های کاربر #${u.id} (${u.username})\n\n` +
+      "همه گفتگوها، آزمون‌ها، آمار و فایل‌های این کاربر برای همیشه پاک می‌شوند و قابل بازگشت نیستند.\n" +
+      `برای تایید، نام کاربری را تایپ کنید: ${u.username}`
+    );
+    if (typed === null) return; // canceled
+    setBusy(true); setErr(""); setMsg("");
+    try {
+      const res = await fetch(apiUrl(`/api/admin/users/${u.id}/data`), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ confirm: typed.trim() }),
+      });
+      if (!res.ok) throw new Error(await readApiError(res, "حذف کامل ناموفق بود"));
+      setMsg(`همه داده‌های کاربر ${u.username} پاک شد`);
+      await load();
+    } catch (e) { setErr(e instanceof Error ? e.message : "خطا"); }
+    finally { setBusy(false); }
+  }
+
   async function cancelRestock() {
     setErr("");
     try {
@@ -246,6 +268,12 @@ export default function Admin({ nav }: { nav: NavFn }) {
                       className="text-[11px] px-2.5 py-1 rounded-lg bg-[var(--card)] border border-[var(--border)] text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40">
                       ریست سهمیه
                     </button>
+                    {!u.is_admin && (
+                      <button onClick={() => wipeUser(u)} disabled={busy}
+                        className="text-[11px] px-2.5 py-1 rounded-lg border border-red-400/60 text-red-400 hover:bg-red-400/10 disabled:opacity-40">
+                        حذف کامل
+                      </button>
+                    )}
                   </div>
                   {Object.keys(u.usage?.features ?? {}).length > 0 && (
                     <div className="flex flex-wrap gap-1.5">

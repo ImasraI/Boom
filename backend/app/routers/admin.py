@@ -13,8 +13,10 @@ Everything here is server-side gated: 403 for any non-admin token, no
 endpoint can create or promote admins (that's scripts/manage_admin.py only).
 """
 
+import shutil
 import threading
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -209,6 +211,137 @@ def pool_restock(db: Session = Depends(get_db)):
 # producer and SQLite serializes the inserts themselves).
 _restock_running = False
 _restock_lock = threading.Lock()
+
+
+class WipeUserData(BaseModel):
+    # Must equal the user's username (phone) - a type-to-confirm guard
+    # against wiping the wrong account from the panel.
+    confirm: str
+
+
+@router.delete("/users/{user_id}/data")
+def wipe_user_data(user_id: int, body: WipeUserData,
+                   db: Session = Depends(get_db)):
+    """Permanently erase one user's data (GDPR-style full wipe).
+
+    Removes: account row, conversations, daily tasks, study tasks/sessions,
+    assessments, wrong answers, claimed mocks + attempts, arena queue/match
+    entries, SMS codes for their phone, uploaded files, rendered page images
+    and every vector-store chunk in all three collections.
+
+    Deliberately NOT touched: the shared mock pool (pool rows are owned by
+    the student_id=0 sentinel) and the admin-managed signup allowlist.
+    Admin accounts cannot be wiped from here.
+    """
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="کاربر پیدا نشد")
+    if user.is_admin:
+        raise HTTPException(status_code=403,
+                            detail="حساب مدیر از این طریق حذف نمیشود")
+    if (body.confirm or "").strip() != user.username:
+        raise HTTPException(status_code=400,
+                            detail="متن تایید با نام کاربری مطابقت ندارد")
+
+    counts = _wipe_user_data(user_id, user.phone, db)
+    logger.warning(
+        "Admin wiped ALL data for user %d (%s): %s", user_id, user.username,
+        counts,
+    )
+    return {"ok": True, "user_id": user_id, "deleted": counts}
+
+
+def _wipe_user_data(user_id: int, phone: str | None, db: Session) -> dict:
+    """Delete every trace of a user. Returns per-target deletion counts."""
+    from sqlalchemy import or_
+
+    from ..auth.database import (
+        ArenaMatch, ArenaQueueEntry, Assessment, Conversation, DailyTask,
+        GeneratedMock, MockAttempt, PhoneCode, StudySession, Task,
+        WrongAnswer,
+    )
+    from ..rag import mock_generation  # noqa: F401  (import guard: stores wired)
+    from ..rag.vector_store import (
+        get_image_vector_store, get_question_vector_store, get_vector_store,
+    )
+
+    counts: dict[str, int] = {}
+
+    # ---- Vector stores: all three collections, scoped by user_id --------
+    for name, store in (
+        ("vector_text_chunks", get_vector_store()),
+        ("vector_image_chunks", get_image_vector_store()),
+        ("vector_question_chunks", get_question_vector_store()),
+    ):
+        try:
+            store.collection.delete(where={"user_id": user_id})
+            counts[name] = -1  # Chroma does not report deleted counts
+        except Exception:
+            logger.exception("Wipe: vector purge failed (%s).", name)
+    try:
+        from ..rag.hybrid_search import get_hybrid_search
+        get_hybrid_search().refresh(user_id)
+    except Exception:
+        logger.exception("Wipe: lexical index refresh failed.")
+
+    # ---- Files: uploads and rendered page images ------------------------
+    from ..config import get_settings
+    settings = get_settings()
+    for name, folder in (
+        ("upload_files", Path(settings.UPLOAD_DIR) / str(user_id)),
+        ("page_images", Path(settings.IMAGES_DIR) / str(user_id)),
+    ):
+        try:
+            if folder.exists():
+                shutil.rmtree(folder)
+                counts[name] = -1
+        except Exception:
+            logger.exception("Wipe: could not remove %s.", folder)
+
+    # ---- SQLite rows (FK-safe order; pool rows student_id=0 survive) ----
+    def _delete(model, *filters, key: str) -> None:
+        q = db.query(model)
+        if filters:
+            q = q.filter(*filters)
+        counts[key] = q.delete(synchronize_session=False)
+
+    # Children of generated_mocks first, then the user's claimed mocks.
+    _delete(MockAttempt, MockAttempt.student_id == user_id,
+            key="mock_attempts")
+    _delete(GeneratedMock, GeneratedMock.student_id == user_id,
+            key="generated_mocks")
+    _delete(ArenaMatch,
+            or_(ArenaMatch.student_a_id == user_id,
+                ArenaMatch.student_b_id == user_id,
+                ArenaMatch.winner_id == user_id),
+            key="arena_matches")
+    _delete(ArenaQueueEntry, ArenaQueueEntry.student_id == user_id,
+            key="arena_queue_entries")
+    _delete(StudySession, StudySession.student_id == user_id,
+            key="study_sessions")
+    _delete(Task, Task.student_id == user_id, key="tasks")
+    _delete(Assessment, Assessment.student_id == user_id, key="assessments")
+    _delete(WrongAnswer, WrongAnswer.student_id == user_id,
+            key="wrong_answers")
+    _delete(DailyTask, DailyTask.user_id == user_id, key="daily_tasks")
+    _delete(Conversation, Conversation.user_id == user_id,
+            key="conversations")
+    if phone:
+        _delete(PhoneCode, PhoneCode.phone == phone, key="phone_codes")
+
+    user_row = db.get(User, user_id)
+    if user_row is not None:
+        db.delete(user_row)
+        counts["user"] = 1
+    db.commit()
+
+    # ---- In-memory quota counters (features + tokens) -------------------
+    try:
+        limits.reset_user_quota(user_id)
+    except Exception:
+        logger.exception("Wipe: quota counter cleanup failed.")
+
+    return counts
 
 
 def _pool_target() -> int:
