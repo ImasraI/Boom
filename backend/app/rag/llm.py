@@ -690,44 +690,59 @@ class OpenAICompatibleClient(BaseLLMClient):
             yield f"خطا: {e}"
 
 
-def get_llm_client() -> BaseLLMClient:
+def get_llm_client(
+    *,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+) -> BaseLLMClient:
+    """Build the chat/planning LLM client from settings.
+
+    ``api_key`` / ``model`` override the provider's default key/model - used
+    by get_pool_llm_client() so mock generation can run on its own key
+    instead of competing with the chatbot for the same rate limits.
+    """
     settings = get_settings()
     provider = settings.LLM_PROVIDER
 
     if provider == "groq":
-        if not settings.LLM_API_KEY:
-            logger.warning("Groq selected but LLM_API_KEY is not set. Using mock.")
+        key = api_key if api_key is not None else settings.LLM_API_KEY
+        model_name = model if model is not None else settings.LLM_MODEL_NAME
+        if not key:
+            logger.warning("Groq selected but no API key is set. Using mock.")
             return MockLLMClient()
-        logger.info(f"Using GroqLLMClient with model={settings.LLM_MODEL_NAME}")
+        logger.info(f"Using GroqLLMClient with model={model_name}")
         return GroqLLMClient(
-            api_key=settings.LLM_API_KEY,
-            model=settings.LLM_MODEL_NAME,
+            api_key=key,
+            model=model_name,
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
         )
 
     if provider == "openai" or provider == "omniroute":
-        if not settings.LLM_API_KEY:
-            logger.warning(f"{provider} selected but LLM_API_KEY is not set. Using mock.")
+        key = api_key if api_key is not None else settings.LLM_API_KEY
+        model_name = model if model is not None else settings.LLM_MODEL_NAME
+        if not key:
+            logger.warning(f"{provider} selected but no API key is set. Using mock.")
             return MockLLMClient()
         base_url = settings.LLM_BASE_URL
         if not base_url or base_url == "http://localhost:11434/v1":
             base_url = "https://api.omniroute.ai/v1"
-        logger.info(f"Using OpenAICompatibleClient ({provider}) with base_url={base_url}, model={settings.LLM_MODEL_NAME}")
+        logger.info(f"Using OpenAICompatibleClient ({provider}) with base_url={base_url}, model={model_name}")
         return OpenAICompatibleClient(
-            api_key=settings.LLM_API_KEY,
+            api_key=key,
             base_url=base_url,
-            model=settings.LLM_MODEL_NAME,
+            model=model_name,
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
         )
 
     if provider == "ollama":
         if "localhost:11434" in settings.LLM_BASE_URL or "127.0.0.1:11434" in settings.LLM_BASE_URL:
-            logger.info(f"Using OllamaLLMClient with base_url={settings.LLM_BASE_URL}, model={settings.LLM_MODEL_NAME}")
+            model_name = model if model is not None else settings.LLM_MODEL_NAME
+            logger.info(f"Using OllamaLLMClient with base_url={settings.LLM_BASE_URL}, model={model_name}")
             return OllamaLLMClient(
                 base_url=settings.LLM_BASE_URL,
-                model=settings.LLM_MODEL_NAME,
+                model=model_name,
                 temperature=settings.LLM_TEMPERATURE,
                 max_tokens=settings.LLM_MAX_TOKENS,
             )
@@ -736,20 +751,40 @@ def get_llm_client() -> BaseLLMClient:
             return MockLLMClient()
 
     if provider == "gemini":
-        if not settings.GEMINI_API_KEY:
-            logger.warning("Gemini selected but GEMINI_API_KEY is not set. Using mock.")
+        key = api_key if api_key is not None else settings.GEMINI_API_KEY
+        model_name = model if model is not None else settings.GEMINI_MODEL_NAME
+        if not key:
+            logger.warning("Gemini selected but no API key is set. Using mock.")
             return MockLLMClient()
-        logger.info(f"Using GeminiLLMClient with model={settings.GEMINI_MODEL_NAME}")
+        logger.info(f"Using GeminiLLMClient with model={model_name}")
         return GeminiLLMClient(
-            api_key=settings.GEMINI_API_KEY,
+            api_key=key,
             base_url=settings.GEMINI_BASE_URL,
-            model=settings.GEMINI_MODEL_NAME,
+            model=model_name,
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
         )
 
     logger.info("Using MockLLMClient (test mode without a real LLM).")
     return MockLLMClient()
+
+
+def get_pool_llm_client() -> BaseLLMClient:
+    """LLM client for MOCK GENERATION (pool worker, admin restock, live
+    booklet builds).
+
+    Uses POOL_LLM_API_KEY / POOL_LLM_MODEL_NAME when set, so pool generation
+    gets its own provider quota instead of competing with the chatbot and
+    planning on the main key. Empty key = fall back to the shared key
+    (previous behavior).
+    """
+    settings = get_settings()
+    pool_key = (settings.POOL_LLM_API_KEY or "").strip()
+    if not pool_key:
+        return get_llm_client()
+    pool_model = (settings.POOL_LLM_MODEL_NAME or "").strip() or None
+    logger.info("Using the dedicated pool LLM key/model for mock generation.")
+    return get_llm_client(api_key=pool_key, model=pool_model)
 
 
 def get_vision_llm_client() -> BaseLLMClient:

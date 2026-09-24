@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
     LLM_MODEL_NAME: str = "llama-3.1-8b-instant"
+    # Separate key (and optional model) for MOCK GENERATION (the pool worker,
+    # admin restock and live booklet builds). Booklet generation makes many
+    # large LLM calls and can exhaust a shared key's per-minute limits,
+    # which used to 429 the chatbot/planning at the same time. Leave empty
+    # to share the main LLM_API_KEY (old behavior).
+    POOL_LLM_API_KEY: str = ""
+    POOL_LLM_MODEL_NAME: str = ""  # empty = LLM_MODEL_NAME
     VISION_LLM_PROVIDER: str = "gemini"  # Options: "gemini", "groq", "ollama", "mock"
     VISION_LLM_MODEL_NAME: str = "gemini-3.6-flash"
 

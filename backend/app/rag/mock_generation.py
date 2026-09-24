@@ -30,7 +30,7 @@ from app.rag.konkur_format import (  # noqa: F401  (re-exported for consumers)
     major_key,
     plan_totals,
 )
-from app.rag.llm import get_llm_client
+from app.rag.llm import get_pool_llm_client
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -413,7 +413,7 @@ def verify_and_repair_booklet(
     """
     if not questions:
         return questions
-    client = get_llm_client()
+    client = get_pool_llm_client()
 
     def _score(verdict: Optional[int], stated: int) -> int:
         if verdict == stated:
@@ -485,7 +485,7 @@ def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
         prompt = build_booklet_prompt([{**row, "questions": target}],
                                       row_topics, difficulty, context,
                                       weak_block=_weak_block(row.get("weak") or []))
-        raw = get_llm_client().generate(
+        raw = get_pool_llm_client().generate(
             [{"role": "user", "content": prompt}],
             max_tokens=budget, timeout=timeout,
         )
