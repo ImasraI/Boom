@@ -322,6 +322,29 @@ def test_non_allowlisted_phone_ignores_bypass(monkeypatch, db):
     assert exc.value.status_code == 503  # falls through to the SMS guard
 
 
+def test_sms_provider_failure_is_503_not_500(monkeypatch, db):
+    """Regression: when the SMS provider is unreachable (raises RuntimeError
+    from sms.py), request-code must return a clean 503 carrying the
+    user-safe message instead of an unhandled 500."""
+    monkeypatch.setattr(auth_router, "get_settings",
+                        lambda: _settings(SMS_API_KEY="k",
+                                          SMS_VERIFY_TEMPLATE_ID="1"))
+
+    def _boom(mobile, code):
+        raise RuntimeError("سرویس پیامک در دسترس نیست")
+
+    monkeypatch.setattr(auth_router, "send_verification_code", _boom)
+    with pytest.raises(HTTPException) as exc:
+        auth_router.request_code(
+            auth_router.RequestCodeRequest(phone=PHONE), _fake_request(), db
+        )
+    assert exc.value.status_code == 503
+    assert "پیامک" in exc.value.detail
+    # Nothing may be persisted: no code row, or the retry would be blocked
+    # by the resend cooldown while the user never received anything.
+    assert db.query(PhoneCode).count() == 0
+
+
 # ---------------------------------------------------------------------------
 # tasks.py update-plan (LLM stubbed)
 # ---------------------------------------------------------------------------

@@ -128,7 +128,13 @@ def request_code(
     if settings.SMS_DEBUG_ECHO and settings.APP_ENV != "production":
         debug_code = code  # dev convenience: no SMS spent
     else:
-        send_verification_code(mobile, code)
+        try:
+            send_verification_code(mobile, code)
+        except RuntimeError as exc:
+            # sms.py raises RuntimeError with a user-safe Persian message
+            # (unreachable provider, rejected send, bad template id...).
+            # Surface it as 503 instead of an unhandled 500.
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         debug_code = None
 
     db.add(
