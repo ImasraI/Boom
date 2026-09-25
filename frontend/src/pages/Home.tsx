@@ -470,17 +470,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
         ))}
       </div>
 
-      {/* ── Floating chat ── */}
-      <div className="fixed bottom-0 inset-x-0 max-w-[430px] mx-auto px-4 pb-7 pt-6 md:hidden"
-        style={{ background: "linear-gradient(to top, #F8F6F2 60%, transparent)" }}>
-        <button onClick={() => { nav("chat"); }}
-          className="w-full h-[52px] rounded-full bg-[#1A1108] text-[#F8F6F2] font-bold text-[14px] flex items-center justify-center gap-2.5 hover:bg-[#2C2010] active:scale-95 transition-all shadow-lg">
-          گفتگو با بوم
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-        </button>
-      </div>
+      {/* Chat lives in the mobile tab bar now (App.tsx MobileTabBar). */}
 
       {/* Popups */}
       {selectedTask && (

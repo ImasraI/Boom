@@ -87,11 +87,11 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
     return html.replace(`<!-- ${slotName} -->`, content)
   }
 
-  const title = config.title ?? "Figma Make App"
+  const title = config.title ?? "Boom"
   const description = config.description ?? ''
   const favicon = config.icons?.icon ?? ''
   const socialImage = config.openGraph?.image ?? ''
-  const language = sanitizeHtmlValue(config.language) || 'en'
+  const language = sanitizeHtmlValue(config.language) || 'fa'
   const googleAnalyticsId = sanitizeHtmlValue(config.analytics?.googleAnalyticsId)
   const headStart = config.customScripts?.headStart ?? ''
   const headEnd = config.customScripts?.headEnd ?? ''
@@ -100,7 +100,7 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
   const robotsTxt = config.robots?.index === false ? 'User-agent: *\nDisallow: /\n' : ''
 
   return {
-    name: 'figma-site-configuration',
+    name: 'Boom',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         if (!robotsTxt || req.url?.split('?')[0] !== '/robots.txt') return next()

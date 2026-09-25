@@ -95,12 +95,118 @@ function Shell({ children, screen, nav, isAdmin }: { children: React.ReactNode; 
   return (
     <div dir="rtl" className="min-h-screen bg-[var(--page-bg)]">
       {!hideSidebar && <DesktopSidebar screen={screen} nav={nav} isAdmin={isAdmin} />}
+      {!hideSidebar && <MobileTabBar screen={screen} nav={nav} isAdmin={isAdmin} />}
       <div className={`min-h-screen ${!hideSidebar ? "md:mr-[220px]" : ""}`}>
-        <div className="w-full max-w-[430px] mx-auto md:max-w-none min-h-screen bg-[var(--surface)] md:shadow-none">
+        <div className={`w-full max-w-[430px] mx-auto md:max-w-none min-h-screen bg-[var(--surface)] md:shadow-none ${!hideSidebar ? "pb-24 md:pb-0" : ""}`}>
           {children}
         </div>
       </div>
     </div>
+  );
+}
+
+const CHAT_ICON = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+  </svg>
+);
+
+/** Fixed bottom navigation for phones (< md). Mirrors DesktopSidebar so
+ * every screen is reachable without a keyboard/mouse; the کمی tabs that
+ * don't fit live in the «بیشتر» sheet. */
+function MobileTabBar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Screen) => void; isAdmin: boolean }) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const items: { screen: Screen; label: string; icon: React.ReactNode }[] = [
+    NAV_ITEMS[0], // home
+    NAV_ITEMS[4], // plan
+    NAV_ITEMS[7], // mock
+    NAV_ITEMS[9], // profile
+  ];
+  const moreItems: { screen: Screen; label: string; icon: React.ReactNode }[] = [
+    NAV_ITEMS[1], // streak
+    NAV_ITEMS[2], // recovery
+    NAV_ITEMS[3], // exams
+    NAV_ITEMS[5], // schedule
+    NAV_ITEMS[6], // evaluation
+    NAV_ITEMS[8], // arena
+  ];
+  const moreActive = moreItems.some(i => i.screen === screen) || (isAdmin && screen === "admin");
+
+  function go(s: Screen) {
+    setMoreOpen(false);
+    nav(s);
+  }
+
+  return (
+    <>
+      {moreOpen && (
+        <div className="md:hidden fixed inset-0 z-40 bg-black/50" onClick={() => setMoreOpen(false)} />
+      )}
+      {moreOpen && (
+        <div className="md:hidden fixed bottom-[62px] inset-x-2 z-50 card-elevated shadow-float p-3 anim-fade-up">
+          <div className="grid grid-cols-3 gap-2">
+            {moreItems.map(item => {
+              const active = screen === item.screen;
+              return (
+                <button key={item.screen} onClick={() => go(item.screen)}
+                  className={`press flex flex-col items-center gap-1.5 py-3 px-1 rounded-2xl transition-colors ${
+                    active ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--text-strong)] bg-[var(--surface-2)]"
+                  }`}>
+                  {item.icon}
+                  <span className="text-[11px] font-bold">{item.label}</span>
+                </button>
+              );
+            })}
+            {isAdmin && (
+              <button onClick={() => go("admin")}
+                className={`press flex flex-col items-center gap-1.5 py-3 px-1 rounded-2xl transition-colors ${
+                  screen === "admin" ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--text-strong)] bg-[var(--surface-2)]"
+                }`}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <span className="text-[11px] font-bold">مدیریت</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+      <nav
+        aria-label="ناوبری موبایل"
+        className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-[var(--card)]/95 border-t border-[var(--border)]"
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      >
+        <div className="flex items-stretch justify-around px-1">
+          {items.map(item => {
+            const active = screen === item.screen;
+            return (
+              <button key={item.screen} onClick={() => go(item.screen)}
+                className={`press flex-1 flex flex-col items-center gap-0.5 py-2.5 transition-colors ${
+                  active ? "text-[var(--accent)]" : "text-[var(--muted-2)]"
+                }`}>
+                {item.icon}
+                <span className="text-[10px] font-bold">{item.label}</span>
+                {active && <span className="w-4 h-0.5 rounded-full bg-[var(--accent)]" />}
+              </button>
+            );
+          })}
+          <button onClick={() => nav("chat")}
+            className={`press flex-1 flex flex-col items-center gap-0.5 py-2.5 transition-colors ${
+              screen === "chat" ? "text-[var(--accent)]" : "text-[var(--muted-2)]"
+            }`}>
+            {CHAT_ICON}
+            <span className="text-[10px] font-bold">بوم AI</span>
+            {screen === "chat" && <span className="w-4 h-0.5 rounded-full bg-[var(--accent)]" />}
+          </button>
+          <button onClick={() => setMoreOpen(o => !o)}
+            className={`press flex-1 flex flex-col items-center gap-0.5 py-2.5 transition-colors ${
+              moreActive || moreOpen ? "text-[var(--accent)]" : "text-[var(--muted-2)]"
+            }`}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+            <span className="text-[10px] font-bold">بیشتر</span>
+            {(moreActive || moreOpen) && <span className="w-4 h-0.5 rounded-full bg-[var(--accent)]" />}
+          </button>
+        </div>
+      </nav>
+    </>
   );
 }
 
