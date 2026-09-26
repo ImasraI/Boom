@@ -1,4 +1,4 @@
-import { Task, DayRecord } from "./types";
+import { DayRecord } from "./types";
 
 export const MAJORS = [
   "ریاضی فیزیک",
@@ -42,39 +42,6 @@ export const SUBJECTS_BY_MAJOR: Record<string, string[]> = {
     "زبان انگلیسی", "زبان دوم", "ادبیات فارسی", "ریاضی", "تاریخ",
   ],
 };
-
-export const DEMO_TASKS: Task[] = [
-  {
-    id: 1, type: "study",
-    title: "حسابان — مشتق‌گیری",
-    description: "فصل ۵، مسائل ۱ تا ۲۰. تمرکز روی قانون زنجیر و مشتق‌گیری ضمنی.",
-    subject: "حسابان", duration: "۱.۵ ساعت", scheduledTime: "۰۹:۰۰", done: false,
-  },
-  {
-    id: 2, type: "quiz",
-    title: "آزمون فیزیک",
-    description: "مدارهای الکتریکی — ۳۰ سؤال چندگزینه‌ای به سبک کنکور.",
-    subject: "فیزیک", duration: "۴۵ دقیقه", scheduledTime: "۱۱:۰۰", done: false,
-  },
-  {
-    id: 3, type: "review",
-    title: "مرور واژگان عربی",
-    description: "فصل ۳، کلمات بنیادی — ۴۰ کارت فلش، دو دور کامل.",
-    subject: "عربی", duration: "۳۰ دقیقه", scheduledTime: "۱۴:۰۰", done: true,
-  },
-  {
-    id: 4, type: "practice",
-    title: "تمرین درک مطلب انگلیسی",
-    description: "۲ متن کامل با سؤالات از کنکورهای سال‌های قبل.",
-    subject: "زبان انگلیسی", duration: "۴۰ دقیقه", scheduledTime: "۱۶:۰۰", done: false,
-  },
-  {
-    id: 5, type: "test",
-    title: "آزمون شبیه‌سازی شیمی",
-    description: "فصل‌های ۱ تا ۳. شرایط واقعی کنکور، تایمر ۵۰ دقیقه.",
-    subject: "شیمی", duration: "۵۰ دقیقه", scheduledTime: "۱۸:۰۰", done: false,
-  },
-];
 
 export const PAST_RECORDS: DayRecord[] = [
   { date: "2026-08-20", tasksTotal: 5, tasksDone: 4, xp: 180 },

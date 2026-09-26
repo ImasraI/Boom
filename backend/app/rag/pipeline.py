@@ -20,7 +20,7 @@ def _record_call_tokens(user_id: int, client) -> None:
         logger.exception("token accounting failed")
 from app.schemas import ChatMessage, SourceChunk
 from app.utils.logger import get_logger
-from app.rag.hybrid_search import get_hybrid_search, HybridSearch
+from app.rag.hybrid_search import get_hybrid_search
 
 
 # Initialize application logger

@@ -10,7 +10,7 @@ Recommended models for Persian: nomic-embed-text (via Ollama)
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List
 import httpx
 
 from app.config import get_settings

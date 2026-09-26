@@ -19,7 +19,7 @@ after 30 minutes so matchmaking never pairs with a ghost.
 
 import json
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,14 +39,17 @@ from app.auth.database import (
 )
 from app.auth.deps import get_current_user, get_db
 from app.auth.limits import check_ai_quota, record_ai_use
-from app.rag import mock_generation
+from app.rag import mock_generation, pool_core
+from app.rag.konkur_format import major_key
 from app.routers.mocks import _score
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/api/arena", tags=["arena"])
 logger = get_logger(__name__)
 
-_MATCHMAKING_BAND = 300  # Elo window for pairing two queued players
+_MATCHMAKING_BAND = 300  # Elo window for pairing two queued players (base)
+_BAND_WIDEN_PER_MIN = 50  # +Elo per queued minute (see _matchmaking_band)
+_BAND_MAX = 900  # widened band never grows past this
 _STALE_QUEUE_MINUTES = 30  # purge queue entries not polled for this long
 _LOCK = threading.Lock()
 
@@ -69,6 +72,14 @@ def _title(elo: int) -> dict:
     return {"name": "تازه‌کار", "color": "#9CA3AF"}
 
 
+def _major_key_of(major_label: str) -> str:
+    """Frontend/DB major label -> konkur_format key (for pool shelves)."""
+    try:
+        return major_key(major_label or "")
+    except Exception:
+        return "riazi"
+
+
 class JoinPayload(BaseModel):
     student: Optional[dict] = None
     topics: Optional[list] = None
@@ -84,17 +95,18 @@ class SubmitPayload(BaseModel):
 def _try_pair(db: Session, entry: ArenaQueueEntry, student: Optional[dict]):
     """Match two human queue entries whose ratings are within the band.
 
-    Reserves the match atomically (lock-safe) and generates the real AI
-    booklet right after, OUTSIDE the matchmaking lock: a 60-420s LLM call
-    must never block other players' join/status requests.
+    Reserves the match atomically (lock-safe) and fills the booklet from the
+    pre-generated duel pool when one is available; only otherwise does it
+    start a live LLM generation, OUTSIDE the matchmaking lock: a 60-420s LLM
+    call must never block other players' join/status requests.
     """
     other = (
         db.execute(
             select(ArenaQueueEntry)
             .where(ArenaQueueEntry.student_id != entry.student_id)
             .where(ArenaQueueEntry.elo.between(
-                entry.elo - _MATCHMAKING_BAND,
-                entry.elo + _MATCHMAKING_BAND,
+                entry.elo - _matchmaking_band(entry),
+                entry.elo + _matchmaking_band(entry),
             ))
             .order_by(ArenaQueueEntry.joined_at.asc())
             .limit(1)
@@ -105,7 +117,10 @@ def _try_pair(db: Session, entry: ArenaQueueEntry, student: Optional[dict]):
         return None
 
     match = _reserve_match(db, entry, other, student)
-    # Real booklet generation in a daemon thread: join_queue holds _LOCK, and
+    if match.mock_ready:
+        # Served instantly from the pre-generated duel pool.
+        return match
+    # Live generation fallback in a daemon thread: join_queue holds _LOCK, and
     # an LLM call can take minutes — the lock must free up immediately so
     # other players' join/status requests never block.
     plan = mock_generation.scale_plan(
@@ -119,45 +134,74 @@ def _try_pair(db: Session, entry: ArenaQueueEntry, student: Optional[dict]):
     return match
 
 
+def _matchmaking_band(entry: ArenaQueueEntry) -> int:
+    """Elo pairing window, widening with queue wait: 300 at join, +50 every
+    full minute queued, capped at 900 so a long-waiting player eventually
+    matches instead of queueing forever. waited_seconds is already surfaced
+    by /status, so both sides agree on the same clock."""
+    waited = 0.0
+    try:
+        joined = entry.joined_at
+        if joined is not None:
+            if joined.tzinfo is None:
+                joined = joined.replace(tzinfo=timezone.utc)
+            waited = (datetime.now(timezone.utc) - joined).total_seconds()
+    except Exception:
+        waited = 0.0
+    return min(900, _MATCHMAKING_BAND + 50 * int(max(0.0, waited) // 60))
+
+
 def _reserve_match(db: Session, entry: ArenaQueueEntry, other: ArenaQueueEntry,
                    student: Optional[dict]) -> ArenaMatch:
     """Atomically pair two queue entries and reserve a placeholder match.
 
-    Runs under _LOCK so two joiners can never grab the same opponent; the
-    (slow) booklet generation happens later, outside the lock, in
-    _generate_duel_booklet. The placeholder booklet keeps /status reporting
-    "matched" for both players while the real questions are generated.
+    Runs under _LOCK so two joiners can never grab the same opponent. A
+    pre-generated + verified duel booklet is claimed from the pool when the
+    player's major has stock; otherwise a placeholder booklet is stored and
+    the (slow) live generation happens later, outside the lock, in
+    _generate_duel_booklet. Either way /status reports "matched" for both
+    players immediately.
     """
+    major_key = _major_key_of((student or {}).get("major") or "")
     plan = mock_generation.scale_plan(
         mock_generation.default_plan((student or {}).get("major") or ""),
         divisor=3, minimum=3,
     )
-    questions = []
-    i = 0
-    for s in plan:
-        for _ in range(s["questions"]):
-            i += 1
-            questions.append({
-                "_id": i,
-                "subject": s["name"],
-                "topic": "",
-                "text": "",
-                "options": ["", "", "", ""],
-                "answer": 0,
-                "explanation": "",
-            })
 
-    mock = GeneratedMock(
-        student_id=entry.student_id,
-        title=f"دوئل رنکینگ — {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
-        major=(student or {}).get("major") or "ریاضی فیزیک",
-        grade="",
-        duration_minutes=sum(s["minutes"] for s in plan) // 3 or 10,
-        questions=json.dumps(questions, ensure_ascii=False),
-        status="claimed",  # duel placeholder rows are never pool candidates
-    )
-    db.add(mock)
-    db.flush()
+    # Fast path: a pre-generated, already-verified duel booklet.
+    pooled = pool_core.claim_duel_booklet(
+        db, entry.student_id, other.student_id, major_key)
+    if pooled is not None:
+        mock = pooled
+        logger.info("Arena match served from duel pool (mock %d).", mock.id)
+    else:
+        questions = []
+        i = 0
+        for s in plan:
+            for _ in range(s["questions"]):
+                i += 1
+                questions.append({
+                    "_id": i,
+                    "subject": s["name"],
+                    "topic": "",
+                    "text": "",
+                    "options": ["", "", "", ""],
+                    "answer": 0,
+                    "explanation": "",
+                })
+        mock = GeneratedMock(
+            student_id=entry.student_id,
+            title=f"دوئل رنکینگ — {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+            major=(student or {}).get("major") or "ریاضی فیزیک",
+            grade="",
+            duration_minutes=sum(s["minutes"] for s in plan) // 3 or 10,
+            questions=json.dumps(questions, ensure_ascii=False),
+            status="claimed",  # duel placeholder rows are never pool candidates
+        )
+        db.add(mock)
+        db.flush()
+    mock_ready = not any(not (q.get("text") or "").strip()
+                         for q in (json.loads(mock.questions or "[]")))
 
     match = ArenaMatch(
         student_a_id=other.student_id,
@@ -172,8 +216,10 @@ def _reserve_match(db: Session, entry: ArenaQueueEntry, other: ArenaQueueEntry,
     db.delete(entry)
     db.commit()
     db.refresh(match)
-    logger.info("Arena match %d reserved: %d vs %d (booklet generating)",
-                match.id, match.student_a_id, match.student_b_id)
+    match.mock_ready = mock_ready
+    logger.info("Arena match %d reserved: %d vs %d (%s)",
+                match.id, match.student_a_id, match.student_b_id,
+                "pool booklet" if mock_ready else "booklet generating")
     return match
 
 
@@ -183,6 +229,11 @@ def _generate_duel_booklet(match: ArenaMatch, plan: list) -> None:
     Must be called OUTSIDE _LOCK (a real LLM call can take minutes). On
     failure the match survives with the placeholder booklet and the error is
     logged; submit scoring of an all-blank booklet yields 0 for both.
+
+    Duel booklets get the SAME answer-verification pass as pool booklets:
+    a wrong key in a ranked duel directly moves Elo, so an unverified
+    generation is never stored. Tighter budget than the pool default so the
+    duel's already-long generation does not grow much more.
     """
     try:
         mock_db = SessionLocal()
@@ -194,9 +245,13 @@ def _generate_duel_booklet(match: ArenaMatch, plan: list) -> None:
                 match.student_b_id, plan, topics=[], difficulty="konkur",
             )
             if questions:
+                questions = mock_generation.verify_and_repair_booklet(
+                    questions, match.student_b_id,
+                    difficulty="konkur", max_regens=1, timeout=45.0,
+                )
                 mock.questions = json.dumps(questions, ensure_ascii=False)
                 mock_db.commit()
-                logger.info("Arena match %d: real booklet ready (%d questions)",
+                logger.info("Arena match %d: verified booklet ready (%d questions)",
                             match.id, len(questions))
         finally:
             mock_db.close()
@@ -279,7 +334,8 @@ def status(
             return {"state": "idle"}
 
         waited = (datetime.utcnow() - entry.joined_at).total_seconds()
-        return {"state": "queued", "waited_seconds": int(waited)}
+        return {"state": "queued", "waited_seconds": int(waited),
+                "band": _matchmaking_band(entry)}
 
 
 @router.post("/leave")
@@ -332,7 +388,9 @@ def submit(
     ))
 
     if match.score_a is not None and match.score_b is not None:
-        record_match_rating(match)
+        # Placement K-factor is computed BEFORE the row is marked finished so
+        # the current match is not counted in either player's history.
+        record_match_rating(match, db)
         match.status = "finished"
         match.finished_at = datetime.utcnow()
         if match.score_a > match.score_b:
@@ -375,28 +433,25 @@ def leaderboard(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Global ranking from the latest Elo snapshot per player."""
+    """Global ranking from User.rating snapshots (O(log n) index query).
+
+    record_match_rating keeps users.rating in sync after every finished
+    match, so no ArenaMatch history scan is needed here anymore. Players who
+    have never finished a match sit at the 1000 default and sort below any
+    rated player with positive delta - same behavior as before for new
+    accounts, minus the full-table scan."""
     rows = db.execute(
-        select(ArenaMatch).where(ArenaMatch.status == "finished")
-        .order_by(ArenaMatch.created_at.desc())
-    ).scalars().all()
-    latest: dict[int, tuple[int, ArenaMatch]] = {}
-    for m in rows:
-        for sid, elo in ((m.student_a_id, m.elo_a), (m.student_b_id, m.elo_b)):
-            if sid and sid not in latest:
-                latest[sid] = (elo, m)
-    entries = []
-    for sid, (elo, _m) in latest.items():
-        user = db.get(User, sid)
-        if not user:
-            continue
-        entries.append({"user_id": sid, "username": user.username, "elo": elo})
-    entries.sort(key=lambda e: -e["elo"])
+        select(User.id, User.username, User.rating)
+        .where(User.rating != 1000)
+        .order_by(User.rating.desc())
+        .limit(50)
+    ).all()
     out = []
-    for i, e in enumerate(entries[:50], start=1):
-        t = _title(e["elo"])
-        out.append({**e, "rank": i, "title": t["name"], "color": t["color"],
-                    "is_you": e["user_id"] == current_user.id})
+    for i, (sid, username, elo) in enumerate(rows, start=1):
+        t = _title(elo)
+        out.append({"user_id": sid, "username": username, "elo": elo,
+                    "rank": i, "title": t["name"], "color": t["color"],
+                    "is_you": sid == current_user.id})
     return out
 
 

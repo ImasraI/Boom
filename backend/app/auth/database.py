@@ -12,7 +12,9 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    func,
     inspect,
+    select,
     text,
 )
 from sqlalchemy.orm import Mapped, declarative_base, mapped_column, sessionmaker, relationship
@@ -37,6 +39,10 @@ class User(Base):
     # Admin flag: gates /api/admin/* (require_admin dependency). Only set
     # through scripts/manage_admin.py - never through any HTTP endpoint.
     is_admin = Column(Boolean, default=False, nullable=False, server_default="0")
+    # Arena Elo snapshot, maintained by record_match_rating so the
+    # leaderboard can query/sort on users directly instead of scanning every
+    # finished ArenaMatch on each request. 1000 = unrated starting rating.
+    rating = Column(Integer, nullable=False, default=1000, server_default="1000")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -306,6 +312,9 @@ def ensure_schema() -> None:
     # Difficulty the booklet was generated for - pool rows are matched to
     # requests by (major, difficulty), so it must be persisted.
     _ensure_column("generated_mocks", "difficulty", "VARCHAR DEFAULT ''")
+    # Arena Elo snapshot on the user (see record_match_rating); existing DBs
+    # backfill at the unrated starting value.
+    _ensure_column("users", "rating", "INTEGER DEFAULT 1000")
     # Unique index for phone (SQLite allows multiple NULLs).
     with engine.begin() as conn:
         conn.execute(
@@ -336,28 +345,64 @@ def user_elo(db, student_id: int) -> int:
     return int(row.elo_b or 1000)
 
 
-def record_match_rating(match: ArenaMatch) -> None:
-    """Compute Elo deltas for a finished arena match using standard Elo with
-    K=32 over konkur-percentage scores, and persist them on the row.
+def record_match_rating(match: ArenaMatch, db=None) -> None:
+    """Compute Elo deltas for a finished arena match using standard Elo over
+    konkur-percentage scores, and persist them on the row + User.rating.
 
     Each player's expected score comes from the rating gap; the actual score
     is the normalized konkur percentage (0..1), so blowing out a weak opponent
-    on an easy mock still caps the gain. Call once, after both scores exist.
+    on an easy mock still caps the gain. K is 48 for each player's first 10
+    finished matches (placement acceleration) and 32 afterwards. Call once,
+    after both scores exist and BEFORE the caller commits `match.status =
+    "finished"` (the placement count must not include the current match).
+
+    `db`: the caller's session when available (the arena submit endpoint
+    passes it) so the User.rating snapshots commit atomically with the match.
+    Falls back to a short-lived SessionLocal for direct/test callers.
     """
-    K = 32.0
-    ea = 1.0 / (1.0 + 10 ** ((float(match.elo_b or 1000) - float(match.elo_a or 1000)) / 400.0))
-    sa = max(0.0, min(1.0, float(match.score_a or 0.0) / 100.0))
-    sb = max(0.0, min(1.0, float(match.score_b or 0.0) / 100.0))
-    # Normalize so the two actual scores sum to 1 (like a two-player game).
-    total = sa + sb
-    if total <= 0:
-        sa_n, sb_n = 0.5, 0.5
-    else:
-        sa_n, sb_n = sa / total, sb / total
-    match.delta_a = int(round(K * (sa_n - ea)))
-    match.delta_b = int(round(K * (sb_n - (1.0 - ea))))
-    match.elo_a = int(match.elo_a or 1000) + match.delta_a
-    match.elo_b = int(match.elo_b or 1000) + match.delta_b
+    session = db if db is not None else SessionLocal()
+    own_session = db is None
+    try:
+        def _k_for(student_id) -> float:
+            if not student_id:
+                return 32.0
+            played = session.execute(
+                select(func.count()).select_from(ArenaMatch).where(
+                    ArenaMatch.status == "finished",
+                    (ArenaMatch.student_a_id == student_id)
+                    | (ArenaMatch.student_b_id == student_id),
+                )
+            ).scalar() or 0
+            return 48.0 if played < 10 else 32.0
+
+        ka = _k_for(match.student_a_id)
+        kb = _k_for(match.student_b_id)
+        ea = 1.0 / (1.0 + 10 ** ((float(match.elo_b or 1000) - float(match.elo_a or 1000)) / 400.0))
+        sa = max(0.0, min(1.0, float(match.score_a or 0.0) / 100.0))
+        sb = max(0.0, min(1.0, float(match.score_b or 0.0) / 100.0))
+        # Normalize so the two actual scores sum to 1 (like a two-player game).
+        total = sa + sb
+        if total <= 0:
+            sa_n, sb_n = 0.5, 0.5
+        else:
+            sa_n, sb_n = sa / total, sb / total
+        match.delta_a = int(round(ka * (sa_n - ea)))
+        match.delta_b = int(round(kb * (sb_n - (1.0 - ea))))
+        match.elo_a = int(match.elo_a or 1000) + match.delta_a
+        match.elo_b = int(match.elo_b or 1000) + match.delta_b
+        # Persist snapshots onto the users so the leaderboard never needs to
+        # rescan ArenaMatch history.
+        for sid, elo in ((match.student_a_id, match.elo_a),
+                         (match.student_b_id, match.elo_b)):
+            if sid:
+                u = session.get(User, sid)
+                if u is not None:
+                    u.rating = int(elo)
+        if own_session:
+            session.commit()
+    finally:
+        if own_session:
+            session.close()
 
 
 ensure_schema()

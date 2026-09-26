@@ -1,7 +1,15 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import React from "react";
 import { NavFn, SignupData, Task } from "../types";
-import { SUBJECT_COLORS, DEMO_TASKS } from "../data";
+import { SUBJECT_COLORS } from "../data";
+import {
+  homeTasksForDate,
+  postponeToTomorrow,
+  saveTaskEdit,
+  toggleDone,
+  type HomeTask,
+} from "../homeTasks";
+import { SCHEDULE_CHANGED_EVENT, toISO } from "../scheduleStore";
 
 const STREAK = 7;
 const KONKOOR_DATE = "2027-06-20";
@@ -75,7 +83,7 @@ function CircularProgress({ done, total }: { done: number; total: number }) {
 }
 
 function TaskSheet({ task, onClose, onPostpone, onSave }: {
-  task: Task; onClose: () => void; onPostpone: () => void; onSave: (updated: Task) => void;
+  task: HomeTask; onClose: () => void; onPostpone: () => void; onSave: (updated: HomeTask) => void;
 }) {
   const color = getSubjectColor(task.subject);
   const [editing, setEditing] = useState(false);
@@ -176,7 +184,7 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
   );
 }
 
-function QuizResultModal({ task, onClose, onSubmit }: { task: Task; onClose: () => void; onSubmit: (time: string, pct: string) => void }) {
+function QuizResultModal({ task, onClose, onSubmit }: { task: HomeTask; onClose: () => void; onSubmit: (time: string, pct: string) => void }) {
   const [time, setTime] = useState("");
   const [pct, setPct] = useState("");
   return (
@@ -222,12 +230,13 @@ function QuizResultModal({ task, onClose, onSubmit }: { task: Task; onClose: () 
 }
 
 export default function Home({ userData, nav, logout }: { userData: SignupData; nav: NavFn; logout: () => void }) {
-  const [tasks, setTasks] = useState<Task[]>(DEMO_TASKS);
+  const todayISO = toISO(new Date());
+  const [tasks, setTasks] = useState<HomeTask[]>(() => homeTasksForDate(todayISO));
   const done = tasks.filter(t => t.done).length;
   const daysLeft = daysUntil(KONKOOR_DATE);
   const [showTime, setShowTime] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [quizTask, setQuizTask] = useState<Task | null>(null);
+  const [selectedTask, setSelectedTask] = useState<HomeTask | null>(null);
+  const [quizTask, setQuizTask] = useState<HomeTask | null>(null);
   const [postponingId, setPostponingId] = useState<number | null>(null);
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "صبح بخیر" : hour < 17 ? "ظهر بخیر" : "شب بخیر";
@@ -239,30 +248,50 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
 
   const AI_LEVEL = 47;
 
-  function handleCheckbox(task: Task) {
+  // Re-derive whenever the weekly plan or statics change anywhere in the app
+  // (Schedule edits, AI chat plan_update) or the day rolls over.
+  const refreshTasks = useCallback(() => {
+    setTasks(homeTasksForDate(todayISO));
+  }, [todayISO]);
+
+  useEffect(() => {
+    refreshTasks();
+    window.addEventListener(SCHEDULE_CHANGED_EVENT, refreshTasks);
+    return () => window.removeEventListener(SCHEDULE_CHANGED_EVENT, refreshTasks);
+  }, [refreshTasks]);
+
+  function handleCheckbox(task: HomeTask) {
     if ((task.type === "quiz" || task.type === "test") && !task.done) {
       setQuizTask(task);
     } else {
-      setTasks(ts => ts.map(t => t.id === task.id ? { ...t, done: !t.done } : t));
+      toggleDone(todayISO, task);
+      refreshTasks();
     }
   }
 
-  function handlePostpone(taskId: number) {
+  function handlePostpone(task: HomeTask) {
     setSelectedTask(null);
-    setPostponingId(taskId);
+    setPostponingId(task.id);
     setTimeout(() => {
-      setTasks(ts => ts.filter(t => t.id !== taskId));
+      postponeToTomorrow(todayISO, task);
       setPostponingId(null);
     }, 380);
   }
 
-  function handleSaveTask(updated: Task) {
-    setTasks(ts => ts.map(t => t.id === updated.id ? updated : t));
+  function handleSaveTask(updated: HomeTask) {
+    saveTaskEdit(todayISO, updated, {
+      title: updated.title,
+      description: updated.description,
+      duration: updated.duration,
+      scheduledTime: updated.scheduledTime,
+    });
+    refreshTasks();
   }
 
   function handleQuizSubmit(_time: string, _pct: string) {
     if (!quizTask) return;
-    setTasks(ts => ts.map(t => t.id === quizTask.id ? { ...t, done: true } : t));
+    toggleDone(todayISO, quizTask, true);
+    refreshTasks();
     setQuizTask(null);
   }
 
@@ -382,7 +411,25 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
         </div>
 
         <div className="flex flex-col gap-2">
-          {tasks.map(task => {
+          {tasks.filter(t => !t.skipped).length === 0 && (
+            <div className="bg-[var(--card)] rounded-2xl border border-dashed border-[#D5CCC3] p-6 text-center">
+              <p className="text-[13px] font-semibold text-[var(--muted)]">برنامه‌ای برای امروز نیست</p>
+              <p className="text-[11px] text-[var(--muted-2)] mt-1 leading-relaxed">
+                از «برنامه هفتگی» برنامه‌ات را بساز یا از بوم AI بخواه برایت بریزد؛ همین‌جا نشان داده می‌شود.
+              </p>
+              <div className="flex justify-center gap-2 mt-4">
+                <button onClick={() => nav("schedule")}
+                  className="press px-4 py-2 rounded-xl bg-[var(--accent)] text-[var(--surface)] text-[12px] font-bold hover:brightness-105 transition-all">
+                  برنامه هفتگی
+                </button>
+                <button onClick={() => nav("chat")}
+                  className="press px-4 py-2 rounded-xl border border-[var(--border-strong)] text-[var(--muted)] text-[12px] font-bold hover:bg-[#F0EBE3] transition-colors">
+                  گفتگو با بوم AI
+                </button>
+              </div>
+            </div>
+          )}
+          {tasks.filter(t => !t.skipped).map(task => {
             const color = getSubjectColor(task.subject);
             const isQuizOrTest = task.type === "quiz" || task.type === "test";
             const isPostponing = postponingId === task.id;
@@ -475,7 +522,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
       {/* Popups */}
       {selectedTask && (
         <TaskSheet task={selectedTask} onClose={() => setSelectedTask(null)}
-          onPostpone={() => handlePostpone(selectedTask.id)}
+          onPostpone={() => handlePostpone(selectedTask)}
           onSave={handleSaveTask} />
       )}
       {quizTask && (

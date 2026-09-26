@@ -6,7 +6,6 @@ Fallback to local disk only — no R2 or external dependencies.
 """
 
 import os
-from typing import Optional
 
 
 def put_object(key: str, data: bytes) -> None:

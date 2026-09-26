@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { NavFn } from "../types"
 import { apiUrl, authHeaders, readApiError } from "../api"
+import { RichText } from "../richText"
 
 type Phase = "config" | "loading" | "test" | "result"
 
@@ -199,7 +200,7 @@ function TestRunner({ info, questions, onFinish, onExit }: {
           {q?.topic && (
             <span className="inline-block px-2.5 py-1 rounded-lg bg-[var(--chip)] text-[var(--muted)] text-[10px] font-bold mb-3">{q.topic}</span>
           )}
-          <p className="text-[15px] font-bold text-[var(--text)] leading-relaxed mb-5 text-right whitespace-pre-wrap">{q?.text}</p>
+          <p className="text-[15px] font-bold text-[var(--text)] leading-relaxed mb-5 text-right whitespace-pre-wrap"><RichText text={q?.text ?? ""} /></p>
           <div className="space-y-2.5">
             {q?.options.map((opt, i) => {
               const sel = answers[String(q.id)] === i
@@ -209,7 +210,7 @@ function TestRunner({ info, questions, onFinish, onExit }: {
                     sel ? "bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)]" : "bg-[var(--card)] border-[var(--border)] text-[var(--text)] hover:border-[var(--border-strong)]"
                   }`}>
                   <span className="w-7 h-7 rounded-lg bg-[var(--chip)] flex items-center justify-center text-[11px] font-bold flex-shrink-0">{LABELS[i]}</span>
-                  <span className="flex-1 text-[14px] font-medium">{opt}</span>
+                  <span className="flex-1 text-[14px] font-medium"><RichText text={opt} /></span>
                 </button>
               )
             })}
@@ -353,7 +354,7 @@ function ResultView({ result, onBack, onRetry }: { result: MockResult; onBack: (
                     ok ? "bg-green-500 text-white" : blankQ ? "bg-[var(--chip)] text-[var(--muted)]" : "bg-red-500 text-white"
                   }`}>{ok ? "✓" : blankQ ? "—" : "✗"}</span>
                   <p className="flex-1 text-[13px] font-bold text-[var(--text)] leading-relaxed text-right">
-                    <span className="text-[var(--muted-2)]">{i + 1}. [{q.subject}] </span>{q.text}
+                    <span className="text-[var(--muted-2)]">{i + 1}. [{q.subject}] </span><RichText text={q.text} />
                   </p>
                 </div>
                 <div className="space-y-1.5 pr-8">
@@ -363,12 +364,12 @@ function ResultView({ result, onBack, onRetry }: { result: MockResult; onBack: (
                       : oi === yours ? "text-red-500"
                       : "text-[var(--muted-2)]"
                     }`}>
-                      {LABELS[oi]}. {opt} {oi === q.answer ? "← پاسخ صحیح" : oi === yours ? "← پاسخ تو" : ""}
+                      {LABELS[oi]}. <RichText text={opt} /> {oi === q.answer ? "← پاسخ صحیح" : oi === yours ? "← پاسخ تو" : ""}
                     </p>
                   ))}
                   {q.explanation && (
                     <p className="text-[12px] text-[var(--text)] leading-relaxed bg-[var(--surface-2)] rounded-xl p-3 mt-2 text-right">
-                      <span className="font-bold text-[var(--accent)]">راه‌حل: </span>{q.explanation}
+                      <span className="font-bold text-[var(--accent)]">راه‌حل: </span><RichText text={q.explanation} />
                     </p>
                   )}
                 </div>

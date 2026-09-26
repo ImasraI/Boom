@@ -5,7 +5,7 @@ Optimized for speed: 72 DPI, lower num_predict. Supports page range for incremen
 """
 
 from pathlib import Path
-from typing import Any, Protocol, Optional, cast
+from typing import Any, Protocol, Optional
 import base64
 import io
 import requests

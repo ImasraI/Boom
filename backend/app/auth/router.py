@@ -234,7 +234,18 @@ def login(
 ):
     # 10 login attempts / 5 min / IP: blunts password brute force.
     rate_limit(http, limit=10, window_s=300)
-    user = db.query(User).filter(User.username == form_data.username).first()
+    username = (form_data.username or "").strip()
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        # Phone usernames are stored normalized (9xxxxxxxxx). Accept common
+        # spellings too - 09xxxxxxxxx / +989xxxxxxxxx / spaced digits - so
+        # login works regardless of how the number was typed.
+        try:
+            normalized = normalize_ir_mobile(username)
+        except ValueError:
+            normalized = None
+        if normalized and normalized != username:
+            user = db.query(User).filter(User.username == normalized).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect username or password")
     # Transparent upgrade: legacy sha256 hashes become bcrypt on first login.

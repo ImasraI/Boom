@@ -5,8 +5,21 @@ import os
 import glob
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TEST_BOOKS_DIR = REPO_ROOT / "backend" / "data" / "raw" / "test-books"
+
+# The scanned test-book texts live under gitignored local data (see
+# .gitignore: backend/data/) and only exist on machines that ran the bulk
+# scan. The catalog regex itself is exercised in test_persian_digit_pattern
+# below regardless; the corpus-dependent assertions must not fail a fresh
+# clone that simply has no scan data on disk.
+needs_test_books = pytest.mark.skipif(
+    not glob.glob(str(TEST_BOOKS_DIR / "*.txt")),
+    reason="backend/data/raw/test-books/*.txt not present on this machine "
+           "(gitignored local OCR scan data)",
+)
 
 def test_persian_digit_pattern():
     """The regex should match question ranges with both Arabic/Persian digits and ASCII digits."""
@@ -27,6 +40,7 @@ def test_persian_digit_pattern():
     # May or may not match depending on exact text, but the pattern should handle both
 
 
+@needs_test_books
 def test_extract_question_ranges():
     """Extract question ranges from test book text files."""
     pdfs = sorted(glob.glob(str(TEST_BOOKS_DIR / "*.txt")))
@@ -46,6 +60,7 @@ def test_extract_question_ranges():
     print(f"Catalog parser test: found {total} question ranges in {len(results)} books")
 
 
+@needs_test_books
 def test_mathematics_has_ranges():
     """Mathematics book should have question ranges extracted."""
     pdfs = sorted(glob.glob(str(TEST_BOOKS_DIR / "*.txt")))

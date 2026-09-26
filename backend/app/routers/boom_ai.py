@@ -649,7 +649,6 @@ def generate_study_plan(
     turns the retrieved material and student constraints into a usable plan.
     """
     check_ai_quota(current_user.id, "study_plan")
-    settings = get_settings()
     student = request.student or {}
     weak = request.weak_subjects or student.get("weakSubjects", []) or student.get("weak_subjects", [])
     strong = request.strong_subjects or student.get("strongSubjects", []) or student.get("strong_subjects", [])
@@ -834,7 +833,6 @@ def _extract_week_mock(user_id: int, week_start: date, weeks: int = 1) -> Option
         from app.config import get_settings
         from app.rag.ingest_raw import list_raw_pdfs, category_for_pdf
 
-        settings = get_settings()
         plan_pdfs = [
             p for p in list_raw_pdfs()
             if category_for_pdf(p) == "plan"
@@ -1052,7 +1050,6 @@ def _resolve_topic_ranges(
         except Exception as exc:
             logger.warning("Topic range retrieval failed for %s/%s: %s", subject, topic, exc)
             continue
-        best = None
         page_nums: List[int] = []
         chains: List[tuple] = []
         for c in chunks:
@@ -1108,6 +1105,7 @@ def _default_week_plan(
     occupied: Optional[List[dict]] = None,
     weak_topics: Optional[List[str]] = None,
     week_offset: int = 0,
+    user_id: int = 0,
 ) -> List[dict]:
     """Deterministic standard week used when the LLM output is not parseable.
 
@@ -1136,7 +1134,6 @@ def _default_week_plan(
     # Resolve real ranges for the weakest topics ("درس: مبحث").
     ranges: List[dict] = []
     try:
-        settings = get_settings()
         pairs = list(weak_topics or [])[:6]
         for pair in pairs:
             if ":" in pair:
@@ -1159,7 +1156,7 @@ def _default_week_plan(
                 key = (r["subject"], r["topic"])
                 if key not in resolved:
                     resolved[key] = _resolve_topic_ranges(
-                        current_user.id, r["subject"], [r["topic"]], wanted=1
+                        user_id, r["subject"], [r["topic"]], wanted=1
                     )
             for r in ranges:
                 got = resolved.get((r["subject"], r["topic"])) or []
@@ -1209,6 +1206,7 @@ def _complete_week_plan(
     student: Optional[dict],
     statics: Optional[List[dict]] = None,
     protected_statics: Optional[List[dict]] = None,
+    user_id: int = 0,
 ) -> List[dict]:
     """Ensure the weekly plan covers all 7 days with study + test blocks each.
 
@@ -1225,7 +1223,8 @@ def _complete_week_plan(
         dict(b) for b in blocks
         if not _overlaps_occupied(b.get("day", 0), b.get("startHour", 0), b.get("duration", 1), occupied)
     ]
-    default = _default_week_plan(books, daily_hours, student, _occupied_slots([]))
+    default = _default_week_plan(books, daily_hours, student, occupied,
+                                 user_id=user_id)
     by_day: dict[int, List[dict]] = {}
     for b in kept:
         by_day.setdefault(int(b.get("day", 0)), []).append(dict(b))
@@ -1243,7 +1242,7 @@ def _complete_week_plan(
                 continue
             if db["type"] == "test" and has_test:
                 continue
-            if _overlaps_occupied(db["day"], db["startHour"], db["duration"], _occupied_slots([])):
+            if _overlaps_occupied(db["day"], db["startHour"], db["duration"], occupied):
                 continue
             if any(_hours_overlap(db["startHour"], db["duration"], b["startHour"], b["duration"]) for b in day_blocks):
                 continue
@@ -1460,7 +1459,6 @@ def recommend_today_tests(
     3. OCR'd test-book content (text store) to name the exact question chains
        (e.g. "تست‌های ۴۱ تا ۵۶" on pages 154-158) for that topic.
     """
-    settings = get_settings()
     student = student or {}
     today_idx = _today_index(schedule)
     if today_idx is None:
@@ -1764,7 +1762,6 @@ def generate_weekly_plan(
     in the retrieved Konkoor books, so empty weeks can be auto-filled by the
     schedule page."""
     check_ai_quota(current_user.id, "weekly_plan")
-    settings = get_settings()
     student = request.student or {}
     daily = request.daily_hours
     major = student.get("major", "ریاضی فیزیک")
@@ -1852,7 +1849,6 @@ def generate_weekly_plan(
     # extra test blocks and which topics the fallback plan resolves into
     # concrete page/question ranges.
     weakness = _weakness_summary(student, student_id=current_user.id)
-    weak_topics = weakness.get("topics") or []
 
     prompt = WEEKLY_PLAN_PROMPT.format(
         daily_hours=daily,
@@ -1874,8 +1870,14 @@ def generate_weekly_plan(
         note = str((data or {}).get("note") or "")
         llm_used = True
     else:
+        # Fallback plan is placed directly into the free slots (so it never
+        # collides with the user's class/static blocks) and alternates the
+        # study/test emphasis every other week (week_offset parity).
         blocks = _default_week_plan(
-            books, daily, student, weak_topics=weakness.get("pairs") or [],
+            books, daily, student, occupied,
+            weak_topics=weakness.get("pairs") or [],
+            week_offset=week_start.isocalendar()[1] % 2,
+            user_id=current_user.id,
         )
         note = "برنامه استاندارد پیش‌فرض (خروجی مدل قابل تفسیر نبود). llm_used=false"
         llm_used = False
@@ -1885,7 +1887,9 @@ def generate_weekly_plan(
     # System statics are the pre-defined weekly schedule blocks
     # For now, we treat request.statics as user statics (protected)
     # and system statics as empty (to be added later if needed)
-    blocks = _complete_week_plan(blocks, books, daily, student, statics=[], protected_statics=request.statics)
+    blocks = _complete_week_plan(blocks, books, daily, student, statics=[],
+                                 protected_statics=request.statics,
+                                 user_id=current_user.id)
     if books:
         main = books[0]
         for b in blocks:

@@ -21,7 +21,7 @@ Notes (matched to the SMS.ir docs / panel template):
 from __future__ import annotations
 
 import logging
-import random
+import time
 
 import requests
 
@@ -30,6 +30,36 @@ from ..config import get_settings
 logger = logging.getLogger(__name__)
 
 CODE_TTL_SECONDS = 120  # signup codes live for 2 minutes
+
+
+def _sms_session() -> requests.Session:
+    """Session that IGNORES ambient proxy config by default (trust_env=False).
+
+    requests picks up proxies from environment variables and - on Windows -
+    from the system (registry) proxy, e.g. a v2rayN client at 127.0.0.1:10809.
+    SMS.ir is an Iranian endpoint: routed through a VPN exit it usually hangs
+    until the timeout, surfacing to users as «سرویس پیامک در دسترس نیست" even
+    though the panel and key are perfectly fine (direct calls answer in <1s).
+
+    Set SMS_TRUST_ENV=true in .env only if your network genuinely needs a
+    proxy to reach api.sms.ir.
+    """
+    session = requests.Session()
+    session.trust_env = get_settings().SMS_TRUST_ENV
+    return session
+
+
+def _proxy_dict(settings) -> dict[str, str] | None:
+    """Explicit failover proxy (SMS_PROXY, else GEMINI_PROXY), if any.
+
+    Used as the SECOND attempt when the direct connection stalls - e.g. the
+    ISP messing with TLS to domestic HTTPS hosts (ServerHello never arrives
+    while plain HTTP answers fine). Points at a local VPN client like v2rayN.
+    """
+    url = (settings.SMS_PROXY or settings.GEMINI_PROXY or "").strip()
+    if not url:
+        return None
+    return {"http": url, "https": url}
 
 
 def generate_code() -> str:
@@ -73,19 +103,36 @@ def send_verification_code(mobile: str, code: str) -> None:
         "templateId": int(template_id),  # API expects a number
         "parameters": [{"name": "OTP", "value": code}],
     }
-    try:
-        resp = requests.post(
-            url,
-            json=payload,
-            headers={
-                "x-api-key": settings.SMS_API_KEY,
-                "Content-Type": "application/json",
-            },
-            timeout=15,
-        )
-    except requests.RequestException as exc:
-        logger.error("SMS.ir unreachable: %s", exc)
-        raise RuntimeError("سرویس پیامک در دسترس نیست") from exc
+    # Direct connectivity to api.sms.ir is usually fine but occasionally the
+    # ISP route stalls TLS (ServerHello never arrives); one retry absorbs the
+    # flakiness, and when SMS_PROXY/GEMINI_PROXY is configured the second
+    # attempt goes through the local VPN client instead of repeating direct.
+    proxies = _proxy_dict(settings)
+    attempts: list[dict[str, str] | None] = [None, proxies or None]
+    last_exc: requests.RequestException | None = None
+    resp: requests.Response | None = None
+    for attempt, use_proxies in enumerate(attempts, 1):
+        try:
+            resp = _sms_session().post(
+                url,
+                json=payload,
+                headers={
+                    "x-api-key": settings.SMS_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                timeout=(5, 10),
+                proxies=use_proxies,
+            )
+            break
+        except requests.RequestException as exc:
+            last_exc = exc
+            via = "proxy" if use_proxies else "direct"
+            logger.warning("SMS.ir attempt %d/2 (%s) failed: %s", attempt, via, exc)
+            if attempt == 1:
+                time.sleep(1.5)
+    if resp is None:
+        logger.error("SMS.ir unreachable after retry: %s", last_exc)
+        raise RuntimeError("سرویس پیامک در دسترس نیست") from last_exc
 
     if resp.status_code != 200:
         logger.error("SMS.ir verify failed %s: %s", resp.status_code, resp.text[:300])
@@ -117,11 +164,12 @@ def sms_credit() -> dict:
     if not settings.SMS_API_KEY.strip():
         return {"credit": 0, "configured": False, "detail": "کلید API تنظیم نشده"}
     try:
-        resp = requests.get(
+        resp = _sms_session().get(
             f"{settings.SMS_BASE_URL.rstrip('/')}/v1/credit",
             headers={"x-api-key": settings.SMS_API_KEY,
                      "Accept": "application/json"},
-            timeout=10,
+            timeout=(5, 8),
+            proxies=_proxy_dict(settings),
         )
         if resp.status_code != 200:
             return {"credit": 0, "configured": True,

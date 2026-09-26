@@ -64,6 +64,14 @@ class Settings(BaseSettings):
     SMS_VERIFY_TEMPLATE_ID: str = ""
     SECRET_KEY: str = ""  # JWT + code-hashing secret (set it in .env!)
     SMS_BASE_URL: str = "https://api.sms.ir"
+    # false = ignore env-var/Windows-registry proxies for SMS.ir calls
+    # (a local VPN client like v2rayN otherwise hijacks them and they hang).
+    SMS_TRUST_ENV: bool = False
+    # Optional HTTP proxy used as a FAILOVER when the direct route to
+    # api.sms.ir stalls (ISP-level TLS interference on domestic HTTPS).
+    # Example: http://127.0.0.1:10809 (v2rayN HTTP port). Empty = fall back
+    # to GEMINI_PROXY when that is set; if both are empty, direct only.
+    SMS_PROXY: str = ""
     # SMS-template-approval stopgap: numbers on the admin-managed signup
     # allowlist can complete signup with this shared passcode instead of a
     # texted code. Set it explicitly in .env (6 digits to match the SMS code

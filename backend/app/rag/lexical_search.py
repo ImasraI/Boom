@@ -44,16 +44,29 @@ def tokenize(text: str) -> List[str]:
     Convert text into searchable tokens.
 
     Persian words, English words, numbers and codes
-    are preserved.
+    are preserved, minus Persian function-word stopwords (they carry no
+    discriminative weight and pollute BM25's IDF). The same filter applies
+    at index time and query time, so both sides stay symmetric.
     """
 
     text = normalize_text(text)
 
-    return re.findall(
+    tokens = re.findall(
         r"[\w\u0600-\u06FF]+",
         text,
         flags=re.UNICODE,
     )
+    return [t for t in tokens if t not in PERSIAN_STOPWORDS]
+
+
+# Persian/Arabic function words only - never content words. Kept literal and
+# auditable on purpose (see docs/improvement-workflow.md §3).
+PERSIAN_STOPWORDS = frozenset({
+    "و", "در", "به", "از", "که", "این", "را", "با", "برای", "تا",
+    "است", "هست", "بر", "آن", "های", "ها", "می", "هر", "یا", "هم",
+    "یک", "شد", "شده", "خود", "کند", "کنید", "بود", "باشد", "نیز",
+    "اما", "همه", "چه", "اگر", "بین", "روی", "درباره", "برای",
+})
 
 
 class LexicalIndex:
@@ -160,113 +173,62 @@ class LexicalIndex:
         if document_count == 0:
             return []
 
-        # Initial score for every chunk
-        scores = [
-            0.0
-            for _ in range(document_count)
-        ]
-
-        # Process every chunk
-        for index, term_frequency in enumerate(
-            self.term_frequencies
-        ):
-
-            # Length of current chunk
-            document_length = (
-                sum(term_frequency.values())
-                or 1
+        # Precompute the BM25 IDF per unique query term once (it depends
+        # only on the corpus, not on the chunk), then score each chunk that
+        # actually contains at least one query term. Scanning the postings
+        # instead of every chunk keeps this O(matching chunks x terms)
+        # instead of O(chunks x terms).
+        term_idf: Dict[str, float] = {}
+        for term in set(query_tokens):
+            document_frequency = self.document_frequencies.get(term, 0)
+            if document_frequency == 0:
+                continue
+            term_idf[term] = math.log(
+                1
+                + (
+                    document_count
+                    - document_frequency
+                    + 0.5
+                )
+                / (
+                    document_frequency
+                    + 0.5
+                )
             )
 
-            # Process every query term
-            for term in query_tokens:
-
-                # Number of occurrences in this chunk
-                frequency = term_frequency.get(
-                    term,
-                    0,
-                )
-
-                # Term does not occur in this chunk
+        avg_dl = max(self.average_document_length, 1)
+        matching = []
+        for index, term_frequency in enumerate(self.term_frequencies):
+            score = 0.0
+            for term, idf in term_idf.items():
+                frequency = term_frequency.get(term, 0)
                 if frequency == 0:
                     continue
-
-                # Number of chunks containing this term
-                document_frequency = (
-                    self.document_frequencies.get(
-                        term,
-                        0,
-                    )
-                )
-
-                # BM25 inverse document frequency
-                idf = math.log(
-                    1
-                    + (
-                        document_count
-                        - document_frequency
-                        + 0.5
-                    )
+                score += (
+                    idf
+                    * frequency
+                    * (k1 + 1)
                     / (
-                        document_frequency
-                        + 0.5
-                    )
-                )
-
-                # BM25 numerator
-                numerator = frequency * (
-                    k1 + 1
-                )
-
-                # BM25 denominator
-                denominator = (
-                    frequency
-                    + k1
-                    * (
-                        1
-                        - b
-                        + b
-                        * document_length
-                        / max(
-                            self.average_document_length,
-                            1,
+                        frequency
+                        + k1
+                        * (
+                            1
+                            - b
+                            + b
+                            * (sum(term_frequency.values()) or 1)
+                            / avg_dl
                         )
                     )
                 )
+            if score > 0:
+                matching.append((index, score))
 
-                # Add contribution of this term
-                scores[index] += (
-                    idf
-                    * numerator
-                    / denominator
-                )
-
-        # Sort chunk indexes by score
-        ranked_indexes = sorted(
-            range(document_count),
-            key=lambda index: scores[index],
-            reverse=True,
-        )
-
-        # Keep only top results
-        ranked_indexes = ranked_indexes[:top_k]
-
+        # Rank only the chunks with a positive score (same ranking as before,
+        # computed without touching zero-score chunks).
+        matching.sort(key=lambda pair: pair[1], reverse=True)
         results = []
-
-        for index in ranked_indexes:
-
-            # Ignore chunks with no lexical match
-            if scores[index] <= 0:
-                continue
-
-            result = dict(
-                self.documents[index]
-            )
-
-            result["lexical_score"] = round(
-                scores[index],
-                4,
-            )
-
+        for index, score in matching[:top_k]:
+            result = dict(self.documents[index])
+            result["lexical_score"] = round(score, 4)
             results.append(result)
-
         return results

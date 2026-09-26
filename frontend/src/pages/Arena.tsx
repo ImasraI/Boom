@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { NavFn } from "../types"
 import { apiUrl, authHeaders, readApiError } from "../api"
+import { RichText } from "../richText"
 
 type Phase = "lobby" | "queued" | "playing" | "finished" | "board"
 
@@ -209,7 +210,7 @@ function DuelRunner({ match, onDone, onExit }: {
       <div className="flex-1 overflow-auto px-4 py-5">
         <div className="max-w-[560px] mx-auto">
           <p className="text-[11px] font-bold text-[var(--muted-2)] mb-2">سوال {current + 1} از {questions.length} — {q.subject}</p>
-          <p className="text-[15px] font-bold text-[var(--text)] leading-relaxed mb-5 text-right whitespace-pre-wrap">{q.text}</p>
+          <p className="text-[15px] font-bold text-[var(--text)] leading-relaxed mb-5 text-right whitespace-pre-wrap"><RichText text={q.text} /></p>
           <div className="space-y-2.5">
             {q.options.map((opt, i) => {
               const sel = answers[String(q.id)] === i
@@ -219,7 +220,7 @@ function DuelRunner({ match, onDone, onExit }: {
                     sel ? "bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)]" : "bg-[var(--card)] border-[var(--border)] text-[var(--text)]"
                   }`}>
                   <span className="w-7 h-7 rounded-lg bg-[var(--chip)] flex items-center justify-center text-[11px] font-bold flex-shrink-0">{LABELS[i]}</span>
-                  <span className="flex-1 text-[14px] font-medium">{opt}</span>
+                  <span className="flex-1 text-[14px] font-medium"><RichText text={opt} /></span>
                 </button>
               )
             })}

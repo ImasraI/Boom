@@ -16,7 +16,7 @@ from datetime import datetime
 
 from sqlalchemy import select
 
-from app.auth.database import GeneratedMock
+from app.auth.database import GeneratedMock, MockAttempt
 from app.rag import mock_generation
 from app.rag.konkur_format import MAJOR_ALIASES, SPECIALIZED_SUBJECTS
 from app.utils.logger import get_logger
@@ -165,3 +165,111 @@ def sweep(db, target: int, majors=None, difficulties=None,
                 if generate_one(db, major_key, difficulty):
                     produced += 1
     return produced
+
+
+# ------------------------------- Duel stock -------------------------------
+# Ranked duels used to generate their booklet LIVE at match time (a multi-
+# minute wait for both players). These shelves pre-generate + verify scaled
+# (divisor=3) duel booklets per major so _try_pair can claim one instantly.
+# They are stored with difficulty="duel" (never one of POOL_DIFFICULTIES),
+# which makes them invisible to the standard mock claim query - a scaled
+# duel booklet can never be served as a full-length mock.
+DUEL_DIFFICULTY = "duel"
+
+
+def duel_pool_deficit(db, major_key: str, target: int) -> int:
+    """How many more pending_use duel rows this major's shelf needs."""
+    available = db.execute(
+        select(GeneratedMock.id)
+        .where(GeneratedMock.status == "pending_use")
+        .where(GeneratedMock.difficulty == DUEL_DIFFICULTY)
+        .where(GeneratedMock.major == CANONICAL_MAJOR[major_key])
+    ).scalars().all()
+    return max(0, target - len(available))
+
+
+def generate_one_duel(db, major_key: str) -> bool:
+    """Generate one scaled + verified duel booklet into the duel shelf.
+
+    Same shared generation path as standard pool rows (build_pool_booklet),
+    on the scaled plan; verification included, because a wrong key in a
+    ranked duel moves Elo. Failures are logged and swallowed like the others.
+    """
+    plan = mock_generation.scale_plan(
+        mock_generation.default_plan(major_key), divisor=3, minimum=3)
+    duration = max(10, sum(s["minutes"] for s in plan) // 3)
+    try:
+        questions, _plan, _ = mock_generation.build_pool_booklet(
+            major_key, "konkur", user_id=POOL_OWNER_ID, plan=plan)
+    except Exception:
+        logger.exception("Duel pool generation failed for %s.", major_key)
+        return False
+    if not questions:
+        logger.warning("Duel pool generation produced nothing for %s.", major_key)
+        return False
+
+    db.add(GeneratedMock(
+        student_id=POOL_OWNER_ID,
+        title=(f"دوئل رنکینگ بوم — {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"),
+        major=CANONICAL_MAJOR[major_key],
+        grade="",
+        duration_minutes=duration,
+        questions=json.dumps(questions, ensure_ascii=False),
+        status="pending_use",
+        difficulty=DUEL_DIFFICULTY,
+    ))
+    db.commit()
+    logger.info("Duel pool +%d questions  [%s]", len(questions), major_key)
+    return True
+
+
+def sweep_duels(db, target: int, majors=None, dry_run: bool = False) -> int:
+    """One pass over the per-major duel shelves (same cancel semantics)."""
+    produced = 0
+    for major_key in list(majors or POOL_MAJORS):
+        if _cancel_event.is_set():
+            break
+        if major_key not in CANONICAL_MAJOR:
+            continue
+        deficit = duel_pool_deficit(db, major_key, target)
+        if deficit == 0:
+            continue
+        if dry_run:
+            print(f"[dry-run] duels/{major_key}: need {deficit} more")
+            continue
+        for _ in range(deficit):
+            if _cancel_event.is_set():
+                return produced
+            if generate_one_duel(db, major_key):
+                produced += 1
+    return produced
+
+
+def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str):
+    """Atomically claim the oldest pending_use duel row for this major that
+    NEITHER player has attempted before. Marks it claimed + assigns it to
+    player A (the match row's owner convention). Returns the row or None.
+    Callers hold the matchmaking lock, so the claim is serialized exactly
+    like mocks._claim_pool_mock's own lock.
+    """
+    label = CANONICAL_MAJOR.get(major_key)
+    if not label:
+        return None
+    seen_a = select(MockAttempt.mock_id).where(MockAttempt.student_id == user_a)
+    seen_b = select(MockAttempt.mock_id).where(MockAttempt.student_id == user_b)
+    row = db.execute(
+        select(GeneratedMock)
+        .where(GeneratedMock.status == "pending_use")
+        .where(GeneratedMock.difficulty == DUEL_DIFFICULTY)
+        .where(GeneratedMock.major == label)
+        .where(GeneratedMock.id.not_in(seen_a))
+        .where(GeneratedMock.id.not_in(seen_b))
+        .order_by(GeneratedMock.created_at.asc())
+        .limit(1)
+    ).scalars().first()
+    if row is None:
+        return None
+    row.status = "claimed"
+    row.student_id = user_a
+    db.flush()
+    return row

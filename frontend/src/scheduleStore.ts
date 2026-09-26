@@ -27,6 +27,7 @@ export interface StoredBlock {
   type: BlockType
   color?: string
   count?: number | null
+  description?: string
 }
 
 export interface StoredStatic {
@@ -38,6 +39,15 @@ export interface StoredStatic {
   title: string
   type: BlockType
   color?: string
+  description?: string
+}
+
+/** Fired (window CustomEvent) whenever the weekly plan or statics change, so
+ * views derived from them (e.g. the Home to-do list) can reload live. */
+export const SCHEDULE_CHANGED_EVENT = "boom-schedule-changed"
+
+function notifyScheduleChanged() {
+  window.dispatchEvent(new CustomEvent(SCHEDULE_CHANGED_EVENT))
 }
 
 export function staticWeekday(t: StoredStatic): number {
@@ -97,6 +107,7 @@ export function loadWeekBlocks(weekISO: string): StoredBlock[] {
 
 export function saveWeekBlocks(weekISO: string, blocks: StoredBlock[]) {
   localStorage.setItem(STORAGE_PREFIX + weekISO, JSON.stringify(blocks))
+  notifyScheduleChanged()
 }
 
 export function loadStaticTemplates(): StoredStatic[] {
@@ -105,6 +116,7 @@ export function loadStaticTemplates(): StoredStatic[] {
 
 export function saveStaticTemplates(templates: StoredStatic[]) {
   localStorage.setItem(STATIC_KEY, JSON.stringify(templates))
+  notifyScheduleChanged()
 }
 
 export function loadGeneratedMarkers(): Record<string, boolean> {

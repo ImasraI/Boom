@@ -15,7 +15,6 @@ endpoint can create or promote admins (that's scripts/manage_admin.py only).
 
 import shutil
 import threading
-from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -196,6 +195,8 @@ def pool_restock(db: Session = Depends(get_db)):
             produced = pool_core.sweep(sweep_db, _pool_target(),
                                        pool_core.POOL_MAJORS,
                                        pool_core.POOL_DIFFICULTIES)
+            produced += pool_core.sweep_duels(sweep_db, _pool_target(),
+                                              pool_core.POOL_MAJORS)
             logger.info("Admin-triggered restock produced %d row(s).", produced)
         except Exception:
             logger.exception("Admin-triggered restock failed.")

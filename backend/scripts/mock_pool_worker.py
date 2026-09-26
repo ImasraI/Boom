@@ -87,6 +87,7 @@ def main() -> None:
         db = SessionLocal()
         try:
             produced = pool_core.sweep(db, args.target, majors, difficulties)
+            produced += pool_core.sweep_duels(db, max(2, args.target // 2), majors)
         finally:
             db.close()
         print(f"one sweep complete: {produced} pool row(s) generated")
@@ -99,6 +100,7 @@ def main() -> None:
             db = SessionLocal()
             try:
                 produced = pool_core.sweep(db, args.target, majors, difficulties)
+                produced += pool_core.sweep_duels(db, max(2, args.target // 2), majors)
             finally:
                 db.close()
             if produced:

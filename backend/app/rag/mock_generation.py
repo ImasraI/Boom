@@ -53,14 +53,21 @@ _GENERATE_PROMPT = """تو طراح آزمون آزمایشی کنکور هست�
 
 سطح دشواری: {difficulty} (سوالات باید در سطح و سبک واقعی کنکور باشند).
 
-نمونه صفحات واقعی کتاب‌های دانش‌آموز (در صورت مرتبط بودن از آن‌ها الهام بگیر و سبک سوالات را حفظ کن):
+نمونه صفحات واقعی کتاب‌های دانش‌آموز:
 {context}
 {weak_block}قوانین:
+{grounding_rule}
 - برای هر سوال: متن سوال، دقیقا ۴ گزینه، شماره گزینه صحیح (۰ تا ۳) و یک توضیح کوتاه حل.
 - پاسخ‌ها بین گزینه‌ها پخش باشند (همه «الف» نباشند).
 - هیچ سوال تکراری یا تله‌ای با جواب واضح نساز؛ گزینه‌های انحرافی معنادار باشند.
 - خروجی فقط JSON، بدون markdown و توضیح اضافه، در این قالب:
 {{"questions":[{{"subject":"ریاضی","topic":"حد و پیوستگی","text":"...","options":["...","...","...","..."],"answer":2,"explanation":"..."}}, ...]}}"""
+
+_GROUNDED_RULE = ("- هر سوال باید مستقیماً بر اساس مفاهیم، اصطلاحات، اعداد و مثال‌های موجود در "
+                  "«نمونه صفحات واقعی کتاب‌های دانش‌آموز» طراحی شود؛ دانش عمومی مدل فقط برای "
+                  "تکمیل قالب و نگارش سوال استفاده شود، نه برای انتخاب محتوا.")
+_UNGROUNDED_RULE = ("- هیچ متن کتابی در دسترس نیست؛ سوالات را از دانش استاندارد کنکور و "
+                    "کتاب‌های درسی رسمی بساز.")
 
 
 def default_plan(major: str) -> List[dict]:
@@ -69,7 +76,8 @@ def default_plan(major: str) -> List[dict]:
 
 
 def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
-                       user_id: int = 0, verify: bool = True) -> tuple:
+                       user_id: int = 0, verify: bool = True,
+                       plan: Optional[List[dict]] = None) -> tuple:
     """One STANDARD booklet for a (major, difficulty) combination.
 
     The single generation path shared by /api/mocks/generate's live
@@ -85,10 +93,13 @@ def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
     student untouched. verify=False is the raw-pipeline escape hatch for
     tests/benchmarks only.
 
+    `plan` overrides the major's official plan (used by the duel pool to
+    pre-generate the scaled/divisor-3 shape). Defaults to the official plan.
+
     Returns (questions, official_plan, duration_minutes); questions is []
     when the model produced nothing usable.
     """
-    plan = [dict(s) for s in KONKUR_SUBJECTS[major_key_str]]
+    plan = [dict(s) for s in (plan or KONKUR_SUBJECTS[major_key_str])]
     duration = sum(s["minutes"] for s in plan)
     questions = generate_booklet(user_id, plan, topics=[], difficulty=difficulty)
     if questions and verify:
@@ -117,7 +128,14 @@ def scale_plan(plan: List[dict], divisor: int = 3, minimum: int = 3) -> List[dic
 
 def retrieve_book_context(user_id: int, subjects: List[str], topics: List[str],
                           per_subject: int = 3) -> str:
-    """OCR'd page excerpts to ground generation in the student's real books."""
+    """OCR'd page excerpts to ground generation in the student's real books.
+
+    The context budget scales with the workload: the old flat ``blocks[:12]``
+    starved multi-subject booklets (about 2 excerpts per subject on a 6-row
+    plan, far too thin to actually ground generation). The cap is now
+    subjects x topics x per_subject with a floor of 12 so small requests keep
+    the old behavior. Retrieval is user-scoped inside HybridSearch (a student
+    is only ever grounded on their own uploads + the shared corpus)."""
     try:
         from app.rag.embeddings import get_embedding_model
         from app.rag.hybrid_search import get_hybrid_search
@@ -128,10 +146,12 @@ def retrieve_book_context(user_id: int, subjects: List[str], topics: List[str],
         logger.warning("Mock context retrieval unavailable: %s", exc)
         return ""
 
+    topic_list = list(topics or [""]) or [""]
+    cap = max(12, len(subjects) * len(topic_list) * per_subject)
     blocks: List[str] = []
     seen = set()
     for subject in subjects:
-        for topic in (topics or [""]):
+        for topic in topic_list:
             q = f"{subject} {topic} تست چهارگزینه‌ای کنکور با جواب تشریحی".strip()
             try:
                 emb = embedder.embed_query(q)
@@ -153,7 +173,7 @@ def retrieve_book_context(user_id: int, subjects: List[str], topics: List[str],
                 blocks.append(
                     f"[کتاب: {c['document_name']}{page}]\n{c['content'][:700]}"
                 )
-    return "\n\n".join(blocks[:12])
+    return "\n\n".join(blocks[:cap])
 
 
 def build_booklet_prompt(plan: List[dict], topics: List[str], difficulty: str,
@@ -161,11 +181,13 @@ def build_booklet_prompt(plan: List[dict], topics: List[str], difficulty: str,
     plan_text = "\n".join(f"- {s['name']}: {s['questions']} سوال" for s in plan)
     topics_text = ("\n".join(f"- {t}" for t in topics)
                    if topics else "- هر مبحث کنکوری آن درس")
+    grounded = bool((context or "").strip())
     return _GENERATE_PROMPT.format(
         plan=plan_text, topics=topics_text,
         difficulty=_DIFFICULTY_LABEL.get(difficulty, _DIFFICULTY_LABEL["konkur"]),
         context=context or "در دسترس نیست.",
         weak_block=weak_block,
+        grounding_rule=_GROUNDED_RULE if grounded else _UNGROUNDED_RULE,
     )
 
 
@@ -293,15 +315,30 @@ def parse_booklet(raw: str) -> List[dict]:
 
 
 def pad_booklet(questions: List[dict]) -> List[dict]:
-    """Keep what the model produced; just spread answer keys that clump
-    (LLMs love answer=0)."""
-    n = len(questions)
+    """Balance the answer key across options WITHOUT ever changing which
+    option text is correct (LLMs clump on answer=0).
+
+    Each clumped question's correct option is reassigned to the currently
+    least-used slot by *swapping the option strings* - the key keeps pointing
+    at the same text, so correctness is preserved, but the final distribution
+    approaches a balanced 25/25/25/25 instead of a mechanical index shift
+    that silently broke answer keys (the old bug)."""
+    counts = [0, 0, 0, 0]
     for q in questions:
-        q.setdefault("answer", 0)
-    answers = [q["answer"] for q in questions]
-    if answers and (answers.count(0) / n > 0.6):
-        for i, q in enumerate(questions):
-            q["answer"] = (q["answer"] + i) % 4 if q["answer"] == 0 else q["answer"]
+        counts[q.get("answer", 0)] += 1
+    for q in questions:
+        if q.get("answer") != 0:
+            continue
+        # Only move it when option 0 is (or would be) overloaded.
+        if counts[0] <= max(counts[1:]) :
+            continue
+        target = counts.index(min(counts[1:]), 1)  # least-used non-zero slot
+        opts = list(q["options"])
+        opts[0], opts[target] = opts[target], opts[0]
+        q["options"] = opts
+        q["answer"] = target
+        counts[0] -= 1
+        counts[target] += 1
     return questions
 
 
@@ -388,6 +425,13 @@ def _generate_replacement(client, user_id: int, question: dict,
     return rows[0] if rows else None
 
 
+def _norm_qtext(text: str) -> str:
+    """Cheap normalized form of a question text for duplicate detection:
+    Persian digits unified, everything but letters/digits stripped."""
+    t = (text or "").translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+    return re.sub(r"[\W_]+", "", t, flags=re.UNICODE).lower()
+
+
 def verify_and_repair_booklet(
     questions: List[dict],
     user_id: int,
@@ -421,10 +465,12 @@ def verify_and_repair_booklet(
         return 1 if verdict is not None else 0
 
     out: List[dict] = []
+    seen_texts: set = set()
     for q in questions:
         verdict = _verify_question(client, q, timeout)
         if verdict == q["answer"]:
             out.append(q)
+            seen_texts.add(_norm_qtext(q["text"]))
             continue
 
         best, best_score = q, _score(verdict, q["answer"])
@@ -435,6 +481,12 @@ def verify_and_repair_booklet(
                 logger.warning("Verify: replacement attempt %d for a %s "
                                "question produced nothing parseable.",
                                attempt, q["subject"])
+                continue
+            if _norm_qtext(repl["text"]) in seen_texts:
+                # Duplicate of a question already in the booklet - reject the
+                # replacement (it would never be accepted) and keep trying.
+                logger.info("Verify: replacement for %s duplicates an existing "
+                            "question; regenerating.", q["subject"])
                 continue
             repl_verdict = _verify_question(client, repl, timeout)
             s = _score(repl_verdict, repl["answer"])
@@ -451,6 +503,7 @@ def verify_and_repair_booklet(
             best["_id"] = q["_id"]
             best["subject"] = q["subject"]  # plan spelling wins
         out.append(best)
+        seen_texts.add(_norm_qtext(best["text"]))
     return out
 
 
@@ -477,6 +530,16 @@ def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
     subject = row["name"]
     row_topics = row.get("topics") or topics
     context = retrieve_book_context(user_id, [subject], row_topics)
+    if not (context or "").strip():
+        # Make the ungrounded path VISIBLE: this subject's questions come from
+        # general model knowledge, not the student's books. Logged per subject
+        # (not per booklet) so a partial grounding failure is still diagnosable
+        # from the logs afterwards.
+        logger.warning(
+            "Booklet grounding MISS: subject %r generated with zero book "
+            "context (user %s) - questions will be LLM-knowledge-only.",
+            subject, user_id,
+        )
     # ~90 output tokens per question (Persian text + 4 options + explanation)
     budget = max(max_tokens, count * 90)
 
