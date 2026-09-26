@@ -42,9 +42,7 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
     <aside className="hidden md:flex flex-col fixed top-0 right-0 bottom-0 w-[220px] bg-[var(--card)] border-r border-[var(--border)] z-30">
       <div className="px-5 pt-7 pb-5 border-b border-[var(--border)]">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-2xl bg-[var(--accent)] flex items-center justify-center flex-shrink-0">
-            <span className="text-[var(--surface)] font-display text-lg leading-none">ب</span>
-          </div>
+          <img src="/logo.png" alt="بوم" className="w-10 h-10 flex-shrink-0" />
           <div>
             <p className="font-display text-2xl text-[var(--text)] leading-none">بوم</p>
             <p className="text-[10px] text-[var(--muted-2)] font-medium mt-0.5">برنامه ریز کنکور</p>

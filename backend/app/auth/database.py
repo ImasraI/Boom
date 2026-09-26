@@ -286,6 +286,32 @@ class ArenaMatch(Base):
     finished_at = Column(DateTime, nullable=True)
 
 
+class ChallengeInvite(Base):
+    """Asynchronous friend challenge on an already-played mock.
+
+    Unlike ArenaMatch (matchmaking, both players online simultaneously, Elo
+    at stake), a challenge is a shareable link: the sender challenges friends
+    with a booklet they have already attempted themselves, the recipient
+    plays it whenever they are free through the normal /api/mocks flow, and
+    both stored scores are compared once the recipient is done.
+    """
+
+    __tablename__ = "challenge_invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    mock_id = Column(Integer, ForeignKey("generated_mocks.id"), nullable=False, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # Short unambiguous code embedded in the shareable link (unique).
+    invite_code = Column(String, unique=True, index=True, nullable=False)
+    # Null until someone claims the invite by accepting it.
+    recipient_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    status = Column(String, nullable=False, default="pending")  # pending / accepted / completed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    # Stale invites die silently: expired pending invites can no longer be
+    # accepted (checked lazily - no cleanup job needed).
+    expires_at = Column(DateTime, nullable=False)
+
+
 def _ensure_column(table: str, column: str, ddl_type: str) -> None:
     """Add a missing column to an existing SQLite table (create_all won't)."""
     insp = inspect(engine)

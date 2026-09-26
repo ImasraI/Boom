@@ -73,9 +73,8 @@ export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: s
         <div className="flex-1 flex flex-col justify-center max-w-md w-full mx-auto">
           <div className="card-elevated p-7 sm:p-8 anim-fade-up shadow-float">
             <div className="flex flex-col items-center text-center">
-              <div className="logo-badge w-14 h-14 rounded-2xl flex items-center justify-center mb-4">
-                <span className="font-display text-2xl text-[var(--surface)] leading-none">ب</span>
-              </div>
+              <img src="/logo.png" alt="لوگوی بوم" className="w-14 h-14 mb-4"
+                   style={{ filter: "drop-shadow(0 6px 16px rgba(0,0,0,0.22))" }} />
               <p className="text-xs font-bold tracking-[0.2em] text-[var(--accent)] mb-1">خوش برگشتی</p>
               <h1 className="font-display text-4xl text-[var(--text)] leading-snug">ورود به حساب</h1>
               <p className="text-[13px] text-[var(--muted)] mt-2">شماره موبایل و رمز عبورت رو وارد کن.</p>

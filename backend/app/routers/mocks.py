@@ -36,7 +36,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth.database import ArenaMatch, GeneratedMock, MockAttempt, User, WrongAnswer
+from app.auth.database import (
+    ArenaMatch,
+    ChallengeInvite,
+    GeneratedMock,
+    MockAttempt,
+    User,
+    WrongAnswer,
+)
 from app.auth.deps import get_current_user, get_db
 from app.auth.limits import check_ai_quota, record_ai_use
 from app.rag import mock_generation
@@ -299,7 +306,16 @@ def get_mock(
                    | (ArenaMatch.student_b_id == current_user.id))
         ).scalar_one_or_none() is not None
         if not is_duel_participant:
-            raise HTTPException(status_code=404, detail="آزمون پیدا نشد")
+            # Same for async friend challenges: the accepted recipient reads
+            # the sender's booklet through the normal mock-taking flow.
+            is_challenge_recipient = mock is not None and db.execute(
+                select(ChallengeInvite)
+                .where(ChallengeInvite.mock_id == mock_id)
+                .where(ChallengeInvite.recipient_id == current_user.id)
+                .where(ChallengeInvite.status.in_(("accepted", "completed")))
+            ).scalar_one_or_none() is not None
+            if not is_challenge_recipient:
+                raise HTTPException(status_code=404, detail="آزمون پیدا نشد")
     questions = _load_questions(mock)
     # Duel booklets are filled asynchronously after match reservation: hide
     # placeholder rows (empty text) so the duel client keeps polling until
@@ -335,8 +351,18 @@ def submit_mock(
     db: Session = Depends(get_db),
 ):
     mock = db.get(GeneratedMock, mock_id)
+    challenge_invite: Optional[ChallengeInvite] = None
     if not mock or mock.student_id != current_user.id:
-        raise HTTPException(status_code=404, detail="آزمون پیدا نشد")
+        # Challenge recipients submit through this same endpoint (konkur
+        # scoring + weakness memory must run exactly once, here).
+        challenge_invite = None if not mock else db.execute(
+            select(ChallengeInvite)
+            .where(ChallengeInvite.mock_id == mock_id)
+            .where(ChallengeInvite.recipient_id == current_user.id)
+            .where(ChallengeInvite.status.in_(("accepted", "completed")))
+        ).scalar_one_or_none()
+        if challenge_invite is None:
+            raise HTTPException(status_code=404, detail="آزمون پیدا نشد")
     questions = _load_questions(mock)
     if not questions:
         raise HTTPException(status_code=500, detail="دفترچه آزمون خراب است")
@@ -376,6 +402,14 @@ def submit_mock(
         ))
     db.commit()
     db.refresh(attempt)
+
+    # Challenge completion: if this submit was an accepted friend challenge,
+    # flip the invite to "completed" so /complete just returns the scores.
+    if challenge_invite is not None:
+        challenge_invite.status = "completed"
+        db.commit()
+        logger.info("Challenge invite %s auto-completed by submit",
+                    challenge_invite.invite_code)
 
     return {
         "attempt_id": attempt.id,
