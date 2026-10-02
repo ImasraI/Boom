@@ -19,7 +19,7 @@ nothing usable was produced — callers decide how to surface that (502 for
 
 import json
 import re
-from typing import List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from app.rag.konkur_format import (  # noqa: F401  (re-exported for consumers)
     FORMAT_YEAR,
@@ -37,6 +37,46 @@ logger = get_logger(__name__)
 
 OPTIONS = ["الف", "ب", "ج", "د"]
 
+# Live progress events for whoever is watching a long generation run (the
+# pool passes a reporter in; the live-mock path passes nothing). Events:
+#   booklet        {"target": questions the plan asks for}
+#   phase          {"name": "generating"|"verifying"}
+#   generated      {"count": questions just parsed/submitted}
+#   verified       {"count": questions accepted by the verifier}
+#   provider_error {"message": why the LLM refused (quota, rate limit, ...)}
+Reporter = Optional[Callable[[str, Dict[str, Any]], None]]
+
+# A pool paper is served as a full mock, so it must stay materially complete.
+# The generator and the verifier both legitimately drop questions, and the
+# old exact-match rule then rejected EVERY booklet - the pool produced nothing
+# at all for minutes on end. A paper that still holds this fraction of the
+# official plan is kept, and its advertised duration is scaled down to the
+# questions it really contains (see build_pool_booklet).
+POOL_MIN_FILL = 0.5
+
+
+def _report(report: Reporter, event: str, **data: Any) -> None:
+    """Send one progress event; never let reporting break generation."""
+    if report is None:
+        return
+    try:
+        report(event, data)
+    except Exception:
+        logger.exception("Generation progress callback failed (%s).", event)
+
+
+def _shortfall(questions: List[dict], plan: List[dict]) -> List[tuple]:
+    """[(subject, planned, produced)] for every subject off its target."""
+    counts: Dict[str, int] = {}
+    for q in questions:
+        counts[q.get("subject")] = counts.get(q.get("subject"), 0) + 1
+    return [
+        (row["name"], int(row.get("questions") or 0),
+         counts.get(row["name"], 0))
+        for row in plan
+        if counts.get(row["name"], 0) != int(row.get("questions") or 0)
+    ]
+
 _DIFFICULTY_LABEL = {
     "easy": "آسان",
     "konkur": "استاندارد کنکور",
@@ -52,6 +92,7 @@ _GENERATE_PROMPT = """تو طراح آزمون آزمایشی کنکور هست�
 {topics}
 
 سطح دشواری: {difficulty} (سوالات باید در سطح و سبک واقعی کنکور باشند).
+{grade_block}
 
 نمونه صفحات واقعی کتاب‌های دانش‌آموز:
 {context}
@@ -60,14 +101,34 @@ _GENERATE_PROMPT = """تو طراح آزمون آزمایشی کنکور هست�
 - برای هر سوال: متن سوال، دقیقا ۴ گزینه، شماره گزینه صحیح (۰ تا ۳) و یک توضیح کوتاه حل.
 - پاسخ‌ها بین گزینه‌ها پخش باشند (همه «الف» نباشند).
 - هیچ سوال تکراری یا تله‌ای با جواب واضح نساز؛ گزینه‌های انحرافی معنادار باشند.
+- شکل فقط وقتی اضافه شود که برای فهم سوال واقعاً به تصویر نیاز است؛ بیشتر سوال‌ها باید figure با type برابر none داشته باشند.
+- اگر figure.type برابر none نیست، figure.data اجباری و کامل و فقط شامل داده‌های عددی/هندسی باشد؛ هرگز توضیح متنی به‌جای داده شکل ننویس.
+- اعداد و اندازه‌های داخل figure.data باید دقیقاً با ادعاهای متن سوال سازگار باشند؛ زاویه، طول یا مقداری را تقریب یا نقض نکن.
+- برای function_plot، expression را با نحو استاندارد Python بنویس (توان با **، نه ^ یا LaTeX)؛ فقط x و تابع‌های sin، cos، sqrt و abs مجازند.
+- ساختار داده‌ها: function_plot={{"expression":"x**2 - 3*x + 2","variable":"x","domain":[-2,5],"labels":{{"x_axis":"x","y_axis":"y"}},"highlight_points":[{{"x":1,"y":0,"label":"A"}}]}}; geometry={{"shape":"triangle","points":{{"A":[0,0],"B":[4,0],"C":[1,3]}},"labels":{{"A":"A","B":"B","C":"C"}},"side_lengths":{{"AB":4,"AC":3.16,"BC":3.16}},"angles":{{"A":60}},"marks":{{"right_angle_at":null,"equal_sides":["AC","BC"],"parallel_pairs":[]}}}}.
+- bar_chart={{"categories":["A","B","C","D"],"values":[12,19,7,15],"x_label":"دسته","y_label":"فراوانی"}}; coordinate_plane={{"points":[{{"x":1,"y":2,"label":"P"}}],"lines":[{{"from":[0,0],"to":[4,4],"label":"l"}}],"x_range":[-5,5],"y_range":[-5,5]}}.
 - خروجی فقط JSON، بدون markdown و توضیح اضافه، در این قالب:
-{{"questions":[{{"subject":"ریاضی","topic":"حد و پیوستگی","text":"...","options":["...","...","...","..."],"answer":2,"explanation":"..."}}, ...]}}"""
+{{"questions":[{{"subject":"ریاضی","topic":"حد و پیوستگی","text":"...","options":["...","...","...","..."],"answer":2,"explanation":"...","figure":{{"type":"none","data":{{}}}}}}, ...]}}"""
 
 _GROUNDED_RULE = ("- هر سوال باید مستقیماً بر اساس مفاهیم، اصطلاحات، اعداد و مثال‌های موجود در "
                   "«نمونه صفحات واقعی کتاب‌های دانش‌آموز» طراحی شود؛ دانش عمومی مدل فقط برای "
                   "تکمیل قالب و نگارش سوال استفاده شود، نه برای انتخاب محتوا.")
 _UNGROUNDED_RULE = ("- هیچ متن کتابی در دسترس نیست؛ سوالات را از دانش استاندارد کنکور و "
                     "کتاب‌های درسی رسمی بساز.")
+
+
+def grade_block(grade: str) -> str:
+    """Prompt line scoping a booklet to a school grade ("" = unrestricted).
+
+    Arena duels set this to the YOUNGER player's grade (see
+    knowledge_base.grade_scope): an older opponent has already covered that
+    syllabus, but the younger one must never be asked about material they
+    have not reached yet."""
+    label = (grade or "").strip()
+    if not label:
+        return ""
+    return (f"- پایه تحصیلی دانش‌آموز: {label} — سوال‌ها فقط از مطالب همین پایه و "
+            f"پایه‌های پایین‌تر باشند.")
 
 
 def default_plan(major: str) -> List[dict]:
@@ -77,7 +138,8 @@ def default_plan(major: str) -> List[dict]:
 
 def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
                        user_id: int = 0, verify: bool = True,
-                       plan: Optional[List[dict]] = None) -> tuple:
+                       plan: Optional[List[dict]] = None,
+                       report: Reporter = None) -> tuple:
     """One STANDARD booklet for a (major, difficulty) combination.
 
     The single generation path shared by /api/mocks/generate's live
@@ -100,13 +162,38 @@ def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
     when the model produced nothing usable.
     """
     plan = [dict(s) for s in (plan or KONKUR_SUBJECTS[major_key_str])]
+    planned = sum(int(s.get("questions") or 0) for s in plan)
     duration = sum(s["minutes"] for s in plan)
-    questions = generate_booklet(user_id, plan, topics=[], difficulty=difficulty)
+    questions = generate_booklet(user_id, plan, topics=[], difficulty=difficulty,
+                                 report=report)
     if questions and verify:
         questions = verify_and_repair_booklet(questions, user_id,
-                                              difficulty=difficulty)
-        logger.info("Pool booklet verified: %d question(s) survived the "
-                    "answer-verification pass.", len(questions))
+                                              difficulty=difficulty,
+                                              report=report)
+        logger.info("Pool booklet verified: %d/%d question(s) survived the "
+                    "answer-verification pass.", len(questions), planned)
+    if verify:
+        short = _shortfall(questions, plan)
+        empty_subject = any(produced == 0 for _, _, produced in short)
+        if not questions or len(questions) < planned * POOL_MIN_FILL or empty_subject:
+            logger.error(
+                "Pool booklet discarded: %d/%d questions verified "
+                "(floor %d%%%s) - %s", len(questions), planned,
+                round(POOL_MIN_FILL * 100),
+                ", a subject came back empty" if empty_subject else "",
+                ", ".join(f"{name}: {got}/{want}" for name, want, got in short)
+                or "nothing usable",
+            )
+            questions = []
+        elif short:
+            # Usable, but never advertise more time than the questions it has:
+            # the pool serves this row as a full-length mock.
+            duration = max(1, round(duration * len(questions) / planned))
+            logger.warning(
+                "Pool booklet kept at %d/%d questions; duration scaled to %d "
+                "min. %s", len(questions), planned, duration,
+                ", ".join(f"{name}: {got}/{want}" for name, want, got in short),
+            )
     return questions, plan, duration
 
 
@@ -177,7 +264,8 @@ def retrieve_book_context(user_id: int, subjects: List[str], topics: List[str],
 
 
 def build_booklet_prompt(plan: List[dict], topics: List[str], difficulty: str,
-                         context: str, weak_block: str = "") -> str:
+                         context: str, weak_block: str = "",
+                         grade: str = "") -> str:
     plan_text = "\n".join(f"- {s['name']}: {s['questions']} سوال" for s in plan)
     topics_text = ("\n".join(f"- {t}" for t in topics)
                    if topics else "- هر مبحث کنکوری آن درس")
@@ -185,6 +273,7 @@ def build_booklet_prompt(plan: List[dict], topics: List[str], difficulty: str,
     return _GENERATE_PROMPT.format(
         plan=plan_text, topics=topics_text,
         difficulty=_DIFFICULTY_LABEL.get(difficulty, _DIFFICULTY_LABEL["konkur"]),
+        grade_block=grade_block(grade),
         context=context or "در دسترس نیست.",
         weak_block=weak_block,
         grounding_rule=_GROUNDED_RULE if grounded else _UNGROUNDED_RULE,
@@ -301,6 +390,20 @@ def parse_booklet(raw: str) -> List[dict]:
             text = str(r.get("text") or "").strip()
             if len(text) < 5:
                 continue
+            figure = r.get("figure") or {"type": "none", "data": {}}
+            if not isinstance(figure, dict):
+                continue
+            figure_type = figure.get("type", "none")
+            if figure_type not in {
+                "function_plot", "geometry", "bar_chart",
+                "coordinate_plane", "none",
+            }:
+                continue
+            figure_data = figure.get("data", {})
+            if figure_type != "none" and (
+                not isinstance(figure_data, dict) or not figure_data
+            ):
+                continue
             out.append({
                 "subject": str(r.get("subject") or "").strip(),
                 "topic": str(r.get("topic") or "").strip(),
@@ -308,6 +411,8 @@ def parse_booklet(raw: str) -> List[dict]:
                 "options": options,
                 "answer": ans,
                 "explanation": str(r.get("explanation") or "").strip(),
+                "figure": {"type": figure_type,
+                           "data": figure_data if figure_type != "none" else {}},
             })
         if out:
             return out
@@ -409,6 +514,127 @@ def _verify_question(client, question: dict, timeout: float) -> Optional[int]:
     return _parse_verify_answer(raw)
 
 
+# One solver call per BATCH of questions instead of one per question.
+# A 105-question ریاضی فیزیک booklet used to cost ~108 requests (3 generation
+# + 105 verification), which no free tier can serve: Gemini's free tier allows
+# 20 requests per day per model, so the pool could never build a single row.
+# At 10 questions per call the same booklet costs ~14 requests, and the saving
+# scales with every paid tier too.
+_VERIFY_BATCH_SIZE = 10
+
+
+def _verify_batch_prompt(batch: List[dict]) -> str:
+    """Solver prompt for several questions at once (1-based numbering)."""
+    items = []
+    for i, q in enumerate(batch, start=1):
+        options = "\n".join(f"   {j}) {opt}"
+                            for j, opt in enumerate(q["options"]))
+        items.append(f"[{i}]\nمتن سوال: {q['text']}\nگزینه‌ها:\n{options}")
+    example = ", ".join(f'"{i}": {(i - 1) % 4}' for i in range(1, len(batch) + 1))
+    return ("تو یک حل‌کننده مستقل تست چهارگزینه‌ای هستی. هر سوال را جدا و مستقل حل کن."
+            "\n\n" + "\n\n".join(items) +
+            "\n\nخروجی فقط JSON و بدون هیچ توضیح اضافه، در این قالب:\n"
+            '{"answers": {' + example + '}}\n'
+            "برای هر شماره سوال، شماره گزینه‌ای که محاسبه کردی (عددی بین ۰ تا ۳) را بگذار. "
+            "اگر یک سوال را با قطعیت نمی‌توانی حل کنی برای همان null بنویس. "
+            "شماره همه سوال‌ها را برگردان.")
+
+
+_FA_AR_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩",
+                              "01234567890123456789")
+
+
+def _parse_batch_answers(raw: str, count: int) -> Dict[int, Optional[int]]:
+    """{1-based question number: option index or None} from a batch reply.
+
+    Strict like _parse_verify_answer: only an exact integer 0-3 (or null)
+    counts, so a question the reply omits, misframes, or answers with prose is
+    None - "could not verify IT" - and never a guessed index.
+    """
+    out: Dict[int, Optional[int]] = {i: None for i in range(1, count + 1)}
+    if not raw:
+        return out
+    data = None
+    m = re.search(r"\{.*\}", raw, re.S)
+    for cand in ([m.group(0), raw] if m else [raw]):
+        try:
+            parsed = json.loads(re.sub(r",\s*([}\]])", r"\1", cand.strip()))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(parsed, dict):
+            inner = parsed.get("answers")
+            data = inner if isinstance(inner, dict) else parsed
+            break
+    if not isinstance(data, dict):
+        return out
+    for key, value in data.items():
+        try:
+            idx = int(str(key).strip().translate(_FA_AR_DIGITS))
+        except (TypeError, ValueError):
+            continue
+        if idx not in out:
+            continue
+        if type(value) is int and 0 <= value <= 3:
+            out[idx] = value
+        elif isinstance(value, str) and value.strip().translate(
+                _FA_AR_DIGITS).isdigit():
+            v = int(value.strip().translate(_FA_AR_DIGITS))
+            out[idx] = v if 0 <= v <= 3 else None
+    return out
+
+
+def _verify_batch(client, batch: List[dict],
+                  timeout: float) -> Optional[Dict[int, Optional[int]]]:
+    """One independent solve of a batch of questions.
+
+    The solver sees ONLY each question's text and options - never a stored
+    answer or explanation. Returns {1-based position: index|None}, or None
+    when the provider refused the call outright (no reply at all), which is a
+    different failure from "the solver could not solve it": this codebase must
+    not spend one call per question discovering that a per-day quota is gone.
+    """
+    try:
+        raw = client.generate(
+            [{"role": "user", "content": _verify_batch_prompt(batch)}],
+            max_tokens=max(400, 60 * len(batch)), timeout=timeout,
+        )
+    except Exception as exc:
+        logger.warning("Verifier batch call failed: %s", exc)
+        return None
+    if not (raw or "").strip():
+        return None
+    return _parse_batch_answers(raw, len(batch))
+
+
+def _batch_verdicts(client, questions: List[dict], timeout: float, report):
+    """Yield (question, solver_verdict) for every question, batched.
+
+    A provider that refuses a batch call ENDS the stream early. The caller
+    then keeps only the questions it already verified and drops the rest, so
+    an unverified answer key can never reach a student - and a dead quota costs
+    ONE request, not one per remaining question.
+    """
+    batch_size = max(1, _VERIFY_BATCH_SIZE)
+    # One call now carries N questions, so it gets the per-question budget
+    # twice over rather than being cut off mid-batch.
+    batch_timeout = max(timeout, 30.0) * 2
+    for start in range(0, len(questions), batch_size):
+        batch = questions[start:start + batch_size]
+        verdicts = _verify_batch(client, batch, batch_timeout)
+        if verdicts is None:
+            reason = (getattr(client, "last_error", "")
+                      or "provider returned no response")
+            logger.error(
+                "Verifier refused the call (%s); stopping after %d/%d "
+                "question(s) - the rest stay unverified.",
+                reason, start, len(questions),
+            )
+            _report(report, "provider_error", message=reason)
+            return
+        for pos, question in enumerate(batch, start=1):
+            yield question, verdicts.get(pos)
+
+
 def _generate_replacement(client, user_id: int, question: dict,
                           difficulty: str, max_tokens: int,
                           timeout: float) -> Optional[dict]:
@@ -439,11 +665,13 @@ def verify_and_repair_booklet(
     max_regens: int = 2,
     timeout: float = 60.0,
     gen_max_tokens: int = 6000,
+    report: Reporter = None,
 ) -> List[dict]:
     """Independently re-solve every question; replace the broken ones.
 
-    For each question a separate solver call (small max_tokens, cheap) sees
-    only the question text and options and returns the option it computed.
+    The solver sees only question texts and options and returns the options it
+    computed - one call per batch of _VERIFY_BATCH_SIZE questions (a booklet
+    costs ~14 provider requests instead of ~108), one call per replacement.
     Verdict per question:
       - solver index == stored answer               -> keep as-is
       - solver clean but different, OR solver could
@@ -458,6 +686,7 @@ def verify_and_repair_booklet(
     if not questions:
         return questions
     client = get_pool_llm_client()
+    _report(report, "phase", name="verifying")
 
     def _score(verdict: Optional[int], stated: int) -> int:
         if verdict == stated:
@@ -466,11 +695,12 @@ def verify_and_repair_booklet(
 
     out: List[dict] = []
     seen_texts: set = set()
-    for q in questions:
-        verdict = _verify_question(client, q, timeout)
-        if verdict == q["answer"]:
+    for q, verdict in _batch_verdicts(client, questions, timeout, report):
+        if verdict == q["answer"] and _norm_qtext(q["text"]) not in seen_texts:
+            q = {**q, "verification_status": "verified"}
             out.append(q)
             seen_texts.add(_norm_qtext(q["text"]))
+            _report(report, "verified", count=1)
             continue
 
         best, best_score = q, _score(verdict, q["answer"])
@@ -497,13 +727,18 @@ def verify_and_repair_booklet(
         if best_score < 2:
             logger.warning(
                 "Verify: %s question never verified after %d regen "
-                "attempt(s); keeping best attempt (score %d).",
+                "attempt(s); quarantining candidate (score %d).",
                 q["subject"], max_regens, best_score)
+            continue  # Fail closed: an unverified answer key never reaches a student.
+        if _norm_qtext(best["text"]) in seen_texts:
+            continue
+        best = {**best, "verification_status": "verified"}
         if best is not q:
             best["_id"] = q["_id"]
             best["subject"] = q["subject"]  # plan spelling wins
         out.append(best)
         seen_texts.add(_norm_qtext(best["text"]))
+        _report(report, "verified", count=1)
     return out
 
 
@@ -521,7 +756,9 @@ def _weak_block(entries: List[dict]) -> str:
 
 def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
                                 difficulty: str, max_tokens: int,
-                                timeout: float) -> List[dict]:
+                                timeout: float,
+                                report: Reporter = None,
+                                grade: str = "") -> List[dict]:
     """One subject -> one (retried) LLM call. Subject name is enforced from
     the plan row so scoring/grouping never depends on the model's spelling.
     A row may carry "topics" (per-subject topic targets) and "weak" (weak-area
@@ -543,16 +780,32 @@ def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
     # ~90 output tokens per question (Persian text + 4 options + explanation)
     budget = max(max_tokens, count * 90)
 
+    client = get_pool_llm_client()
     rows: List[dict] = []
     for attempt, target in enumerate((count, max(3, count // 2))):
         prompt = build_booklet_prompt([{**row, "questions": target}],
                                       row_topics, difficulty, context,
-                                      weak_block=_weak_block(row.get("weak") or []))
-        raw = get_pool_llm_client().generate(
+                                      weak_block=_weak_block(row.get("weak") or []),
+                                      grade=grade)
+        raw = client.generate(
             [{"role": "user", "content": prompt}],
             max_tokens=budget, timeout=timeout,
         )
+        if not (raw or "").strip():
+            # Not one character back: the provider refused the call (quota,
+            # rate limit, timeout). Retrying with half the questions merely
+            # doubles the wait and the wasted quota, so stop here and say why.
+            # The pool turns this into a sweep abort instead of hammering
+            # every remaining shelf for minutes (or hours).
+            reason = (getattr(client, "last_error", "")
+                      or "provider returned no response")
+            logger.error("Subject %s: provider refused the call (%s).",
+                         subject, reason)
+            _report(report, "provider_error", message=reason, subject=subject)
+            return []
         rows = parse_booklet(raw)
+        _report(report, "generated", count=len(rows), subject=subject,
+                target=count)
         if len(rows) >= count // 2:
             break
         logger.warning("Subject %s: attempt %d produced %d/%d valid questions.",
@@ -571,6 +824,8 @@ def generate_booklet(
     difficulty: str = "konkur",
     max_tokens: int = 6000,
     timeout: float = 420.0,
+    report: Reporter = None,
+    grade: str = "",
 ) -> List[dict]:
     """Full pipeline: per-subject (retrieval -> prompt -> LLM -> parse -> pad).
 
@@ -586,11 +841,16 @@ def generate_booklet(
     questions: List[dict] = []
     next_id = 1
 
+    _report(report, "booklet",
+            target=sum(int(s.get("questions") or 0) for s in plan))
+    _report(report, "phase", name="generating")
+
     for row in (dict(s) for s in plan):
         if int(row.get("questions") or 0) <= 0:
             continue
         rows = _generate_subject_questions(
-            user_id, row, topics, difficulty, max_tokens, timeout)
+            user_id, row, topics, difficulty, max_tokens, timeout, report=report,
+            grade=grade)
         if not rows:
             logger.warning("Booklet: subject %s produced nothing; skipping.",
                            row["name"])

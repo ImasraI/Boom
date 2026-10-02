@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Dict, Optional, Generator
+from typing import Any, List, Dict, Optional, Generator, cast
 import json
 import re
 
@@ -59,8 +59,8 @@ type فقط یکی از: study, test, class, break. بلوک‌های تست ب�
 
 
 # System instructions for the vision LLM (page-as-image pipeline)
-IMAGE_SYSTEM_PROMPT = """تو دستیار هوشمند دانشگاه صنعتی خواجه نصیرالدین طوسی هستی.
-به تو تصاویری از صفحات اسناد دانشگاهی داده می‌شود؛ متن، جدول‌ها، نمودارها و طرح‌بندی هر صفحه را مستقیماً از روی تصویر بخوان.
+IMAGE_SYSTEM_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنکور و دستیار مطالعاتی دانش‌آموز.
+به تو تصاویری از صفحات منابع کنکور و آموزشی داده می‌شود؛ متن، جدول‌ها، نمودارها و طرح‌بندی هر صفحه را مستقیماً از روی تصویر بخوان.
 
 قوانین پاسخ‌دهی:
 ۱. فقط بر اساس چیزی که در تصاویر ارائه‌شده می‌بینی پاسخ بده.
@@ -80,6 +80,20 @@ def _build_context_block(chunks: List[dict]) -> str:
         )
 
     return "\n\n".join(parts)
+
+
+def _answer_confidence(chunks: List[dict], image_hits: Optional[List[dict]] = None) -> dict:
+    """Give the UI an honest retrieval signal, separate from model certainty."""
+    evidence = len(chunks) + len(image_hits or [])
+    if not evidence:
+        return {"level": "direct", "score": 0.5, "label": "پاسخ مستقیم؛ بدون منبع"}
+    scores = [float(c.get("score") or c.get("hybrid_score") or 0.0) for c in chunks]
+    scores.extend(float(c.get("score") or 0.0) for c in (image_hits or []))
+    best = max(scores, default=0.0)
+    score = min(0.99, 0.45 + min(0.35, evidence * 0.08) + max(0.0, min(0.2, best)))
+    level = "high" if score >= 0.8 else "medium" if score >= 0.62 else "low"
+    labels = {"high": "منابع مرتبط کافی", "medium": "منابع مرتبط محدود", "low": "اطمینان منبع پایین"}
+    return {"level": level, "score": round(score, 2), "label": labels[level]}
 
 
 # Persian day labels matching the frontend schedule (0 = شنبه).
@@ -117,7 +131,7 @@ def _schedule_context(schedule: Optional[dict]) -> str:
     # Say explicitly which day is "today" so requests like "امروز" resolve
     # to the correct block instead of the model guessing the first day.
     try:
-        from datetime import date, timedelta as _td
+        from datetime import date
         ws = date.fromisoformat(str(week_start)[:10])
         today_idx = (date.today() - ws).days
         if 0 <= today_idx <= 6:
@@ -185,7 +199,7 @@ _SIMPLE_QUESTION_RE = re.compile(
 # answer. Plain concept questions ("مشتق 2x چی میشه؟") stay direct: the LLM
 # knows them without any book.
 _GROUNDED_HINTS = re.compile(
-    r"کنکور|کتاب|تست|برنامه|آزمون|ماز|قلم‌چی|سنجش|مبحث|فصل|صفحه|درس|"
+    r"کنکور|کتاب|تست|برنامه|آزمون|امروز|فردا|ماز|قلم‌چی|سنجش|مبحث|فصل|صفحه|درس|"
     r"سرفصل|مرور|جمع‌بندی|خلاصه|تدریس|روزانه|هفتگی|تقویم|زمان‌بندی"
 )
 
@@ -199,13 +213,15 @@ def _is_simple_message(question: str) -> bool:
     if len(q) > 60:
         return False
     lowered = q.lower()
+    # A greeting can prefix a real study request (for example, "سلام،
+    # برنامه امروز چیه؟"). Grounded questions must take precedence over the
+    # greeting shortcut so they still use the user's sources and schedule.
+    if _GROUNDED_HINTS.search(q):
+        return False
     # Greetings/thanks - exact token match on any whitespace-separated word
     tokens = re.split(r"[\s،,!?.؟]+", lowered)
     if any(t in _SIMPLE_GREETINGS for t in tokens if t):
         return True
-    # Anything mentioning study topics/plans/books always goes to RAG.
-    if _GROUNDED_HINTS.search(q):
-        return False
     # Short plain questions without book-ish keywords: simple.
     if len(q) <= 30 and _SIMPLE_QUESTION_RE.match(q):
         return True
@@ -501,7 +517,7 @@ def _render_qbank_page_image(book: str, page: int) -> Optional[str]:
         with pymupdf.open(pdf) as doc:
             if not (1 <= page <= doc.page_count):
                 return None
-            pix = doc[page - 1].get_pixmap(dpi=150)
+            pix = cast(Any, doc[page - 1]).get_pixmap(dpi=150)
             put_object(key, pix.tobytes("png"))
         return key
     except Exception as exc:
@@ -642,7 +658,7 @@ def answer_question(
         llm_client = get_llm_client()
         answer_text = llm_client.generate(messages)
         _record_call_tokens(user_id, llm_client)
-        return {"answer": answer_text, "sources": []}
+        return {"answer": answer_text, "sources": [], "answer_confidence": _answer_confidence([])}
 
     embedding_model = get_embedding_model()
     hybrid_search = get_hybrid_search()
@@ -679,6 +695,7 @@ def answer_question(
     )
 
     vision_llm = get_vision_llm_client()
+    image_paths: List[bytes] = []
     # Only use vision if we have image hits and we actually have a real vision LLM (not the MockLLMClient)
     use_vision = bool(image_hits) and not isinstance(vision_llm, MockLLMClient)
 
@@ -716,7 +733,8 @@ def answer_question(
             )
             for c in retrieved_chunks
         ]
-        return {"answer": answer_text, "sources": sources}
+        return {"answer": answer_text, "sources": sources,
+            "answer_confidence": _answer_confidence(retrieved_chunks, image_hits)}
 
 
     llm_client = get_llm_client()
@@ -743,7 +761,8 @@ def answer_question(
 
     return {
         "answer": answer_text,
-        "sources": sources
+        "sources": sources,
+        "answer_confidence": _answer_confidence(retrieved_chunks, image_hits),
     }
 
 
@@ -794,9 +813,10 @@ def answer_question_stream(
     if _is_simple_message(question):
         logger.info("Simple message detected; skipping retrieval (streaming) for user %s.", user_id)
         yield json.dumps({"type": "sources", "data": []}) + "\n"
+        yield json.dumps({"type": "confidence", "data": _answer_confidence([])}, ensure_ascii=False) + "\n"
         yield json.dumps({"type": "status", "data": "در حال نگارش پاسخ..."}) + "\n"
         llm_client = get_llm_client()
-        messages = _build_messages(question, [], history, None, None)
+        messages = _build_messages(question, [], history, None, schedule)
         for text_chunk in llm_client.generate_stream(messages):
             yield json.dumps({"type": "text", "data": text_chunk}) + "\n"
         _record_call_tokens(user_id, llm_client)
@@ -810,7 +830,7 @@ def answer_question_stream(
     search_query = rewrite_query(question, user_id=user_id)
 
     # STEP 2: Status - Search
-    yield json.dumps({"type": "status", "data": "در حال جستجو در اسناد و قوانین دانشگاه..."}) + "\n"
+    yield json.dumps({"type": "status", "data": "در حال جستجو در منابع کنکور و آموزشی..."}) + "\n"
     query_embedding = embedding_model.embed_query(search_query)
 
     # Retrieve chunks from vector store, scoped to this user only
@@ -837,6 +857,7 @@ def answer_question_stream(
         image_hits = _resolve_ocr_page_images(retrieved_chunks, user_id) or []
 
     vision_llm = get_vision_llm_client()
+    image_paths: List[bytes] = []
     use_vision = bool(image_hits) and not isinstance(vision_llm, MockLLMClient)
 
     logger.info(
@@ -879,6 +900,7 @@ def answer_question_stream(
         ]
 
         yield json.dumps({"type": "sources", "data": sources_data}) + "\n"
+        yield json.dumps({"type": "confidence", "data": _answer_confidence(retrieved_chunks, image_hits)}, ensure_ascii=False) + "\n"
         yield json.dumps({"type": "status", "data": "در حال بررسی تصاویر صفحات و نگارش پاسخ..."}) + "\n"
 
         for text_chunk in vision_llm.generate_stream(messages, images=image_paths):
@@ -909,6 +931,7 @@ def answer_question_stream(
 
     # Frame: Send sources payload line
     yield json.dumps({"type": "sources", "data": sources_data}) + "\n"
+    yield json.dumps({"type": "confidence", "data": _answer_confidence(retrieved_chunks)}, ensure_ascii=False) + "\n"
 
     # STEP 3: Status - Generating Answer
     yield json.dumps({"type": "status", "data": "در حال نگارش پاسخ نهایی..."}) + "\n"
@@ -963,6 +986,7 @@ def ingest_pdf_as_images(
     dpi: Optional[int] = None,
     batch_size: Optional[int] = None,
     category: str = "",
+    source_fingerprint: Optional[str] = None,
 ) -> int:
     from app.rag.image_loader import pdf_to_page_images
     from app.rag.image_embeddings import get_image_embedding_model
@@ -973,7 +997,6 @@ def ingest_pdf_as_images(
     dpi = dpi or settings.IMAGE_DPI
     batch_size = batch_size or settings.IMAGE_BATCH_SIZE
 
-    output_dir = Path(settings.IMAGES_DIR) / str(user_id) / Path(document_name).stem
     image_keys = pdf_to_page_images(pdf_path, user_id, document_name, dpi=dpi)
 
     if not image_keys:
@@ -1000,6 +1023,7 @@ def ingest_pdf_as_images(
             embeddings,
             user_id=user_id,
             category=category,
+            metadata={"source_fingerprint": source_fingerprint} if source_fingerprint else None,
         )
         logger.info(
             "  '%s': embedded pages %d-%d of %d.",

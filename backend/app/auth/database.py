@@ -1,5 +1,7 @@
-﻿from datetime import datetime
+﻿from datetime import date, datetime
 from pathlib import Path
+import os
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -22,7 +24,7 @@ from sqlalchemy.orm import Mapped, declarative_base, mapped_column, sessionmaker
 
 # Keep the SQLite file next to the backend package root, regardless of CWD.
 _DB_PATH = Path(__file__).resolve().parents[2] / "rag_data.db"
-DATABASE_URL = f"sqlite:///{_DB_PATH.as_posix()}"
+DATABASE_URL = os.environ.get("BOOM_DATABASE_URL") or f"sqlite:///{_DB_PATH.as_posix()}"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -93,14 +95,24 @@ class Conversation(Base):
 
 class DailyTask(Base):
     __tablename__ = "daily_tasks"
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    date = Column(Date, nullable=False, index=True)
-    subject = Column(String, nullable=False)
-    task_type = Column(String, nullable=False)  # study, test, review, practice
-    description = Column(Text, nullable=False)
-    duration_minutes = Column(Integer, nullable=False)
-    completed = Column(Boolean, default=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    subject: Mapped[str] = mapped_column(String, nullable=False)
+    task_type: Mapped[str] = mapped_column(String, nullable=False)  # study, test, review, practice
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    completed: Mapped[Optional[bool]] = mapped_column(Boolean, default=False)
+    # --- Replanning / backlog fields (growth-readiness project 3) ---
+    # planned | completed | partially_completed | missed | skipped_by_student
+    # | cancelled_by_planner | rescheduled
+    status: Mapped[Optional[str]] = mapped_column(String, default="planned")
+    actual_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    completed_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    planned_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)      # why it was not done
+    replan_note: Mapped[Optional[str]] = mapped_column(String, nullable=True) # planner-facing decision note
+    miss_count: Mapped[Optional[int]] = mapped_column(Integer, default=0)     # consecutive misses of this task
 
 
 class BookCatalog(Base):
@@ -181,6 +193,27 @@ class StudySession(Base):
     ended_at = Column(DateTime, nullable=True)
     duration_minutes = Column(Integer, nullable=True)
     completion_data = Column(Text, nullable=True)  # JSON string
+    # ---- Growth-readiness project 4: REAL session logging ----
+    # Distinguishes "what was planned" from "what actually happened" so the
+    # planner can build per-student estimates. Optional columns - daily
+    # logging must stay fast (three-tap quick log).
+    plan_item_id = Column(Integer, nullable=True)  # future plan_items FK
+    subject_name = Column(String, nullable=True)  # free label when no Subject row
+    topic_name = Column(String, nullable=True)
+    actual_minutes = Column(Integer, nullable=True)
+    attempted_questions = Column(Integer, nullable=True)
+    correct_count = Column(Integer, nullable=True)
+    wrong_count = Column(Integer, nullable=True)
+    blank_count = Column(Integer, nullable=True)
+    perceived_difficulty = Column(Integer, nullable=True)  # 1-5
+    focus_level = Column(Integer, nullable=True)  # 1-5
+    energy_level = Column(Integer, nullable=True)  # 1-5
+    interruption_count = Column(Integer, nullable=True)
+    # planned | in_progress | completed | partially_completed | missed |
+    # skipped_by_student | cancelled_by_planner | rescheduled
+    completion_status = Column(String, nullable=True)
+    logged_via = Column(String, nullable=True)  # timer | quick | auto_test
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Assessment(Base):
@@ -214,6 +247,19 @@ class WrongAnswer(Base):
     student_answer = Column(String, nullable=True)
     was_blank = Column(Boolean, default=False)  # skipped vs answered wrong
     source = Column(String, nullable=True)  # mock / arena / practice / ocr
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ReviewLog(Base):
+    """A completed spaced-review event for one subject/topic."""
+
+    __tablename__ = "review_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    subject = Column(String, nullable=False, index=True)
+    topic = Column(String, nullable=False)
+    rating = Column(Integer, nullable=True)  # 1..5 self-rating after review
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -263,6 +309,18 @@ class ArenaQueueEntry(Base):
     student_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     elo = Column(Integer, nullable=False, default=1000)
     joined_at = Column(DateTime, default=datetime.utcnow)
+    # ---- knowledge base (see rag/knowledge_base.py) ----
+    # A duel booklet is generated from the INTERSECTION of both players'
+    # subjects, so each queued entry must carry its own major and grade:
+    # matchmaking never pairs two students whose exam material does not
+    # overlap (a زبان‌های خارجی student shares no booklet subject with the
+    # other majors, for example).
+    major = Column(String, nullable=True)
+    grade = Column(String, nullable=True)
+    # JSON list of study subjects the player wants to be tested on. Every
+    # entry is a MATCHMAKING requirement: the opponent must study all of
+    # them (empty/None = no filter).
+    wanted = Column(Text, nullable=True)  # JSON string
 
 
 class ArenaMatch(Base):
@@ -284,6 +342,112 @@ class ArenaMatch(Base):
     winner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     finished_at = Column(DateTime, nullable=True)
+    # ---- AI-rival exhibition matches (is_ai_opponent=True) ----
+    # A SEPARATE, non-ranked track: these rows NEVER feed record_match_rating
+    # (guarded), the placement K count, user_elo, /me or the public
+    # leaderboard - see the exclusion points in this module and arena.submit.
+    # The "opponent" is simulated: student_b_id uses the 0 sentinel (see
+    # pool_core.POOL_OWNER_ID) and its sampled
+    # per-question answers live in ai_answers so scoring runs identically.
+    is_ai_opponent = Column(Boolean, nullable=False, default=False,
+                            server_default="0")
+    # Key into arena._AI_RIVAL_LEVELS (named difficulty, not raw probability).
+    ai_rival = Column(String, nullable=True)
+    # JSON {question_id: chosen option index} sampled at the level's accuracy.
+    ai_answers = Column(Text, nullable=True)
+    # ---- scheduled matches (arena scheduling option) ----
+    # UTC kickoff. Null for the classic instant modes (matchmaking, AI rival);
+    # set for a scheduled duel, which is created with status="scheduled"
+    # and lazily flips to "pending" when starts_at arrives (both players
+    # then see it through the normal /status + /{id} polling).
+    starts_at = Column(DateTime, nullable=True)
+    # Who BOOKED the match (the acceptor becomes student_b). Kept for the
+    # cancel-authorization rule: only the host or the acceptor may cancel.
+    # For instant modes this is Null (= not a scheduled match).
+    booked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
+class ArenaScheduledInvite(Base):
+    """An OPEN offer: "I want a duel at <time>, who's in?"
+
+    The queue of a matchable opponent sits in a public list so anyone can
+    accept it before kickoff; once accepted, the row freezes and a real
+    ArenaMatch with status="scheduled" is created for both players. The
+    booklet is claimed from the duel pool AT ACCEPT TIME so it is ready
+    before the match starts (no LLM wait at kickoff).
+    """
+
+    __tablename__ = "arena_scheduled_invites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    host_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # UTC kickoff the match becomes playable for BOTH players.
+    starts_at = Column(DateTime, nullable=False, index=True)
+    # Constraints the acceptor must satisfy (same rules as live matchmaking:
+    # same booklet material + rating band, so a scheduled duel is as fair as
+    # an instant one). Empty wanted = no subject filter.
+    major = Column(String, nullable=True)
+    grade = Column(String, nullable=True)
+    elo = Column(Integer, nullable=False, default=1000)
+    wanted = Column(Text, nullable=True)  # JSON list (host's subject ticks)
+    # Null until someone books the slot.
+    accepted_by = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    accepted_at = Column(DateTime, nullable=True)
+    # The ArenaMatch created on acceptance (acceptor = student_b).
+    match_id = Column(Integer, ForeignKey("arena_matches.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    # Host gave up waiting (or the acceptor backed out). Cancelled rows stay
+    # visible to the two parties until kickoff, then disappear from the list.
+    cancelled_at = Column(DateTime, nullable=True)
+
+
+class StudentProfile(Base):
+    """Server-side source of truth for the student's onboarding profile.
+
+    Growth-readiness project 1: the same plan/profile must appear on every
+    device, and clearing browser storage must not lose data. The frontend
+    keeps localStorage as an offline CACHE; this row is authoritative.
+    `version` + `updated_at` make concurrent edits detectable (PATCH sends
+    the version it based on; a stale version gets 409 + server state back
+    instead of a silent overwrite).
+    """
+
+    __tablename__ = "student_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False,
+                     unique=True, index=True)
+    name = Column(String, nullable=True)
+    major = Column(String, nullable=True)
+    grade = Column(String, nullable=True)
+    exam_year = Column(String, nullable=True)
+    target_rank = Column(String, nullable=True)
+    study_hours = Column(String, nullable=True)
+    # JSON list of mock-exam providers the student takes.
+    test_exams = Column(Text, nullable=True)  # JSON string
+    # Daily availability JSON: {"wake": "06:30", "sleep": "23:00",
+    #  "daily_hours": {"0": 4, ...}} - planner input, server-owned.
+    availability = Column(Text, nullable=True)
+    version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow,
+                        onupdate=datetime.utcnow)
+
+
+class TaskProgress(Base):
+    """One latest outcome per student and calendar task; retries replace, not duplicate."""
+    __tablename__ = "task_progress"
+    student_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    client_ref = Column(String, primary_key=True)
+    source_ref = Column(String, nullable=True)
+    date = Column(Date, nullable=False)
+    subject = Column(String, nullable=False)
+    topic = Column(String, nullable=False, default="")
+    task_type = Column(String, nullable=False, default="study")
+    planned_minutes = Column(Integer, nullable=False)
+    actual_minutes = Column(Integer, nullable=False, default=0)
+    status = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class ChallengeInvite(Base):
@@ -327,10 +491,18 @@ def _ensure_column(table: str, column: str, ddl_type: str) -> None:
 def ensure_schema() -> None:
     """Create missing tables and backfill columns added after initial create_all."""
     Base.metadata.create_all(bind=engine)
+    _ensure_column("task_progress", "source_ref", "VARCHAR")
     # users.phone was added after the first schema create; migrate existing DBs.
     _ensure_column("users", "phone", "VARCHAR")
     _ensure_column("users", "phone_verified", "BOOLEAN DEFAULT 0")
     _ensure_column("users", "is_admin", "BOOLEAN DEFAULT 0")
+    _ensure_column("daily_tasks", "status", "VARCHAR DEFAULT 'planned'")
+    _ensure_column("daily_tasks", "actual_minutes", "INTEGER")
+    _ensure_column("daily_tasks", "completed_count", "INTEGER")
+    _ensure_column("daily_tasks", "planned_count", "INTEGER")
+    _ensure_column("daily_tasks", "reason", "VARCHAR")
+    _ensure_column("daily_tasks", "replan_note", "VARCHAR")
+    _ensure_column("daily_tasks", "miss_count", "INTEGER DEFAULT 0")
     # Mock pool: "pending_use" rows sit unassigned in the pre-generated pool;
     # "claimed" rows belong to the student in student_id. Legacy rows (and
     # arena duel rows) predate the pool and default to "claimed".
@@ -341,6 +513,38 @@ def ensure_schema() -> None:
     # Arena Elo snapshot on the user (see record_match_rating); existing DBs
     # backfill at the unrated starting value.
     _ensure_column("users", "rating", "INTEGER DEFAULT 1000")
+    # AI-rival exhibition columns on arena_matches (existing DBs backfill;
+    # is_ai_opponent defaults to 0 = a real ranked match).
+    _ensure_column("arena_matches", "is_ai_opponent", "BOOLEAN DEFAULT 0")
+    # Scheduled duels (arena scheduling option): kickoff timestamp + who
+    # booked the match. Null on every classic row.
+    _ensure_column("arena_matches", "starts_at", "TIMESTAMP")
+    _ensure_column("arena_matches", "booked_by", "INTEGER")
+    _ensure_column("arena_matches", "ai_rival", "VARCHAR")
+    _ensure_column("arena_matches", "ai_answers", "TEXT")
+    # Arena knowledge-base matchmaking: the queue entry remembers the
+    # player's major, grade and ticked subjects (existing DBs backfill as
+    # NULL -> no filter, and matchmaking then falls back to the profile row).
+    _ensure_column("arena_queue", "major", "VARCHAR")
+    _ensure_column("arena_queue", "grade", "VARCHAR")
+    _ensure_column("arena_queue", "wanted", "TEXT")
+    # Growth-readiness project 4: real study-session logging columns
+    # (existing DBs get the new columns; new tables create them directly).
+    _ensure_column("study_sessions", "plan_item_id", "INTEGER")
+    _ensure_column("study_sessions", "subject_name", "VARCHAR")
+    _ensure_column("study_sessions", "topic_name", "VARCHAR")
+    _ensure_column("study_sessions", "actual_minutes", "INTEGER")
+    _ensure_column("study_sessions", "attempted_questions", "INTEGER")
+    _ensure_column("study_sessions", "correct_count", "INTEGER")
+    _ensure_column("study_sessions", "wrong_count", "INTEGER")
+    _ensure_column("study_sessions", "blank_count", "INTEGER")
+    _ensure_column("study_sessions", "perceived_difficulty", "INTEGER")
+    _ensure_column("study_sessions", "focus_level", "INTEGER")
+    _ensure_column("study_sessions", "energy_level", "INTEGER")
+    _ensure_column("study_sessions", "interruption_count", "INTEGER")
+    _ensure_column("study_sessions", "completion_status", "VARCHAR")
+    _ensure_column("study_sessions", "logged_via", "VARCHAR")
+    _ensure_column("study_sessions", "created_at", "TIMESTAMP")
     # Unique index for phone (SQLite allows multiple NULLs).
     with engine.begin() as conn:
         conn.execute(
@@ -351,24 +555,43 @@ def ensure_schema() -> None:
 
 
 def user_elo(db, student_id: int) -> int:
-    """Current Elo for a student: the latest Elo snapshot across their arena
-    matches, or the 1000 starting rating when they have never played."""
+    """Current Elo for a student: the latest Elo snapshot across their real
+    (non-AI-rival) arena matches, or the 1000 starting rating when they have
+    never played.
+
+    AI-rival exhibition rows are EXCLUDED: they store an elo_a snapshot taken
+    at match creation, so letting them win "latest row" could resurrect a
+    stale rating (e.g. a pending real match finishing after the AI row was
+    created). Only real matches ever move the rating.
+    """
     from sqlalchemy import select
 
-    row = db.execute(
-        select(ArenaMatch)
-        .where(
-            (ArenaMatch.student_a_id == student_id)
-            | (ArenaMatch.student_b_id == student_id)
-        )
-        .order_by(ArenaMatch.created_at.desc())
-        .limit(1)
-    ).scalar_one_or_none()
+    row = latest_arena_match(db, student_id)
     if row is None:
         return 1000
     if row.student_a_id == student_id:
         return int(row.elo_a or 1000)
     return int(row.elo_b or 1000)
+
+
+def latest_arena_match(db, student_id: int):
+    """The player's most recent REAL (non-AI-rival) arena match row.
+
+    user_elo() reads the Elo snapshot off this row. Scheduled matches that
+    have not started yet (status="scheduled") must NOT answer this query:
+    their elo_a/elo_b are ratings frozen at booking time, and if a player
+    plays a normal ranked duel after booking one, the older rating would
+    shadow the fresh one. Weakest link: exclude every non-finished row.
+    """
+    return db.execute(
+        select(ArenaMatch)
+        .where((ArenaMatch.student_a_id == student_id)
+               | (ArenaMatch.student_b_id == student_id))
+        .where(ArenaMatch.is_ai_opponent.is_(False))
+        .where(ArenaMatch.status == "finished")
+        .order_by(ArenaMatch.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
 
 
 def record_match_rating(match: ArenaMatch, db=None) -> None:
@@ -385,7 +608,17 @@ def record_match_rating(match: ArenaMatch, db=None) -> None:
     `db`: the caller's session when available (the arena submit endpoint
     passes it) so the User.rating snapshots commit atomically with the match.
     Falls back to a short-lived SessionLocal for direct/test callers.
+
+    AI-RIVAL EXCLUSION (airtight): matches with is_ai_opponent=True return
+    immediately with zero deltas - no Elo math, no User.rating writes. The
+    arena submit endpoint additionally skips calling this for such matches;
+    the guard makes the exclusion hold even if a future caller forgets.
     """
+    if getattr(match, "is_ai_opponent", False):
+        # Exhibition vs the simulated rival: zero deltas, ratings untouched.
+        match.delta_a = 0
+        match.delta_b = 0
+        return
     session = db if db is not None else SessionLocal()
     own_session = db is None
     try:
@@ -395,6 +628,9 @@ def record_match_rating(match: ArenaMatch, db=None) -> None:
             played = session.execute(
                 select(func.count()).select_from(ArenaMatch).where(
                     ArenaMatch.status == "finished",
+                    # AI-rival exhibitions never consume placement
+                    # acceleration - only real matches count toward the 10.
+                    ArenaMatch.is_ai_opponent.is_(False),
                     (ArenaMatch.student_a_id == student_id)
                     | (ArenaMatch.student_b_id == student_id),
                 )

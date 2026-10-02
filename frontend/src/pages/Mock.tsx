@@ -116,7 +116,7 @@ function ConfigView({ onStart }: { onStart: (cfg: Record<string, unknown>) => vo
           <textarea rows={2} value={topics} onChange={e => setTopics(e.target.value)}
             placeholder="مثلاً: حرکت‌شناسی، اثر داپلر، استوکیومتری — هر مبحث در یک خط"
             className="w-full border rounded-xl px-3 py-2.5 text-[13px] text-right bg-[var(--card)] text-[var(--text)] resize-none leading-relaxed" />
-          <p className="text-[10px] text-[var(--muted-2)] mt-1.5">خالی بگذاری، سوالات از کل مباحث کنکوری می‌آید. مباحث آزمون ماز این هفته خودکار در اولویت است.</p>
+          <p className="text-[10px] text-[var(--muted-2)] mt-1.5">خالی بگذاری، سوالات از کل مباحث کنکوری می‌آید. برای تمرکز بر آزمون پیش رو، مباحث آن را وارد کن.</p>
         </div>
 
         <button onClick={() => onStart({ difficulty, questions_per_subject: count || undefined, topics: topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
@@ -331,7 +331,7 @@ function ResultView({ result, onBack, onRetry }: { result: MockResult; onBack: (
             <div className="bg-[#FFF5F0] dark:bg-[#3A2A1A] rounded-2xl border border-[#F5DDD0] p-4">
               <p className="text-[12px] font-bold text-[#C4714A] mb-1.5">چه اتفاقی در برنامه‌ات می‌افتد</p>
               <p className="text-[12px] text-[var(--text)] leading-relaxed text-right">
-                غلط‌ها و نزده‌های این آزمون با درس و مبحث ثبت شد. دفعه بعد که برنامه هفتگی بسازی، بوم برای همین مباحث بلوک تست اختصاصی با بازه صفحه و شماره تست می‌گذارد.
+                غلط‌ها و نزده‌های این آزمون با درس و مبحث ثبت شد. دفعه بعد که برنامه هفتگی بسازی، این نتایج در اولویت مطالعه، تست و مرور این مباحث لحاظ می‌شوند.
               </p>
             </div>
             <button onClick={onRetry} className="w-full py-3.5 rounded-2xl border border-[var(--border-strong)] text-[13px] font-bold text-[var(--muted)]">

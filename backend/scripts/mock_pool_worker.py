@@ -84,27 +84,21 @@ def main() -> None:
         return
 
     if args.once:
-        db = SessionLocal()
-        try:
-            produced = pool_core.sweep(db, args.target, majors, difficulties)
-            produced += pool_core.sweep_duels(db, max(2, args.target // 2), majors)
-        finally:
-            db.close()
-        print(f"one sweep complete: {produced} pool row(s) generated")
+        produced, snap = _run_sweep(args, majors, difficulties)
+        print(f"one sweep complete: {_summary(produced, snap)}")
         return
 
     # Continuous mode: keep the pool topped up forever. A crash inside one
     # sweep never ends the worker.
     while True:
         try:
-            db = SessionLocal()
-            try:
-                produced = pool_core.sweep(db, args.target, majors, difficulties)
-                produced += pool_core.sweep_duels(db, max(2, args.target // 2), majors)
-            finally:
-                db.close()
+            produced, snap = _run_sweep(args, majors, difficulties)
             if produced:
-                logger.info("Sweep done: %d pool row(s) generated.", produced)
+                logger.info("Sweep done: %s.", _summary(produced, snap))
+            elif snap.get("last_error"):
+                # A refused provider (quota/rate limit) aborts the sweep; say
+                # so instead of looking like a pool that is already full.
+                logger.warning("Sweep stopped early: %s", _summary(produced, snap))
             else:
                 logger.info("Pool full; next sweep in %.0fs.", args.interval)
         except KeyboardInterrupt:
@@ -113,6 +107,34 @@ def main() -> None:
         except Exception:
             logger.exception("Sweep crashed; retrying next interval.")
         time.sleep(args.interval)
+
+
+def _run_sweep(args, majors, difficulties) -> tuple:
+    """One pool + duel sweep under a single progress record.
+
+    Opening the record here mirrors the admin restock, so both sweeps report
+    into one run and the summary can state how many questions were produced
+    (and why a run stopped early).
+    """
+    db = SessionLocal()
+    owner = pool_core.begin_progress("worker")
+    try:
+        produced = pool_core.sweep(db, args.target, majors, difficulties)
+        produced += pool_core.sweep_duels(db, max(2, args.target // 2), majors)
+    finally:
+        db.close()
+        if owner:
+            pool_core.finish_progress()
+    return produced, pool_core.progress_snapshot()
+
+
+def _summary(produced: int, snap: dict) -> str:
+    """Pool row + question totals, plus the reason a run stopped early."""
+    text = (f"{produced} pool row(s) generated, "
+            f"{snap['questions']}/{snap['questions_planned']} questions")
+    if snap.get("last_error"):
+        text += f" - stopped early: {snap['last_error']}"
+    return text
 
 
 if __name__ == "__main__":

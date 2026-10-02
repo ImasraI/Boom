@@ -19,6 +19,7 @@ chatbot's quota. Vision keeps its own VISION_LLM_PROVIDER (usually Gemini).
 from abc import ABC, abstractmethod
 from typing import Any, List, Dict, Generator, NamedTuple, Optional, Sequence
 import json
+import re
 import time
 import httpx
 import base64
@@ -58,6 +59,13 @@ def _usage_from_openai(data: dict) -> TokenUsage:
 
 
 class BaseLLMClient(ABC):
+    # Why the last generate() failed, in the provider's own words (e.g.
+    # "HTTP 429 (You exceeded your current quota | GenerateRequestsPerDay...)").
+    # Reset on every call, empty after a success. Callers use it to tell
+    # "the provider refused" apart from "the model answered with nothing
+    # usable" - the pool aborts on the former instead of retrying for hours.
+    last_error: str = ""
+
     @abstractmethod
     def generate(
         self,
@@ -250,6 +258,50 @@ def _retry_after_seconds(response: httpx.Response, fallback: float,
         return fallback
 
 
+# Providers spell out WHY a request was rejected in the error body, but the
+# clients used to log only "HTTP 429" - an exhausted free-tier quota then
+# looked like a hung pool sweep.
+#
+# A per-DAY quota cannot clear by retrying inside one request, so it is
+# reported as terminal and the caller stops instead of burning its budget.
+# The quota id is checked first because it is unambiguous: Google spells
+# "GenerateRequestsPerDayPerProjectPerModel-FreeTier" (daily) versus
+# "...PerMinute..." (a 60s window a short wait can clear).
+_DAILY_QUOTA_RE = re.compile(r"per.?day|daily", re.IGNORECASE)
+
+
+def _quota_reason(response: httpx.Response) -> tuple:
+    """(short reason, terminal) parsed from a failed provider response.
+
+    `reason` is the provider's message plus, when present, the
+    machine-readable quota id (Google nests it inside error.details).
+    `terminal` means a per-day quota is exhausted, i.e. waiting inside this
+    request can never succeed.
+    """
+    try:
+        data = response.json()
+    except Exception:
+        return "", False
+    # Gemini wraps the error in a one-element ARRAY ([]) - OpenAI-compatible
+    # clients return a bare object, so accept both shapes.
+    if isinstance(data, list) and data:
+        data = data[0]
+    if not isinstance(data, dict):
+        return "", False
+    error = data.get("error") if isinstance(data.get("error"), dict) else {}
+    # Keep the message readable in a log line / admin panel: provider texts
+    # are long, multiline and full of documentation URLs.
+    message = str(error.get("message") or data.get("message") or "")
+    message = re.sub(r"https?://\S+", "", message)
+    message = " ".join(message.split())[:160].strip(" .،")
+    nested = json.dumps(error.get("details") or data.get("details") or "",
+                        ensure_ascii=False)
+    match = re.search(r'"quotaId"\s*:\s*"([^"]+)"', nested)
+    quota_id = match.group(1) if match else ""
+    reason = " | ".join(part for part in (message[:200], quota_id) if part)
+    return reason, bool(_DAILY_QUOTA_RE.search(quota_id or reason))
+
+
 class GroqLLMClient(BaseLLMClient):
     """HTTP client for Groq's OpenAI-compatible API."""
 
@@ -322,6 +374,7 @@ class GroqLLMClient(BaseLLMClient):
         # content) or a rate-limit/5xx error.  Retry briefly so a single
         # flaky call doesn't degrade weekly-planning to the default fallback.
         self.last_usage = ZERO_USAGE  # stays zero unless a response succeeds
+        self.last_error = ""
         last = ""
         for attempt in range(4):
             wait_s = 2 * (attempt + 1)  # default short backoff
@@ -360,6 +413,14 @@ class GroqLLMClient(BaseLLMClient):
                 # (capped), otherwise the fixed short backoff can never clear
                 # a 60s rate-limit window and every attempt fails again.
                 if e.response is not None and e.response.status_code == 429:
+                    reason, terminal = _quota_reason(e.response)
+                    self.last_error = "HTTP 429" + (f" ({reason})" if reason else "")
+                    if terminal:
+                        logger.error(
+                            "Groq call blocked: %s - not retrying, a per-day "
+                            "quota cannot clear inside this request.",
+                            self.last_error)
+                        break
                     wait_s = _retry_after_seconds(e.response, fallback=wait_s)
             except httpx.TimeoutException:
                 last = ""
@@ -550,13 +611,23 @@ class GeminiLLMClient(BaseLLMClient):
         req_timeout = timeout if timeout is not None else self.timeout
 
         self.last_usage = ZERO_USAGE  # stays zero unless a response succeeds
+        self.last_error = ""
         last_error = ""
         for attempt in range(1, 5):
             wait_s = 2 * attempt  # default short backoff
             try:
                 resp = self.client.post(url, json=payload, timeout=req_timeout)
                 if resp.status_code == 429 or resp.status_code >= 500:
+                    reason, terminal = _quota_reason(resp)
                     last_error = f"HTTP {resp.status_code}"
+                    if reason:
+                        last_error += f" ({reason})"
+                    self.last_error = last_error
+                    if terminal:
+                        logger.error(
+                            "Gemini call blocked: %s - not retrying, a per-day "
+                            "quota cannot clear inside this request.", last_error)
+                        return ""  # already reported; no extra "failed" line
                     if resp.status_code == 429:
                         wait_s = _retry_after_seconds(resp, fallback=wait_s)
                     time.sleep(wait_s)
@@ -585,6 +656,7 @@ class GeminiLLMClient(BaseLLMClient):
                            attempt, last_error)
             time.sleep(wait_s)
 
+        self.last_error = last_error
         logger.warning("Gemini request failed after retries: %s", last_error)
         return ""
 
@@ -1013,6 +1085,78 @@ def get_llm_client(
     return MockLLMClient()
 
 
+class FallbackLLMClient(BaseLLMClient):
+    """Run generation on the first pool provider that still answers.
+
+    A per-day quota is PER PROVIDER (and per model) and cannot clear inside a
+    request, while one booklet needs a dozen or more calls - so a single spent
+    free tier would otherwise stop the whole pool. This wrapper tries the next
+    configured provider when the current one reports a per-day quota, and
+    only then:
+
+      * any OTHER failure (per-minute limit, timeout, unparseable reply) stays
+        with the current provider, because moving a transient blip onto
+        another key would silently spend a quota we do not need;
+      * a provider that answers keeps the rest of the run (failover happens
+        once per client, not per call);
+      * `last_error` always describes the LAST provider tried, so the pool's
+        "provider refused" reporting stays accurate.
+    """
+
+    def __init__(self, clients: List[BaseLLMClient], labels: List[str]):
+        self._clients = list(clients)
+        self._labels = list(labels)
+        self._idx = 0
+        self.last_error = ""
+        self.last_usage = ZERO_USAGE
+
+    @property
+    def active(self) -> BaseLLMClient:
+        return self._clients[self._idx]
+
+    @property
+    def active_label(self) -> str:
+        return self._labels[self._idx]
+
+    @staticmethod
+    def _exhausted(reason: str) -> bool:
+        """True for a per-day quota (the only reason worth switching keys)."""
+        return bool(_DAILY_QUOTA_RE.search(reason or ""))
+
+    def generate(
+        self,
+        messages: List[LLMMessage],
+        max_tokens: Optional[int] = None,
+        timeout: Optional[float] = None,
+        images: Optional[Sequence[ImageInput]] = None,
+    ) -> str:
+        while True:
+            client = self.active
+            raw = client.generate(messages, max_tokens=max_tokens,
+                                  timeout=timeout, images=images)
+            self.last_usage = getattr(client, "last_usage", ZERO_USAGE)
+            if (raw or "").strip():
+                self.last_error = ""
+                return raw
+            reason = getattr(client, "last_error", "") or ""
+            if self._idx + 1 >= len(self._clients) or not self._exhausted(reason):
+                self.last_error = reason or (
+                    f"{self.active_label} returned no response")
+                return raw
+            logger.warning(
+                "Pool provider %s is out of quota (%s); continuing on %s.",
+                self.active_label, reason, self._labels[self._idx + 1],
+            )
+            self._idx += 1
+
+    def generate_stream(
+        self,
+        messages: List[LLMMessage],
+        images: Optional[Sequence[ImageInput]] = None,
+    ) -> Generator[str, None, None]:
+        yield from self.active.generate_stream(messages, images=images)
+
+
 def get_pool_llm_client() -> BaseLLMClient:
     """LLM client for MOCK GENERATION (pool worker, admin restock, live
     booklet builds).
@@ -1021,19 +1165,46 @@ def get_pool_llm_client() -> BaseLLMClient:
     gets its own provider quota instead of competing with the chatbot and
     planning on the main key. Empty key = fall back to the shared key
     (previous behavior).
+
+    POOL_LLM_FALLBACK_PROVIDERS adds providers to continue on when the first
+    one runs out of its per-day quota; with none configured the primary client
+    is returned unchanged.
     """
     settings = get_settings()
     pool_key = (settings.POOL_LLM_API_KEY or "").strip()
     pool_provider = (settings.POOL_LLM_PROVIDER or "").strip().lower()
-    if not pool_key and not pool_provider:
-        return get_llm_client()
     pool_model = (settings.POOL_LLM_MODEL_NAME or "").strip() or None
-    logger.info("Using the dedicated pool LLM provider/key/model for mock generation.")
-    return get_llm_client(
-        provider=pool_provider or None,
-        api_key=pool_key or None,
-        model=pool_model,
-    )
+    if pool_key or pool_provider:
+        logger.info("Using the dedicated pool LLM provider/key/model for mock generation.")
+        primary = get_llm_client(provider=pool_provider or None,
+                                 api_key=pool_key or None, model=pool_model)
+    else:
+        primary = get_llm_client()
+
+    wanted = [name.strip().lower()
+              for name in (settings.POOL_LLM_FALLBACK_PROVIDERS or "").split(",")]
+    wanted = [name for name in wanted if name]
+    if not wanted:
+        return primary
+
+    primary_label = pool_provider or (settings.LLM_PROVIDER or "").strip().lower()
+    clients: List[BaseLLMClient] = [primary]
+    labels: List[str] = [primary_label or "default"]
+    for name in wanted:
+        if name in labels:
+            continue
+        client = get_llm_client(provider=name)
+        if isinstance(client, MockLLMClient):
+            # No key for this provider: skip it rather than silently
+            # generating nothing forever.
+            logger.warning("Pool fallback provider %r has no API key; skipped.", name)
+            continue
+        clients.append(client)
+        labels.append(name)
+    if len(clients) == 1:
+        return primary
+    logger.info("Pool LLM failover chain: %s", " -> ".join(labels))
+    return FallbackLLMClient(clients, labels)
 
 
 def get_vision_llm_client() -> BaseLLMClient:

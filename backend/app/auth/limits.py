@@ -84,6 +84,45 @@ def record_ai_use(user_id: int, feature: str) -> None:
     _counters.record(user_id, feature)
 
 
+def consume_ai_use(user_id: int, feature: str) -> None:
+    """Atomically reserve one request of `feature` for `user_id`.
+
+    Cost-control fix (growth-readiness project 9): the old pattern was
+    check_ai_quota() at entry + record_ai_use() after the (possibly
+    minutes-long) LLM work, so N concurrent requests ALL passed the check
+    and ALL recorded - blowing through the daily cap. consume() does the
+    check-and-increment under one lock, so the cap can never be exceeded.
+
+    Pair with release_ai_use() on failure paths when the request must stay
+    free; skipping the release only ever UNDER-counts success marginally
+    (conservative) - it can never overshoot the cap.
+    """
+    limit = getattr(get_settings(), f"AI_DAILY_{feature.upper()}", 0)
+    if limit <= 0:
+        return
+    with _counters._lock:
+        _counters._rollover()
+        used = _counters._counts[user_id].get(feature, 0)
+        if used >= limit:
+            raise HTTPException(
+                status_code=429,
+                detail="سهمیه روزانه‌ات برای این بخش تمام شده؛ فردا دوباره تلاش کن",
+            )
+        _counters._counts[user_id][feature] = used + 1
+
+
+def release_ai_use(user_id: int, feature: str) -> None:
+    """Refund one consume_ai_use() reservation (failure path)."""
+    limit = getattr(get_settings(), f"AI_DAILY_{feature.upper()}", 0)
+    if limit <= 0:
+        return
+    with _counters._lock:
+        _counters._rollover()
+        counts = _counters._counts.get(user_id)
+        if counts and counts.get(feature, 0) > 0:
+            counts[feature] -= 1
+
+
 def check_token_budget(user_id: int) -> None:
     """Raise 429 when the user's tokens used today >= AI_DAILY_TOKEN_BUDGET.
 
@@ -118,6 +157,19 @@ def tokens_used_today(user_id: int) -> int:
     with _counters._lock:
         _counters._rollover()
         return int(_counters._counts[user_id].get("_tokens", 0))
+
+
+def feature_quota(user_id: int, feature: str) -> dict:
+    """{used, limit, remaining} for one feature, for user-facing display.
+
+    limit <= 0 means unlimited: remaining is None so clients can render
+    "unlimited" instead of a misleading number.
+    """
+    limit = getattr(get_settings(), f"AI_DAILY_{feature.upper()}", 0)
+    used = _counters.snapshot(user_id).get(feature, 0)
+    if limit <= 0:
+        return {"used": used, "limit": 0, "remaining": None}
+    return {"used": used, "limit": limit, "remaining": max(0, limit - used)}
 
 
 def usage_snapshot(user_id: int) -> dict:

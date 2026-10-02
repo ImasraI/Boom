@@ -60,6 +60,7 @@ def _settings(**over):
         POOL_LLM_PROVIDER="",
         POOL_LLM_API_KEY="",
         POOL_LLM_MODEL_NAME="",
+        POOL_LLM_FALLBACK_PROVIDERS="",
     )
     base.update(over)
     return SimpleNamespace(**base)

@@ -1,8 +1,8 @@
-# بک‌اند دستیار هوشمند RAG - دانشگاه خواجه نصیرالدین طوسی
+# Rag system backend
 
-پیاده‌سازی‌شده با FastAPI + ChromaDB + sentence-transformers.
+FastAPI + ChromaDB + sentence-transformers.
 
-## نصب و اجرا
+## instalation
 
 ```bash
 cd backend
@@ -17,15 +17,15 @@ cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
-پس از اجرا:
-- مستندات تعاملی API: http://localhost:8000/docs
+
+- API: http://localhost:8000/docs
 - health check: http://localhost:8000/api/health
 
 ## مسیرهای API
 
-| Method | مسیر | توضیح |
+| Method |
 |---|---|---|
-| GET | `/api/health` | بررسی سلامت سرویس |
+| GET | `/api/health`  |
 | POST | `/api/chat` | ارسال سوال و دریافت پاسخ RAG به همراه منابع |
 | POST | `/api/documents/upload` | آپلود یک یا چند فایل متنی (txt/md) و ورود به پایگاه دانش |
 | GET | `/api/documents` | لیست اسناد موجود در پایگاه دانش |

@@ -32,8 +32,8 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
-from sqlalchemy import select
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.auth.database import (
@@ -45,7 +45,7 @@ from app.auth.database import (
     WrongAnswer,
 )
 from app.auth.deps import get_current_user, get_db
-from app.auth.limits import check_ai_quota, record_ai_use
+from app.auth.limits import consume_ai_use, release_ai_use
 from app.rag import mock_generation
 from app.rag.mock_generation import (
     KONKUR_SUBJECTS as _KONKUR_SUBJECTS,
@@ -61,7 +61,7 @@ router = APIRouter(prefix="/api/mocks", tags=["mocks"])
 
 # Serializes pool claims within this server process (sync endpoints run in a
 # threadpool). Deployment is a single uvicorn process; SQLite serializes the
-# commit itself, so worst case across processes is a benign double-check.
+# conditional claim update also prevents double assignment across processes.
 _POOL_CLAIM_LOCK = threading.Lock()
 
 # major-key -> every Persian label that maps to it (for pool matching).
@@ -74,8 +74,8 @@ _CANONICAL_MAJOR = {k: v[0] for k, v in _MAJOR_LABELS.items()}
 
 class MockConfig(BaseModel):
     subjects: Optional[List[str]] = None  # default: all major subjects
-    questions_per_subject: Optional[int] = None  # default: konkur counts
-    duration_minutes: Optional[int] = None  # default: sum of subject minutes
+    questions_per_subject: Optional[int] = Field(default=None, ge=1)  # default: konkur counts
+    duration_minutes: Optional[int] = Field(default=None, ge=1)  # default: sum of subject minutes
     topics: List[str] = []  # restrict to these topics (e.g. from the week's mock)
     difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard)$")
     mode: str = Field(default="general", pattern="^(general|practice_weak_areas)$")
@@ -137,22 +137,29 @@ def _claim_pool_mock(db: Session, user_id: int, major_key_str: str,
     with _POOL_CLAIM_LOCK:
         seen = select(MockAttempt.mock_id).where(
             MockAttempt.student_id == user_id)
-        row = db.execute(
+        rows = db.execute(
             select(GeneratedMock)
             .where(GeneratedMock.status == "pending_use")
             .where(GeneratedMock.difficulty == difficulty)
             .where(GeneratedMock.major.in_(labels))
             .where(GeneratedMock.id.not_in(seen))
             .order_by(GeneratedMock.created_at.asc())
-            .limit(1)
-        ).scalars().first()
-        if row is None:
-            return None
-        row.status = "claimed"
-        row.student_id = user_id
-        row.grade = grade or row.grade
+        ).scalars().all()
+        from app.rag.pool_core import verified_booklet
+        for row in rows:
+            if not verified_booklet(row.questions):
+                db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
+                    GeneratedMock.status == "pending_use").values(status="quarantined"))
+                continue
+            claimed = db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
+                GeneratedMock.status == "pending_use").values(
+                    status="claimed", student_id=user_id, grade=grade or row.grade))
+            if claimed.rowcount == 1:
+                db.commit()
+                db.refresh(row)
+                return row
         db.commit()
-        return row
+        return None
 
 
 def _persist_mock(db: Session, *, user_id: int, questions: List[dict],
@@ -180,7 +187,16 @@ def generate_mock(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    check_ai_quota(current_user.id, "mock_generate")
+    consume_ai_use(current_user.id, "mock_generate")
+    try:
+        return _generate_reserved_mock(config, current_user, db)
+    except Exception:
+        # Provider, retrieval and persistence failures must all refund the reservation.
+        release_ai_use(current_user.id, "mock_generate")
+        raise
+
+
+def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session):
     poolable, plan, major = _resolve_plan(config)
     grade = (config.student or {}).get("grade") or ""
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
@@ -190,7 +206,7 @@ def generate_mock(
         claimed = _claim_pool_mock(db, current_user.id,
                                    _major_key(major), config.difficulty, grade)
         if claimed is not None:
-            record_ai_use(current_user.id, "mock_generate")
+            # Quota already reserved atomically at entry - nothing more to record.
             logger.info("Served mock %d from the pre-generated pool for user %d.",
                         claimed.id, current_user.id)
             return {
@@ -219,7 +235,9 @@ def generate_mock(
         current_user.id, plan,
         topics=config.topics, difficulty=config.difficulty,
     )
-    if not questions:
+    if questions:
+        questions = mock_generation.verify_and_repair_booklet(questions, current_user.id, difficulty=config.difficulty)
+    if not questions or any(sum(q.get("subject") == row["name"] for q in questions) != row["questions"] for row in plan):
         raise HTTPException(status_code=502,
                             detail="مدل زبانی دفترچه معتبری تولید نکرد؛ دوباره تلاش کنید.")
 
@@ -232,7 +250,7 @@ def generate_mock(
                f"آزمون آزمایشی بوم — {now}"),
         status="claimed",  # live rows are assigned immediately, never pooled
     )
-    record_ai_use(current_user.id, "mock_generate")
+    # Quota already reserved at entry.
     logger.info("Generated mock %d with %d questions for user %d.",
                 mock.id, len(questions), current_user.id)
     return {
@@ -273,7 +291,7 @@ def _score(questions: List[dict], answers: dict) -> dict:
             stat["wrong"] += 1
     raw = correct - wrong / 3.0
     total = len(questions)
-    percent = max(0.0, round(100.0 * raw / total, 1)) if total else 0.0
+    percent = round(100.0 * raw / total, 1) if total else 0.0
     return {
         "correct": correct, "wrong": wrong, "blank": blank,
         "raw_score": round(raw, 2), "percent": percent,
@@ -289,7 +307,7 @@ def _score(questions: List[dict], answers: dict) -> dict:
     }
 
 
-@router.get("/{mock_id}")
+@router.get("/{mock_id:int}")
 def get_mock(
     mock_id: int,
     current_user: User = Depends(get_current_user),
@@ -340,7 +358,24 @@ def get_mock(
 
 class SubmitPayload(BaseModel):
     answers: dict = Field(default_factory=dict)  # {"1": 2, "2": "", ...}
-    duration_seconds: int = 0
+    duration_seconds: int = Field(default=0, ge=0)
+
+    @field_validator("answers", mode="before")
+    @classmethod
+    def validate_answers(cls, values):
+        if not isinstance(values, dict):
+            raise ValueError("answers must be a question-to-option map")
+        out = {}
+        for key, value in values.items():
+            if value is None or (isinstance(value, str) and value in ("", "null")):
+                out[str(key)] = None
+                continue
+            if isinstance(value, str) and value in ("0", "1", "2", "3"):
+                value = int(value)
+            if type(value) is not int or not 0 <= value <= 3:
+                raise ValueError("answer must be an option index from 0 to 3, or blank")
+            out[str(key)] = value
+        return out
 
 
 @router.post("/{mock_id}/submit")
@@ -366,6 +401,17 @@ def submit_mock(
     questions = _load_questions(mock)
     if not questions:
         raise HTTPException(status_code=500, detail="دفترچه آزمون خراب است")
+
+    # A database write lock serializes submissions for this student across processes.
+    # This preserves historical rows while making retries return the first result.
+    db.execute(update(User).where(User.id == current_user.id).values(rating=User.rating))
+    prior = db.execute(select(MockAttempt).where(MockAttempt.student_id == current_user.id,
+        MockAttempt.mock_id == mock_id).order_by(MockAttempt.id).limit(1)).scalar_one_or_none()
+    if prior is not None:
+        saved = SubmitPayload(answers=json.loads(prior.answers or "{}"), duration_seconds=prior.duration_seconds or 0)
+        response = _submission_response(prior, _score(questions, saved.answers), questions, saved)
+        db.rollback()
+        return response
 
     result = _score(questions, payload.answers)
 
@@ -411,6 +457,10 @@ def submit_mock(
         logger.info("Challenge invite %s auto-completed by submit",
                     challenge_invite.invite_code)
 
+    return _submission_response(attempt, result, questions, payload)
+
+
+def _submission_response(attempt, result, questions, payload):
     return {
         "attempt_id": attempt.id,
         "score": result["percent"],

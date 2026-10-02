@@ -8,7 +8,9 @@ Also implements ``GET /api/boom/last-mock-results`` which the frontend's
 Exams page already calls but which never existed on the backend.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
+import json
+from collections import defaultdict
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends
@@ -16,8 +18,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth.database import Assessment, User, WrongAnswer
+from app.auth.database import Assessment, User, WrongAnswer, MockAttempt, GeneratedMock, StudySession, StudentProfile
 from app.auth.deps import get_current_user, get_db
+from app.rag.knowledge_graph import build_graph
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
@@ -105,6 +108,147 @@ def list_wrong_answers(
             for r in rows
         ],
     }
+
+
+class WeakTopicOut(BaseModel):
+    topic: str
+    wrong_count: int
+    blanks: int
+    # Normalized 0..1: wrong_count relative to the user's worst topic within
+    # the same subject (no attempts-per-topic table exists yet, so this is
+    # raw miss-count normalization, not accuracy).
+    wrongness: float
+
+
+class WeakSubjectOut(BaseModel):
+    subject: str
+    wrong_count: int
+    topics: List[WeakTopicOut]
+
+
+@router.get("/weakness-map")
+def weakness_map(
+    days: int = 90,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """The student's weakness heatmap, grouped by (subject, topic).
+
+    Built purely from wrong_answers rows (every miss of any test lands
+    there): counts per (subject, topic) pair plus a simple normalized
+    "wrongness" score per topic - the topic's wrong count relative to the
+    user's worst topic in the same subject (0..1). There is no
+    attempts-per-topic tracking in the schema, so this deliberately uses raw
+    wrong counts rather than inventing a denominator.
+    """
+    since = datetime.utcnow() - timedelta(days=max(1, min(days, 365)))
+    rows = db.execute(
+        select(WrongAnswer.subject, WrongAnswer.topic, WrongAnswer.was_blank)
+        .where(WrongAnswer.student_id == current_user.id)
+        .where(WrongAnswer.created_at >= since)
+    ).all()
+
+    # subject -> topic -> {"wrong": n, "blanks": n}
+    grouped: dict[str, dict[str, dict]] = {}
+    for subject, topic, was_blank in rows:
+        tkey = (topic or "").strip() or "بدون مبحث"
+        stats = grouped.setdefault(subject, {}).setdefault(
+            tkey, {"wrong": 0, "blanks": 0})
+        stats["wrong"] += 1
+        if was_blank:
+            stats["blanks"] += 1
+
+    subjects: List[WeakSubjectOut] = []
+    for subject, topics in grouped.items():
+        peak = max((s["wrong"] for s in topics.values()), default=0) or 1
+        topic_list = sorted(
+            (
+                WeakTopicOut(
+                    topic=t,
+                    wrong_count=s["wrong"],
+                    blanks=s["blanks"],
+                    wrongness=round(s["wrong"] / peak, 2),
+                )
+                for t, s in topics.items()
+            ),
+            key=lambda t: (-t.wrong_count, t.topic),
+        )
+        subjects.append(WeakSubjectOut(
+            subject=subject,
+            wrong_count=sum(t.wrong_count for t in topic_list),
+            topics=topic_list,
+        ))
+    subjects.sort(key=lambda s: (-s.wrong_count, s.subject))
+
+    return {
+        "days": days,
+        "total_wrong": sum(s.wrong_count for s in subjects),
+        "subjects": [s.model_dump() for s in subjects],
+    }
+
+
+@router.get("/knowledge-graph")
+def knowledge_graph(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the authenticated student's full three-year curriculum graph.
+
+    Curriculum structure is shared and deterministic; opened state and
+    mastery evidence are always calculated from this user's records only.
+    """
+    major = "ریاضی فیزیک"
+    profile_row = db.query(StudentProfile).filter_by(user_id=current_user.id).first()
+    if profile_row and profile_row.major:
+        major = profile_row.major
+
+    evidence = defaultdict(lambda: {"attempted": 0, "correct": 0, "wrong": 0})
+    attempts = db.query(MockAttempt, GeneratedMock).join(
+        GeneratedMock, MockAttempt.mock_id == GeneratedMock.id
+    ).filter(MockAttempt.student_id == current_user.id).all()
+    for attempt, mock in attempts:
+        try:
+            answers = json.loads(attempt.answers or "{}")
+            questions = json.loads(mock.questions or "[]")
+        except (TypeError, ValueError):
+            continue
+        for question in questions:
+            subject = str(question.get("subject") or "")
+            topic = str(question.get("topic") or "")
+            if not subject:
+                continue
+            answer = answers.get(str(question.get("_id", question.get("id"))))
+            row = evidence[(subject, topic)]
+            row["attempted"] += 1
+            if answer in (None, "", "null"):
+                row["wrong"] += 1
+            elif str(answer) == str(question.get("answer")):
+                row["correct"] += 1
+            else:
+                row["wrong"] += 1
+
+    # Manual practice mistakes fill topic gaps without double-counting mock
+    # mistakes, which are already represented by MockAttempt above.
+    for mistake in db.query(WrongAnswer).filter(
+        WrongAnswer.student_id == current_user.id,
+        WrongAnswer.source.notin_(["mock", "arena"]),
+    ).all():
+        row = evidence[(mistake.subject, mistake.topic or "")]
+        row["attempted"] += 1
+        row["wrong"] += 1
+
+    for row in evidence.values():
+        row["accuracy"] = round(row["correct"] / row["attempted"], 3) if row["attempted"] else None
+
+    read_keys = set()
+    for session in db.query(StudySession).filter(
+        StudySession.student_id == current_user.id,
+        StudySession.completion_status == "completed",
+    ).all():
+        if session.subject_name:
+            read_keys.add((session.subject_name, session.topic_name or ""))
+
+    return build_graph(major, dict(evidence), read_keys)
 
 
 class MockSubjectResult(BaseModel):

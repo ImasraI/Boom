@@ -1,6 +1,8 @@
+import { flushProgress } from "../progressSync";
+import { accountStorage } from "../accountStorage";
 import { useEffect, useMemo, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
-import { apiUrl, authHeaders } from "../api"
+import { apiUrl, authHeaders, readApiError } from "../api"
 import GroqChart from "../components/GroqChart"
 import {
   addDays,
@@ -34,7 +36,7 @@ const HOURS = Array.from({ length: SLOT_COUNT }, (_, i) => {
   const val = HOUR_START + i * 0.5
   const h = Math.floor(val) % 24
   const m = Math.round((val - Math.floor(val)) * 60)
-  return `${h}:${m === 0 ? "00" : m}`
+  return `${h}:${String(m).padStart(2, "0")}`
 })
 
 const SLOT_HEIGHT = 32
@@ -67,6 +69,12 @@ const PERSIAN_MONTHS = [
 type BlockType = "class" | "study" | "test" | "break"
 
 interface ScheduleBlock {
+  source_ref?: string;
+  description?: string;
+  subject?: string;
+  topic?: string;
+  task_type?: string;
+  count?: number;
   id: string
   day: number
   startHour: number
@@ -229,7 +237,7 @@ function resolveColor(color: string) {
 function formatTime(val: number) {
   const h = Math.floor(val) % 24
   const m = Math.round((val - Math.floor(val)) * 60)
-  return `${h}:${m === 0 ? "00" : m}`
+  return `${h}:${String(m).padStart(2, "0")}`
 }
 
 function parseBlocks(raw: string): ScheduleBlock[] {
@@ -246,7 +254,7 @@ function parseBlocks(raw: string): ScheduleBlock[] {
 }
 
 function loadBlocks(weekStart: Date): ScheduleBlock[] {
-  const raw = localStorage.getItem(STORAGE_PREFIX + toISO(weekStart))
+  const raw = accountStorage.getItem(STORAGE_PREFIX + toISO(weekStart))
   return raw ? parseBlocks(raw) : []
 }
 
@@ -358,6 +366,7 @@ export default function Schedule({
   const [drag, setDrag] = useState<DragState | null>(null)
   const [generating, setGenerating] = useState(false)
   const [generatingWeeks, setGeneratingWeeks] = useState<Set<string>>(new Set())
+  const [planMessage, setPlanMessage] = useState("")
   const genBusyRef = useRef<Record<string, boolean>>({})
   const genAbortRef = useRef<Record<string, AbortController>>({})
   const skipPersistRef = useRef(true)
@@ -386,18 +395,18 @@ export default function Schedule({
   // Migrate the old single-week key ("boom-weekly-schedule") into the
   // current week's per-week store, then drop it.
   useEffect(() => {
-    const legacy = localStorage.getItem(LEGACY_KEY)
+    const legacy = accountStorage.getItem(LEGACY_KEY)
     if (legacy) {
       try {
         const arr = JSON.parse(legacy)
         if (Array.isArray(arr)) {
           const key = STORAGE_PREFIX + toISO(todayWeekStart)
-          if (!localStorage.getItem(key)) localStorage.setItem(key, legacy)
+          if (!accountStorage.getItem(key)) accountStorage.setItem(key, legacy)
         }
       } catch {
         /* ignore malformed legacy data */
       }
-      localStorage.removeItem(LEGACY_KEY)
+      accountStorage.removeItem(LEGACY_KEY)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -409,10 +418,17 @@ export default function Schedule({
     setEditingBlock(null)
     setEditingStatic(null)
     setShowModal(false)
-    // Empty weeks get auto-filled once with the standard generated plan
-    // (unless the user explicitly cleared them, tracked via the marker).
-    if (loaded.length === 0 && !loadGeneratedMarkers()[toISO(weekStart)]) {
+    // Empty FUTURE weeks get auto-filled once with the standard generated
+    // plan (unless the user explicitly cleared them, tracked via the marker).
+    // The current and past weeks must NOT auto-fill: mid-week generation
+    // crams the whole week's quota into the remaining days (past days are
+    // capacity-zero), which produced a grid full of thin blocks with no
+    // explanation. The user generates those weeks explicitly via بازسازی.
+    const isCurrentOrPast = weekDiff(weekStart, todayWeekStart) <= 0
+    if (loaded.length === 0 && !isCurrentOrPast && !loadGeneratedMarkers()[toISO(weekStart)]) {
       void generateWeekPlan(weekStart)
+    } else if (loaded.length === 0 && isCurrentOrPast && !loadGeneratedMarkers()[toISO(weekStart)] && !generating) {
+      setPlanMessage("برنامهٔ این هفته هنوز ساخته نشده. با دکمهٔ «بازسازی» بسازش.")
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekStart])
@@ -425,12 +441,12 @@ export default function Schedule({
       return
     }
     const key = STORAGE_PREFIX + toISO(weekStartRef.current)
-    localStorage.setItem(key, JSON.stringify(blocks))
+    accountStorage.setItem(key, JSON.stringify(blocks))
   }, [blocks])
 
   // Persist static templates separately (they are global / yearly).
   useEffect(() => {
-    localStorage.setItem(STATIC_KEY, JSON.stringify(statics))
+    accountStorage.setItem(STATIC_KEY, JSON.stringify(statics))
   }, [statics])
 
   const staticInstances = useMemo(
@@ -469,21 +485,30 @@ export default function Schedule({
     
     setGeneratingWeeks(prev => new Set(prev).add(key))
     setGenerating(true)
+    setPlanMessage("")
     
+    const requestToken = localStorage.getItem("boom-token");
     try {
+      if (!await flushProgress()) throw new Error("ثبت پیشرفت انجام نشد؛ اتصال را بررسی و دوباره تلاش کنید.");
+      if (localStorage.getItem("boom-token") !== requestToken) return;
       const resp = await fetch(apiUrl("/api/boom/weekly-plan"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           week_start: key,
-          daily_hours: 4,
+          daily_hours: Math.max(0.5, Math.min(16, Number(
+            (userData?.studyHours || "4").replace(/[۰-۹٠-٩]/g, digit =>
+              String("۰۱۲۳۴۵۶۷۸۹".includes(digit) ? "۰۱۲۳۴۵۶۷۸۹".indexOf(digit) : "٠١٢٣٤٥٦٧٨٩".indexOf(digit))
+            ).match(/[0-9]+(?:\.[0-9]+)?/)?.[0] || 4))),
           student: userData ?? undefined,
-          statics: statics,
+          statics: staticInstancesForWeek(statics, ws),
         }),
         signal: abortController.signal,
       })
-      if (!resp.ok) return
+      if (!resp.ok) throw new Error(await readApiError(resp, "ساخت برنامه انجام نشد؛ دوباره تلاش کنید."))
       const data: any = await resp.json()
+      if (localStorage.getItem("boom-token") !== requestToken) return
+      if (data.unscheduled?.length) setPlanMessage(`${data.unscheduled.length} فعالیت در زمان آزاد جا نشد. زمان آزاد یا تعهدات ثابت را بازبینی کنید.`)
       const list: ScheduleBlock[] = Array.isArray(data.blocks)
         ? data.blocks.map(
             (b: any): ScheduleBlock => ({
@@ -492,12 +517,14 @@ export default function Schedule({
               startHour: Number(b.startHour) || 0,
               duration: Number(b.duration) || 1,
               title: String(b.title ?? "فعالیت"),
+              source_ref: b.source_ref, subject: b.subject, topic: b.topic, task_type: b.task_type, description: b.description,
               type: (b.type in TYPE_LABELS ? b.type : "study") as BlockType,
               color: resolveColor(String(b.color ?? TYPE_COLORS.study)),
+              count: b.count,
             }),
           )
         : []
-      if (list.length) {
+      if (Array.isArray(data.blocks)) {
         saveWeekBlocks(key, list)
         markWeekGenerated(key)
         if (toISO(weekStartRef.current) === key) setBlocks(list)
@@ -505,6 +532,8 @@ export default function Schedule({
     } catch (error: any) {
       if (error.name === 'AbortError') {
         console.log(`Generation cancelled for week ${key}`)
+      } else if (localStorage.getItem("boom-token") === requestToken) {
+        setPlanMessage(error instanceof Error ? error.message : "خطای ارتباط")
       }
     } finally {
       genBusyRef.current[key] = false
@@ -768,6 +797,7 @@ export default function Schedule({
 
   return (
     <div className="h-full flex flex-col bg-[var(--surface)]">
+      {planMessage && <p role="status" className="p-3 text-sm bg-[var(--card)] text-[var(--text)]">{planMessage}</p>}
       <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-12 pb-3">
         <div className="flex items-center gap-3">
           <button
@@ -952,6 +982,7 @@ export default function Schedule({
                   style={
                     {
                       "--block-color": resolveColor(b.color),
+                      "--block-h": `${b.duration * 2 * SLOT_HEIGHT - 8}px`,
                       top: `${(b.startHour - HOUR_START) * 2 * SLOT_HEIGHT + 4}px`,
                       height: `${b.duration * 2 * SLOT_HEIGHT - 8}px`,
                       right: `calc(${(b.day * 100) / DAYS.length}% + 4px)`,
@@ -959,9 +990,9 @@ export default function Schedule({
                     } as React.CSSProperties
                   }
                 >
-                  <div className="font-bold flex items-center gap-1 pointer-events-none leading-tight break-words [overflow-wrap:anywhere]">
-                    <span className="text-[10px] leading-none flex-shrink-0">↻</span>
-                    <span className="min-w-0 break-words [overflow-wrap:anywhere]">{b.title}</span>
+                  <div className="font-bold truncate flex items-center gap-1 pointer-events-none">
+                    <span className="text-[10px] leading-none">↻</span>
+                    <span className="truncate">{b.title}</span>
                   </div>
                   <div className="text-[10px] opacity-80 pointer-events-none">
                     {formatTime(b.startHour)} -{" "}
@@ -979,6 +1010,7 @@ export default function Schedule({
                   style={
                     {
                       "--block-color": resolveColor(b.color),
+                      "--block-h": `${b.duration * 2 * SLOT_HEIGHT - 8}px`,
                       top: `${(b.startHour - HOUR_START) * 2 * SLOT_HEIGHT + 4}px`,
                       height: `${b.duration * 2 * SLOT_HEIGHT - 8}px`,
                       right: `calc(${(b.day * 100) / DAYS.length}% + 4px)`,
@@ -986,7 +1018,7 @@ export default function Schedule({
                     } as React.CSSProperties
                   }
                 >
-                  <div className="font-bold pointer-events-none leading-tight break-words [overflow-wrap:anywhere]">
+                  <div className="font-bold truncate pointer-events-none">
                     {b.title}
                   </div>
                   <div className="text-[10px] opacity-80 pointer-events-none">
@@ -1044,14 +1076,14 @@ export default function Schedule({
                 <label className="block text-xs text-[var(--muted)] mb-1 text-right">
                   عنوان
                 </label>
-                <textarea
-                  rows={1}
+                <input
+                  type="text"
                   value={newBlock.title}
                   onChange={(e) =>
                     setNewBlock({ ...newBlock, title: e.target.value })
                   }
                   placeholder="مثال: ریاضی"
-                  className="w-full border rounded-xl px-3 py-2 text-sm text-right bg-[var(--card)] text-[var(--text)] resize-none break-words [overflow-wrap:anywhere] leading-relaxed"
+                  className="w-full border rounded-xl px-3 py-2 text-sm text-right bg-[var(--card)] text-[var(--text)]"
                 />
               </div>
 

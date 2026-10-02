@@ -5,14 +5,13 @@ Path) so the caller can hand it to the vision pipeline regardless of
 whether R2 or local disk is active.
 """
 
-import sys
 from pathlib import Path
 from typing import Any, List, cast
 
 import pymupdf
 
 from app.utils.logger import get_logger
-from app.utils.storage import put_object, get_object
+from app.utils.storage import put_object
 
 logger = get_logger(__name__)
 

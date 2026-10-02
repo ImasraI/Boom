@@ -1,21 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
+import { celebrate } from "../components/Experience";
 import React from "react";
 import { NavFn, SignupData, Task } from "../types";
 import { SUBJECT_COLORS } from "../data";
 import {
   homeTasksForDate,
   postponeToTomorrow,
+  reportTaskActual,
   saveTaskEdit,
   toggleDone,
   type HomeTask,
 } from "../homeTasks";
 import { SCHEDULE_CHANGED_EVENT, toISO } from "../scheduleStore";
+import WeaknessMap from "../components/WeaknessMap";
 
-const STREAK = 7;
-const KONKOOR_DATE = "2027-06-20";
+import { currentStreak } from "../studyStats";
+import { apiUrl, authHeaders } from "../api";
 
 function daysUntil(d: string) {
-  const diff = new Date(d).getTime() - new Date().setHours(0, 0, 0, 0);
+  const diff = new Date(d + "T00:00:00").getTime() - new Date().setHours(0, 0, 0, 0);
   return Math.max(0, Math.ceil(diff / 86400000));
 }
 
@@ -168,17 +171,73 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
             </button>
           </div>
         ) : (
-          <div className="flex gap-2.5">
-            <button onClick={onPostpone}
-              className="flex-1 py-3.5 rounded-2xl border border-[#E5DDD4] text-[var(--muted)] font-bold text-[13px] hover:bg-[#F0EBE3] transition-colors">
-              تعویق به فردا
-            </button>
-            <button onClick={() => setEditing(true)}
-              className="flex-1 py-3.5 rounded-2xl bg-[#C4714A] text-[#F8F6F2] font-bold text-[13px] hover:bg-[#A85C38] transition-colors">
-              ویرایش
-            </button>
-          </div>
+          <>
+            <ReportActualBlock task={task} onClose={onClose} />
+            <div className="flex gap-2.5">
+              <button onClick={onPostpone}
+                className="flex-1 py-3.5 rounded-2xl border border-[#E5DDD4] text-[var(--muted)] font-bold text-[13px] hover:bg-[#F0EBE3] transition-colors">
+                تعویق به فردا
+              </button>
+              <button onClick={() => setEditing(true)}
+                className="flex-1 py-3.5 rounded-2xl bg-[#C4714A] text-[#F8F6F2] font-bold text-[13px] hover:bg-[#A85C38] transition-colors">
+                ویرایش
+              </button>
+            </div>
+          </>
         )}
+      </div>
+    </div>
+  );
+}
+
+const REPORT_PRESETS = [15, 30, 45, 60, 90];
+
+/** Roadmap §3 quick report: actual minutes + honest status, 3 taps.
+ * Replaces the binary checkbox as the *optional* richer path. */
+function ReportActualBlock({ task, onClose }: { task: HomeTask; onClose: () => void }) {
+  const planMin = Math.max(1, Math.round(task.planBlock.duration * 60));
+  const [minutes, setMinutes] = useState(planMin);
+  const [saved, setSaved] = useState(false);
+
+  function report(status: "completed" | "partially_completed" | "missed") {
+    reportTaskActual(toISO(new Date()), task, { status, actualMinutes: minutes });
+    setSaved(true);
+    setTimeout(onClose, 450);
+  }
+
+  if (saved) {
+    return (
+      <div className="mb-3 p-3 rounded-2xl bg-[#EAF3EA] text-[12px] font-bold text-[#2F6B3A] text-center">
+        ثبت شد — برنامه‌ریز آن را می‌بیند
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-5 p-4 rounded-2xl bg-[var(--card)] border border-[var(--border)]">
+      <p className="text-[11px] font-bold text-[var(--muted-2)] mb-2">واقعاً چقدر انجام شد؟ (اختیاری)</p>
+      <div className="flex gap-1.5 mb-3" dir="ltr">
+        {REPORT_PRESETS.map((m) => (
+          <button key={m} onClick={() => setMinutes(m)}
+            className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
+              minutes === m ? "bg-[#C4714A] text-[#F8F6F2]" : "bg-[#F0EBE3] text-[var(--muted)]"}`}>
+            {m}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-1.5">
+        <button onClick={() => report("completed")}
+          className="flex-1 py-2 rounded-xl bg-[#3E7C4F] text-white text-[11px] font-bold hover:bg-[#2F6B3A] transition-colors">
+          کامل
+        </button>
+        <button onClick={() => report("partially_completed")}
+          className="flex-1 py-2 rounded-xl bg-[#C9862B] text-white text-[11px] font-bold hover:bg-[#A86F1E] transition-colors">
+          ناقص
+        </button>
+        <button onClick={() => report("missed")}
+          className="flex-1 py-2 rounded-xl bg-[#B0523B] text-white text-[11px] font-bold hover:bg-[#8F3F2C] transition-colors">
+          نشد
+        </button>
       </div>
     </div>
   );
@@ -233,7 +292,17 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
   const todayISO = toISO(new Date());
   const [tasks, setTasks] = useState<HomeTask[]>(() => homeTasksForDate(todayISO));
   const done = tasks.filter(t => t.done).length;
-  const daysLeft = daysUntil(KONKOOR_DATE);
+  const STREAK = currentStreak();
+  const [nextExamDate, setNextExamDate] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    fetch(apiUrl("/api/boom/plan-overview"), { headers: authHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (active) setNextExamDate(data?.exams?.[0]?.date || null); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+  const daysLeft = nextExamDate ? daysUntil(nextExamDate) : "—";
   const [showTime, setShowTime] = useState(false);
   const [selectedTask, setSelectedTask] = useState<HomeTask | null>(null);
   const [quizTask, setQuizTask] = useState<HomeTask | null>(null);
@@ -246,7 +315,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
   const donePct = tasks.length ? done / tasks.length : 0;
   const heroMode: "ai" | "countdown" | "circular" = isFirstWeek ? "ai" : donePct < 0.5 ? "countdown" : "circular";
 
-  const AI_LEVEL = 47;
+  const AI_LEVEL = Math.round(donePct * 100);
 
   // Re-derive whenever the weekly plan or statics change anywhere in the app
   // (Schedule edits, AI chat plan_update) or the day rolls over.
@@ -265,6 +334,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
       setQuizTask(task);
     } else {
       toggleDone(todayISO, task);
+      if (!task.done) celebrate("این قدم ثبت شد. همین‌طور ادامه بده.");
       refreshTasks();
     }
   }
@@ -291,6 +361,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
   function handleQuizSubmit(_time: string, _pct: string) {
     if (!quizTask) return;
     toggleDone(todayISO, quizTask, true);
+    celebrate("تمرین امروزت ثبت شد.");
     refreshTasks();
     setQuizTask(null);
   }
@@ -299,21 +370,21 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
     <div className="min-h-screen bg-[#F8F6F2] pb-32">
 
       {/* ── Hero card ── */}
-      <div className="mx-4 mt-6">
-        <div className="bg-[var(--card)] rounded-3xl p-5 shadow-sm border border-[var(--border)] flex flex-col">
+      <div className="border-b border-[var(--border)]">
+        <div className="study-hero flex flex-col">
 
           {/* Top row: [settings + greeting] right | [streak] left */}
           <div className="flex items-center justify-between">
             {/* Right side: settings button + greeting (RTL: first = rightmost) */}
             <div className="flex items-center gap-2.5">
-              <button onClick={() => { nav("profile"); }}
+              <button aria-label="تنظیمات پروفایل" onClick={() => { nav("profile"); }}
                 className="w-9 h-9 rounded-xl bg-[#F0EBE3] flex items-center justify-center text-[var(--muted)] hover:bg-[#E5DDD4] transition-colors flex-shrink-0">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3"/>
                   <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                 </svg>
               </button>
-              <button onClick={logout}
+              <button aria-label="خروج از حساب" onClick={logout}
                 className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition-colors flex-shrink-0">
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
@@ -342,14 +413,14 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <p className="text-[11px] font-bold tracking-[0.08em] text-[var(--muted-2)]">شخصی‌سازی هوش مصنوعی</p>
+                    <p className="text-[11px] font-bold tracking-[0.08em] text-[var(--muted-2)]">پیشرفت امروز</p>
                     <div className="flex items-end gap-2 mt-1">
                       <span className="text-3xl font-bold text-[var(--text)]">{AI_LEVEL}٪</span>
-                      <span className="text-[12px] text-[var(--muted)] mb-0.5">از تو یاد گرفته</span>
+                      <span className="text-[12px] text-[var(--muted)] mb-0.5">از برنامه انجام شده</span>
                     </div>
                   </div>
-                  <div className="w-12 h-12 rounded-2xl bg-[#1A1108] flex items-center justify-center">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F8F6F2" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <div className="w-12 h-12 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><line x1="9" y1="21" x2="15" y2="21"/><line x1="10" y1="17" x2="10" y2="21"/><line x1="14" y1="17" x2="14" y2="21"/>
                     </svg>
                   </div>
@@ -362,10 +433,10 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                 <div className="mt-4 pt-4 border-t border-[var(--border)] flex items-center justify-between">
                   <div>
                     <p className="text-[10px] text-[var(--muted-2)]">XP امروز</p>
-                    <p className="text-xl font-bold text-[#6B9E7A]">۴۰</p>
+                    <p className="text-xl font-bold text-[#6B9E7A]">{done * 10}</p>
                   </div>
                   <div className="text-left">
-                    <p className="text-[10px] text-[var(--muted-2)]">روز تا کنکور</p>
+                    <p className="text-[10px] text-[var(--muted-2)]">روز تا آزمون ثبت‌شده</p>
                     <p className="text-xl font-bold text-[#C4714A]">{daysLeft}</p>
                   </div>
                 </div>
@@ -375,7 +446,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
             {heroMode === "countdown" && (
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-bold text-[var(--muted-2)] mb-1">روز تا کنکور</p>
+                  <p className="text-[10px] font-bold text-[var(--muted-2)] mb-1">روز تا آزمون ثبت‌شده</p>
                   <p className="text-[72px] font-bold text-[var(--text)] leading-none tabular-nums">{daysLeft}</p>
                   <p className="text-[11px] text-[var(--muted-2)] mt-1">{[userData.examYear, userData.major].filter(Boolean).join(" · ") || "پروفایل ناقص"}</p>
                 </div>
@@ -390,7 +461,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
               <div className="flex items-center justify-between">
                 <CircularProgress done={done} total={tasks.length} />
                 <div className="text-left">
-                  <p className="text-[10px] font-bold text-[var(--muted-2)]">روز تا کنکور</p>
+                  <p className="text-[10px] font-bold text-[var(--muted-2)]">روز تا آزمون ثبت‌شده</p>
                   <p className="text-[42px] font-bold text-[#C4714A] leading-none">{daysLeft}</p>
                   <p className="text-[11px] text-[var(--muted-2)] mt-1">{userData.examYear || "—"}</p>
                 </div>
@@ -400,9 +471,14 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
         </div>
       </div>
 
+      {/* ── Weakness map (from wrong_answers across all tests) ── */}
+      <div className="border-b border-[var(--border)]">
+        <WeaknessMap />
+      </div>
+
       {/* ── Tasks ── */}
-      <div className="px-4 mt-5">
-        <div className="flex items-center justify-between mb-3">
+      <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-4 pb-2">
+        <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
           <button onClick={() => setShowTime(s => !s)}
             className="text-[11px] font-bold text-[var(--muted-2)] bg-[#F0EBE3] px-3 py-1 rounded-full hover:bg-[#E5DDD4] transition-colors">
             {showTime ? "نمایش مدت" : "نمایش ساعت"}
@@ -410,9 +486,9 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
           <h2 className="font-display text-[18px] text-[var(--text)]">تکالیف امروز</h2>
         </div>
 
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col">
           {tasks.filter(t => !t.skipped).length === 0 && (
-            <div className="bg-[var(--card)] rounded-2xl border border-dashed border-[#D5CCC3] p-6 text-center">
+            <div className="py-8 text-center">
               <p className="text-[13px] font-semibold text-[var(--muted)]">برنامه‌ای برای امروز نیست</p>
               <p className="text-[11px] text-[var(--muted-2)] mt-1 leading-relaxed">
                 از «برنامه هفتگی» برنامه‌ات را بساز یا از بوم AI بخواه برایت بریزد؛ همین‌جا نشان داده می‌شود.
@@ -435,8 +511,8 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
             const isPostponing = postponingId === task.id;
             return (
               <div key={task.id}
-                className={`bg-[var(--card)] rounded-2xl border flex items-stretch overflow-hidden transition-all duration-[380ms] ${
-                  task.done ? "border-[var(--border)] opacity-55" : "border-[var(--border)] hover:border-[#E5DDD4] shadow-sm"
+                className={`task-tile flex items-stretch overflow-hidden border-b border-[var(--border)] last:border-b-0 transition-all duration-[380ms] ${
+                  task.done ? "opacity-55" : "hover:bg-[var(--surface-2)]"
                 }`}
                 style={isPostponing ? {
                   opacity: 0, transform: "translateX(100%)", maxHeight: 0, marginBottom: 0, overflow: "hidden",
@@ -445,6 +521,8 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                 {/* Checkbox — rightmost in RTL */}
                 <div className="flex items-center pr-3.5">
                   <button onClick={() => handleCheckbox(task)}
+                    aria-label={`${task.done ? "لغو انجام" : "انجام شد"}: ${task.title} (${task.scheduledTime})`}
+                    aria-pressed={task.done}
                     className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all flex-shrink-0 ${
                       task.done ? "border-[#C4714A] bg-[#C4714A]" : isQuizOrTest ? "border-[#9B7AAD] hover:border-[#7A4A9A]" : "border-[#D5CCC3] hover:border-[#C4714A]"
                     }`}
@@ -495,7 +573,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
       </div>
 
       {/* ── 3 Action buttons ── */}
-      <div className="px-4 mt-4 grid grid-cols-3 gap-2.5">
+      <div className="bg-[var(--card)] grid grid-cols-3 [&>*+*]:border-r [&>*+*]:border-[var(--border)]">
         {[
           { label: "ریکاوری", sub: "خواب و خلق‌وخو", screen: "recovery" as const, bg: "#EDF5F0", color: "#6B9E7A",
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> },
@@ -505,7 +583,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
         ].map(({ label, sub, screen, bg, color, icon }) => (
           <button key={label} onClick={() => { nav(screen); }}
-            className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-3 flex flex-col items-center gap-2 hover:border-[#E5DDD4] hover:shadow-sm active:scale-95 transition-all">
+            className="p-4 flex flex-col items-center gap-2 hover:bg-[var(--surface-2)] transition-colors">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "var(--surface-2)", color: "var(--text)" }}>
               {icon}
             </div>
@@ -531,4 +609,3 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
     </div>
   );
 }
-

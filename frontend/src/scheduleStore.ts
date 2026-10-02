@@ -1,3 +1,4 @@
+import { accountStorage } from "./accountStorage";
 /**
  * Shared weekly-schedule storage + date helpers.
  *
@@ -19,6 +20,10 @@ export const GENERATED_KEY = "boom-weekly-generated"
 export type BlockType = "class" | "study" | "test" | "break"
 
 export interface StoredBlock {
+  source_ref?: string;
+  subject?: string;
+  topic?: string;
+  task_type?: string;
   id?: string
   day: number
   startHour: number
@@ -102,25 +107,25 @@ function parseArray<T>(raw: string | null): T[] {
 }
 
 export function loadWeekBlocks(weekISO: string): StoredBlock[] {
-  return parseArray<StoredBlock>(localStorage.getItem(STORAGE_PREFIX + weekISO))
+  return parseArray<StoredBlock>(accountStorage.getItem(STORAGE_PREFIX + weekISO))
 }
 
 export function saveWeekBlocks(weekISO: string, blocks: StoredBlock[]) {
-  localStorage.setItem(STORAGE_PREFIX + weekISO, JSON.stringify(blocks))
+  accountStorage.setItem(STORAGE_PREFIX + weekISO, JSON.stringify(blocks))
   notifyScheduleChanged()
 }
 
 export function loadStaticTemplates(): StoredStatic[] {
-  return parseArray<StoredStatic>(localStorage.getItem(STATIC_KEY))
+  return parseArray<StoredStatic>(accountStorage.getItem(STATIC_KEY))
 }
 
 export function saveStaticTemplates(templates: StoredStatic[]) {
-  localStorage.setItem(STATIC_KEY, JSON.stringify(templates))
+  accountStorage.setItem(STATIC_KEY, JSON.stringify(templates))
   notifyScheduleChanged()
 }
 
 export function loadGeneratedMarkers(): Record<string, boolean> {
-  const raw = localStorage.getItem(GENERATED_KEY)
+  const raw = accountStorage.getItem(GENERATED_KEY)
   if (!raw) return {}
   try {
     const parsed = JSON.parse(raw)
@@ -133,13 +138,13 @@ export function loadGeneratedMarkers(): Record<string, boolean> {
 export function markWeekGenerated(weekISO: string) {
   const markers = loadGeneratedMarkers()
   markers[weekISO] = true
-  localStorage.setItem(GENERATED_KEY, JSON.stringify(markers))
+  accountStorage.setItem(GENERATED_KEY, JSON.stringify(markers))
 }
 
 export function unmarkWeekGenerated(weekISO: string) {
   const markers = loadGeneratedMarkers()
   delete markers[weekISO]
-  localStorage.setItem(GENERATED_KEY, JSON.stringify(markers))
+  accountStorage.setItem(GENERATED_KEY, JSON.stringify(markers))
 }
 
 /**

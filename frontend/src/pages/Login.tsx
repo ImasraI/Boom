@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { accountStorage } from "../accountStorage";
+import { useEffect, useState } from "react";
 import { apiUrl, authHeaders, readApiError } from "../api";
 import { NavFn, SignupData, normalizeSignupData } from "../types";
 import { AuthOrbs, BackButton, ErrorBanner, PhoneInput, PasswordInput, PrimaryButton } from "../components/ui";
 
 function profileForPhone(phone: string): SignupData {
   try {
-    const raw = localStorage.getItem("boom-user-data");
+    const raw = accountStorage.getItem("boom-user-data");
     if (raw) {
       const saved = normalizeSignupData(JSON.parse(raw), phone);
       if (saved.phone === phone) {
@@ -17,7 +18,9 @@ function profileForPhone(phone: string): SignupData {
 }
 
 export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: string, data: SignupData) => void }) {
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(() => localStorage.getItem("boom-login-phone") || "");
+  // One-shot prefill from the signup intercept - don't keep it around.
+  useEffect(() => { localStorage.removeItem("boom-login-phone"); }, []);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);

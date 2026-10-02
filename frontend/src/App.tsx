@@ -1,6 +1,10 @@
-import { useEffect, useState } from "react";
+import { accountStorage } from "./accountStorage";
+import { Component, lazy, Suspense, useEffect, useState } from "react";
 import { apiUrl, authHeaders } from "./api";
+import { pullServerProfile, toSignupData } from "./profileSync";
 import { Screen, SignupData, normalizeSignupData } from "./types";
+import { PANELS, panelOf } from "./navConfig";
+import PanelTabs from "./components/PanelTabs";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -9,13 +13,14 @@ import Streak from "./pages/Streak";
 import Recovery from "./pages/Recovery";
 import Exams from "./pages/Exams";
 import Plan from "./pages/Plan";
-import Chat from "./pages/Chat";
 import Profile from "./pages/Profile";
-import Schedule from "./pages/Schedule";
-import Evaluation from "./pages/Evaluation";
-import Mock from "./pages/Mock";
-import Arena from "./pages/Arena";
-import Admin from "./pages/Admin";
+const KnowledgeGraph = lazy(() => import("./pages/KnowledgeGraph"));
+const Chat = lazy(() => import("./pages/Chat"));
+const Schedule = lazy(() => import("./pages/Schedule"));
+const Evaluation = lazy(() => import("./pages/Evaluation"));
+const Mock = lazy(() => import("./pages/Mock"));
+const Arena = lazy(() => import("./pages/Arena"));
+const Admin = lazy(() => import("./pages/Admin"));
 
 const USER_KEY = "boom-user-data";
 const TOKEN_KEY = "boom-token";
@@ -25,7 +30,8 @@ const NAV_ITEMS: { screen: Screen; label: string; icon: React.ReactNode }[] = [
   { screen: "streak", label: "استریک", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C9 7 6 8 7 13c.7 3 3 5 5 5s4.3-2 5-5c1-5-2-6-5-11z"/></svg> },
   { screen: "recovery", label: "ریکاوری", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> },
   { screen: "exams", label: "آزمونها", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
-   { screen: "plan", label: "برنامه", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
+  { screen: "plan", label: "برنامه", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
+  { screen: "knowledge", label: "نقشه یادگیری", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="12" r="2"/><circle cx="6" cy="18" r="2"/><path d="M8 7l8 4M8 17l8-4"/></svg> },
    { screen: "schedule", label: "برنامه هفتگی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
    { screen: "evaluation", label: "ارزیابی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> },
   { screen: "mock", label: "آزمون هوشمند", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
@@ -33,13 +39,36 @@ const NAV_ITEMS: { screen: Screen; label: string; icon: React.ReactNode }[] = [
    { screen: "profile", label: "پروفایل", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
 ];
 
+/** Icon shortcuts keyed by screen; panel rows get their labels from navConfig. */
+const ICONS: Record<string, React.ReactNode> = {
+  ...Object.fromEntries(NAV_ITEMS.map(item => [item.screen, item.icon])),
+  leaderboard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>,
+  admin: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+};
+
 function persistUser(data: SignupData) {
-  localStorage.setItem(USER_KEY, JSON.stringify(normalizeSignupData(data)));
+  accountStorage.setItem(USER_KEY, JSON.stringify(normalizeSignupData(data)));
+}
+
+function SideButton({ screen, label, icon, current, nav }: {
+  screen: Screen; label: string; icon: React.ReactNode; current: Screen; nav: (s: Screen) => void;
+}) {
+  const active = current === screen;
+  return (
+    <button aria-current={active ? "page" : undefined} onClick={() => nav(screen)}
+      className={`press w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-right transition-all ${
+        active ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-strong)]"
+      }`}>
+      <span className={active ? "text-[var(--accent)]" : "text-[var(--muted-2)]"}>{icon}</span>
+      <span className="font-semibold text-[14px]">{label}</span>
+      {active && <span className="me-auto w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}
+    </button>
+  );
 }
 
 function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Screen) => void; isAdmin: boolean }) {
   return (
-    <aside className="hidden md:flex flex-col fixed top-0 right-0 bottom-0 w-[220px] bg-[var(--card)] border-r border-[var(--border)] z-30">
+    <aside className="boom-sidebar hidden md:flex flex-col fixed top-0 right-0 bottom-0 w-[220px] bg-[var(--card)] border-r border-[var(--border)] z-30">
       <div className="px-5 pt-7 pb-5 border-b border-[var(--border)]">
         <div className="flex items-center gap-3">
           <img src="/logo.png" alt="بوم" className="w-10 h-10 flex-shrink-0" />
@@ -50,29 +79,17 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
         </div>
       </div>
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map(item => {
-          const active = screen === item.screen;
-          return (
-            <button key={item.screen} onClick={() => nav(item.screen)}
-              className={`press w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-right transition-all ${
-                active ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-strong)]"
-              }`}
-            >
-              <span className={active ? "text-[var(--accent)]" : "text-[var(--muted-2)]"}>{item.icon}</span>
-              <span className="font-semibold text-[14px]">{item.label}</span>
-              {active && <span className="me-auto w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}
-            </button>
-          );
-        })}
-        {isAdmin && (
-          <button onClick={() => nav("admin")}
-            className={`press w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-right transition-all ${
-              screen === "admin" ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-strong)]"
-            }`}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            <span className="font-semibold text-[14px]">مدیریت</span>
-          </button>
-        )}
+        <SideButton screen="home" label="خانه" icon={ICONS.home} current={screen} nav={nav} />
+        {(["ranked", "plan", "profile"] as const).map(key => (
+          <div key={key}>
+            <p className="px-4 pt-4 pb-1 text-[11px] font-bold text-[var(--muted-2)]">{PANELS[key].label}</p>
+            {PANELS[key].items
+              .filter(item => item.screen !== "admin" || isAdmin)
+              .map(item => (
+                <SideButton key={item.screen} screen={item.screen} label={item.label} icon={ICONS[item.screen]} current={screen} nav={nav} />
+              ))}
+          </div>
+        ))}
       </nav>
       <div className="p-4 border-t border-[var(--border)]">
         <button onClick={() => nav("chat")}
@@ -88,15 +105,26 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
   );
 }
 
+class ScreenBoundary extends Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) return <div role="alert" className="plan-card m-5 p-6 bg-[var(--card)]"><h2>صفحه آماده نشد</h2><p className="text-sm text-[var(--muted)] mt-2">اتصال را بررسی کن و دوباره تلاش کن.</p><button className="mt-4 px-5 py-3 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]" onClick={() => window.location.reload()}>بارگذاری دوباره</button></div>;
+    return this.props.children;
+  }
+}
+
 function Shell({ children, screen, nav, isAdmin }: { children: React.ReactNode; screen: Screen; nav: (s: Screen) => void; isAdmin: boolean }) {
   const hideSidebar = ["landing", "login", "signup"].includes(screen);
+  const panelKey = hideSidebar ? null : (panelOf(screen)?.key ?? null);
   return (
     <div dir="rtl" className="min-h-screen bg-[var(--page-bg)]">
       {!hideSidebar && <DesktopSidebar screen={screen} nav={nav} isAdmin={isAdmin} />}
       {!hideSidebar && <MobileTabBar screen={screen} nav={nav} isAdmin={isAdmin} />}
       <div className={`min-h-screen ${!hideSidebar ? "md:mr-[220px]" : ""}`}>
         <div className={`w-full max-w-[430px] mx-auto md:max-w-none min-h-screen bg-[var(--surface)] md:shadow-none ${!hideSidebar ? "pb-24 md:pb-0" : ""}`}>
-          {children}
+          {!hideSidebar && panelKey && <PanelTabs panelKey={panelKey} screen={screen} nav={nav} isAdmin={isAdmin} />}
+          <main key={screen} className={`page-scene page-${screen}`}><ScreenBoundary><Suspense fallback={<div className="page-loading" role="status" aria-label="در حال آماده‌سازی صفحه"><span>در حال آماده‌سازی…</span><i /><i /><i /></div>}>{panelKey ? <div className="panel-body">{children}</div> : children}</Suspense></ScreenBoundary></main>
         </div>
       </div>
     </div>
@@ -112,61 +140,26 @@ const CHAT_ICON = (
 /** Fixed bottom navigation for phones (< md). Mirrors DesktopSidebar so
  * every screen is reachable without a keyboard/mouse; the کمی tabs that
  * don't fit live in the «بیشتر» sheet. */
-function MobileTabBar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Screen) => void; isAdmin: boolean }) {
-  const [moreOpen, setMoreOpen] = useState(false);
+function MobileTabBar({ screen, nav }: { screen: Screen; nav: (s: Screen) => void; isAdmin: boolean }) {
+  // 5 tabs: home, Plan, Ranked (middle), chat, Profile. Every sub-screen
+  // is highlighted through its panel, so no "بیشتر" overflow is needed.
   const items: { screen: Screen; label: string; icon: React.ReactNode }[] = [
-    NAV_ITEMS[0], // home
-    NAV_ITEMS[4], // plan
-    NAV_ITEMS[7], // mock
-    NAV_ITEMS[9], // profile
+    { screen: "home", label: "خانه", icon: ICONS.home },
+    { screen: "plan", label: "برنامه", icon: ICONS.plan },
+    { screen: "arena", label: "آرنا", icon: ICONS.arena },
+    { screen: "chat", label: "بوم AI", icon: CHAT_ICON },
+    { screen: "profile", label: "پروفایل", icon: ICONS.profile },
   ];
-  const moreItems: { screen: Screen; label: string; icon: React.ReactNode }[] = [
-    NAV_ITEMS[1], // streak
-    NAV_ITEMS[2], // recovery
-    NAV_ITEMS[3], // exams
-    NAV_ITEMS[5], // schedule
-    NAV_ITEMS[6], // evaluation
-    NAV_ITEMS[8], // arena
-  ];
-  const moreActive = moreItems.some(i => i.screen === screen) || (isAdmin && screen === "admin");
+  const activePanel = panelOf(screen)?.key ?? null;
+  const isActive = (tab: Screen) =>
+    screen === tab || (activePanel !== null && panelOf(tab)?.key === activePanel);
 
   function go(s: Screen) {
-    setMoreOpen(false);
     nav(s);
   }
 
   return (
     <>
-      {moreOpen && (
-        <div className="md:hidden fixed inset-0 z-40 bg-black/50" onClick={() => setMoreOpen(false)} />
-      )}
-      {moreOpen && (
-        <div className="md:hidden fixed bottom-[62px] inset-x-2 z-50 card-elevated shadow-float p-3 anim-fade-up">
-          <div className="grid grid-cols-3 gap-2">
-            {moreItems.map(item => {
-              const active = screen === item.screen;
-              return (
-                <button key={item.screen} onClick={() => go(item.screen)}
-                  className={`press flex flex-col items-center gap-1.5 py-3 px-1 rounded-2xl transition-colors ${
-                    active ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--text-strong)] bg-[var(--surface-2)]"
-                  }`}>
-                  {item.icon}
-                  <span className="text-[11px] font-bold">{item.label}</span>
-                </button>
-              );
-            })}
-            {isAdmin && (
-              <button onClick={() => go("admin")}
-                className={`press flex flex-col items-center gap-1.5 py-3 px-1 rounded-2xl transition-colors ${
-                  screen === "admin" ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "text-[var(--text-strong)] bg-[var(--surface-2)]"
-                }`}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                <span className="text-[11px] font-bold">مدیریت</span>
-              </button>
-            )}
-          </div>
-        </div>
-      )}
       <nav
         aria-label="ناوبری موبایل"
         className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-[var(--card)]/95 border-t border-[var(--border)]"
@@ -174,9 +167,9 @@ function MobileTabBar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scree
       >
         <div className="flex items-stretch justify-around px-1">
           {items.map(item => {
-            const active = screen === item.screen;
+            const active = isActive(item.screen);
             return (
-              <button key={item.screen} onClick={() => go(item.screen)}
+              <button key={item.screen} aria-current={active ? "page" : undefined} onClick={() => go(item.screen)}
                 className={`press flex-1 flex flex-col items-center gap-0.5 py-2.5 transition-colors ${
                   active ? "text-[var(--accent)]" : "text-[var(--muted-2)]"
                 }`}>
@@ -186,22 +179,6 @@ function MobileTabBar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scree
               </button>
             );
           })}
-          <button onClick={() => nav("chat")}
-            className={`press flex-1 flex flex-col items-center gap-0.5 py-2.5 transition-colors ${
-              screen === "chat" ? "text-[var(--accent)]" : "text-[var(--muted-2)]"
-            }`}>
-            {CHAT_ICON}
-            <span className="text-[10px] font-bold">بوم AI</span>
-            {screen === "chat" && <span className="w-4 h-0.5 rounded-full bg-[var(--accent)]" />}
-          </button>
-          <button onClick={() => setMoreOpen(o => !o)}
-            className={`press flex-1 flex flex-col items-center gap-0.5 py-2.5 transition-colors ${
-              moreActive || moreOpen ? "text-[var(--accent)]" : "text-[var(--muted-2)]"
-            }`}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
-            <span className="text-[10px] font-bold">بیشتر</span>
-            {(moreActive || moreOpen) && <span className="w-4 h-0.5 rounded-full bg-[var(--accent)]" />}
-          </button>
         </div>
       </nav>
     </>
@@ -224,16 +201,26 @@ export default function App() {
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token) return;
     fetch(apiUrl("/api/auth/me"), { headers: authHeaders(token) })
-      .then(res => (res.ok ? res.json() : null))
+      .then(res => {
+        if (res.status === 401) {
+          localStorage.removeItem(TOKEN_KEY);
+          accountStorage.removeItem(USER_KEY);
+          setUserData(null);
+          setIsAdmin(false);
+          setScreen("login");
+          return null;
+        }
+        return res.ok ? res.json() : null;
+      })
       .then(me => setIsAdmin(Boolean(me?.is_admin)))
       .catch(() => {});
   }, []);
 
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY);
-    const savedUser = localStorage.getItem(USER_KEY);
+    const savedUser = accountStorage.getItem(USER_KEY);
     if (!token || !savedUser) {
-      localStorage.removeItem(USER_KEY);
+      accountStorage.removeItem(USER_KEY);
       if (!token) localStorage.removeItem(TOKEN_KEY);
       return;
     }
@@ -241,8 +228,13 @@ export default function App() {
       const profile = normalizeSignupData(JSON.parse(savedUser));
       setUserData(profile);
       setScreen("home");
+      // Growth-readiness project 1: refresh the cache from the server so a
+      // second device (or a cleared storage) converges on the same state.
+      pullServerProfile().then(server => {
+        if (server && localStorage.getItem(TOKEN_KEY) === token) setUserData(prev => (prev ? toSignupData(server, prev) : prev));
+      });
     } catch {
-      localStorage.removeItem(USER_KEY);
+      accountStorage.removeItem(USER_KEY);
     }
   }, []);
 
@@ -266,6 +258,17 @@ export default function App() {
     persistUser(profile);
     setUserData(profile);
     nav("home");
+    pullServerProfile().then(server => {
+      if (server && localStorage.getItem(TOKEN_KEY) === token) {
+        const refreshed = toSignupData(server, profile);
+        persistUser(refreshed);
+        setUserData(refreshed);
+      }
+    });
+    fetch(apiUrl("/api/auth/me"), { headers: authHeaders(token) })
+      .then(res => res.ok ? res.json() : null)
+      .then(me => { if (localStorage.getItem(TOKEN_KEY) === token) setIsAdmin(Boolean(me?.is_admin)); })
+      .catch(() => {});
   }
 
   function handleSignupComplete(data: SignupData) {
@@ -288,7 +291,7 @@ export default function App() {
 
   function logout() {
     localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
+    setIsAdmin(false);
     setUserData(null);
     nav("landing");
   }
@@ -310,9 +313,11 @@ export default function App() {
       {screen === "chat" && <Chat {...p} userData={userData} />}
       {screen === "evaluation" && <Evaluation {...p} />}
       {screen === "mock" && <Mock {...p} />}
-      {screen === "arena" && <Arena {...p} />}
+      {screen === "arena" && <Arena {...p} userData={userData} />}
+      {screen === "leaderboard" && <Arena {...p} userData={userData} initialPhase="board" />}
       {screen === "admin" && <Admin {...p} />}
       {screen === "profile" && userData && <Profile {...p} userData={userData} {...settingsProps} />}
+      {screen === "knowledge" && userData && <KnowledgeGraph {...p} userData={userData} />}
     </Shell>
   );
 }

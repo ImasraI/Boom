@@ -1,3 +1,4 @@
+import { accountStorage } from "../accountStorage";
 import { useState, useRef, useEffect } from "react";
 import { apiUrl, authHeaders } from "../api";
 import { NavFn, SignupData } from "../types";
@@ -31,7 +32,11 @@ function renderMath(text: string): React.ReactNode {
   });
 }
 
-interface Msg { role: "user" | "ai"; text: string; }
+interface Msg {
+  role: "user" | "ai";
+  text: string;
+  confidence?: { level: string; label: string; score: number };
+}
 const NEW_CHAT_NAME = "گفتگوی جدید";
 
 function storageKey(userData: SignupData | null) {
@@ -69,7 +74,7 @@ function createBlank(studentName: string): ChatSession {
 
 function loadSessions(userData: SignupData | null): Record<string, ChatSession> {
   try {
-    const raw = localStorage.getItem(storageKey(userData));
+    const raw = accountStorage.getItem(storageKey(userData));
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Record<string, ChatSession>;
     const out: Record<string, ChatSession> = {};
@@ -86,12 +91,12 @@ function loadSessions(userData: SignupData | null): Record<string, ChatSession> 
 }
 
 function saveSessions(userData: SignupData | null, s: Record<string, ChatSession>) {
-  localStorage.setItem(storageKey(userData), JSON.stringify(s));
+  accountStorage.setItem(storageKey(userData), JSON.stringify(s));
 }
 
 function loadActiveId(userData: SignupData | null, sessions: Record<string, ChatSession>) {
   try {
-    const saved = localStorage.getItem(activeStorageKey(userData));
+    const saved = accountStorage.getItem(activeStorageKey(userData));
     if (saved && sessions[saved]) return saved;
   } catch { /* ignore */ }
   const ids = Object.keys(sessions).sort(
@@ -238,7 +243,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
 
   useEffect(() => {
     if (!activeId) return;
-    localStorage.setItem(activeStorageKey(userData), activeId);
+    accountStorage.setItem(activeStorageKey(userData), activeId);
   }, [activeId, storeKey]);
 
   function commit(next: Record<string, ChatSession>) {
@@ -329,7 +334,11 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
           ...current,
           [sessionId]: {
             ...current[sessionId],
-            msgs: [...current[sessionId].msgs, { role: "ai", text: answer }],
+            msgs: [...current[sessionId].msgs, {
+              role: "ai",
+              text: answer,
+              confidence: data.answer_confidence,
+            }],
             pending: false,
             updatedAt: Date.now(),
           },
@@ -446,6 +455,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
                   </div>
                 ) : (
                   <div className="max-w-[85%] min-w-0 text-[13px] leading-relaxed text-[var(--text)] break-words [overflow-wrap:anywhere]">
+                    {m.confidence && <div className="mb-2 text-[10px] font-semibold text-[var(--muted-2)]">{m.confidence.label}</div>}
                     {renderMarkdown(m.text)}
                   </div>
                 )}

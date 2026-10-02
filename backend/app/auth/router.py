@@ -12,7 +12,7 @@ from ..auth.security import (
     verify_password,
     create_access_token,
     needs_rehash,
-    SECRET_KEY,
+    get_secret_key,
 )
 from ..auth.deps import get_current_user
 from ..auth.sms import (
@@ -33,7 +33,7 @@ MAX_VERIFY_ATTEMPTS = 5        # per code
 
 def _hash_code(code: str) -> str:
     """Codes are hashed at rest (DB leak must not leak live codes)."""
-    return hashlib.sha256((code + SECRET_KEY).encode("utf-8")).hexdigest()
+    return hashlib.sha256((code + get_secret_key()).encode("utf-8")).hexdigest()
 
 
 class RequestCodeRequest(BaseModel):
@@ -46,12 +46,21 @@ class RequestCodeResponse(BaseModel):
     debug_code: str | None = None  # only when SMS_DEBUG_ECHO=true (dev)
     bypass_mode: bool = False  # allowlisted number: enter SIGNUP_BYPASS_CODE instead
     auth_disabled: bool = False  # DISABLE_AUTH=true (dev): skip code entry entirely
+    # True when the number already belongs to an account: the client must
+    # route the user to LOGIN, or to the explicit reset flow - never pass
+    # this number off as a fresh signup.
+    account_exists: bool = False
 
 
 class CompleteSignupRequest(BaseModel):
     phone: str
     code: str
     password: str
+    # Explicit opt-in for an EXISTING account: the client may only overwrite
+    # the password after the user saw the "account already exists" screen
+    # and chose password reset. Default False = signup of a taken number
+    # fails with 409 instead of silently taking the account over.
+    reset: bool = False
 
 
 class TokenResponse(BaseModel):
@@ -81,6 +90,18 @@ def request_code(
     auth_disabled = settings.DISABLE_AUTH and settings.APP_ENV != "production"
     now = datetime.now(timezone.utc)
 
+    # The honest signal up front: does this number already belong to an
+    # account? Computed before every early return (bypass, dev-disabled,
+    # normal SMS) so the client can always intercept (regression: a repeat
+    # "signup" used to silently take the account over - overwrite its
+    # password and log the visitor in - with no warning at all).
+    account_exists = (
+        db.query(User)
+        .filter((User.username == mobile) | (User.phone == mobile))
+        .first()
+        is not None
+    )
+
     # SMS-template-approval stopgap: allowlisted numbers can sign up without
     # SMS by using the shared bypass passcode. We store a PhoneCode row
     # hashed from the bypass code, so register/complete validates it with
@@ -100,10 +121,12 @@ def request_code(
         # Never echo the bypass code back: it is a shared secret. Anyone who
         # knows an allowlisted phone could otherwise read it here and reset
         # that account's password. The legit user got it from support.
-        return RequestCodeResponse(resend_after=0, bypass_mode=True)
+        return RequestCodeResponse(resend_after=0, bypass_mode=True,
+                                   account_exists=account_exists)
 
     if auth_disabled:
-        return RequestCodeResponse(resend_after=0, auth_disabled=True)
+        return RequestCodeResponse(resend_after=0, auth_disabled=True,
+                                   account_exists=account_exists)
 
     if not echo_mode and (not settings.SMS_API_KEY or not settings.SMS_VERIFY_TEMPLATE_ID):
         raise HTTPException(
@@ -146,7 +169,7 @@ def request_code(
         )
     )
     db.commit()
-    return RequestCodeResponse(debug_code=debug_code)
+    return RequestCodeResponse(debug_code=debug_code, account_exists=account_exists)
 
 
 @router.post("/register/complete", response_model=TokenResponse)
@@ -163,6 +186,23 @@ def register_complete(request: CompleteSignupRequest, db: Session = Depends(get_
     now = datetime.now(timezone.utc)
     settings = get_settings()
     auth_disabled = settings.DISABLE_AUTH and settings.APP_ENV != "production"
+
+    existing = (
+        db.query(User)
+        .filter((User.username == mobile) | (User.phone == mobile))
+        .first()
+    )
+    if existing and not request.reset:
+        # Fail BEFORE touching the SMS code: the code the user already
+        # received stays valid, so the reset screen can resubmit with the
+        # SAME code (reset=true). No account takeover without explicit
+        # opt-in - 409 + X-Account-Exists is the machine-readable signal;
+        # the user-facing copy lives in detail.
+        raise HTTPException(
+            status_code=409,
+            headers={"X-Account-Exists": "1"},
+            detail="این شماره قبلاً ثبت‌نام کرده است؛ وارد شوید یا بازنشانی رمز عبور را انتخاب کنید",
+        )
 
     rec = None
     if not auth_disabled:
@@ -193,13 +233,9 @@ def register_complete(request: CompleteSignupRequest, db: Session = Depends(get_
             raise HTTPException(status_code=400, detail="کد وارد شده درست نیست")
         rec.consumed = True
 
-    existing = (
-        db.query(User)
-        .filter((User.username == mobile) | (User.phone == mobile))
-        .first()
-    )
     if existing:
-        # Re-verification of a known number: refresh the password.
+        # EXPLICIT password reset: the user saw the account-exists screen and
+        # chose to reset. Update credentials on the SAME account (no dupes).
         existing.hashed_password = get_password_hash(request.password)
         existing.phone_verified = True
         if existing.phone != mobile:

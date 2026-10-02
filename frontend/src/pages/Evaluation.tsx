@@ -1,3 +1,4 @@
+import { accountStorage } from "../accountStorage";
 import { useState, useEffect, useRef, useCallback } from "react"
 import { NavFn } from "../types"
 import { SUBJECT_TESTS, SubjectTest, Question } from "../questions"
@@ -20,8 +21,7 @@ function SubjectCard({ test, onClick }: { test: SubjectTest; onClick: () => void
   return (
     <button
       onClick={onClick}
-      className="eval-card relative overflow-hidden rounded-none border border-[var(--block-shadow] bg-[var(--card)] p-5 text-right transition-all"
-      style={{ boxShadow: "4px 4px 0 0 var(--block-shadow)" }}
+      className="eval-card relative overflow-hidden rounded-none border border-[var(--border-strong)] bg-[var(--card)] p-5 text-right transition-all"
     >
       <div className="flex items-center gap-4">
         <div
@@ -499,7 +499,7 @@ export default function Evaluation({ nav }: { nav: NavFn }) {
     Record<string, { score: number; time: number; date: string }[]>
   >(() => {
     try {
-      return JSON.parse(localStorage.getItem("boom-eval-history") || "{}")
+      return JSON.parse(accountStorage.getItem("boom-eval-history") || "{}")
     } catch {
       return {}
     }
@@ -513,7 +513,7 @@ export default function Evaluation({ nav }: { nav: NavFn }) {
         ...next[testId],
         { score, time, date: new Date().toISOString() },
       ]
-      localStorage.setItem("boom-eval-history", JSON.stringify(next))
+      accountStorage.setItem("boom-eval-history", JSON.stringify(next))
       return next
     })
   }

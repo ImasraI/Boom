@@ -55,9 +55,14 @@ def test_short_selfcontained_questions_are_simple(q):
     "برنامه امروز چیه؟",
     "فیزیک ۱ خیلی سبز صفحه ۱۵۴ تست‌های ۴۱ تا ۵۶ رو بگو",
     "برای آزمون ماز آماده‌م کن",
+    "امروز چی کار کنم؟",
 ])
 def test_plan_book_questions_are_not_simple(q):
     assert pipeline._is_simple_message(q) is False
+
+
+def test_greeting_prefix_does_not_bypass_grounded_question():
+    assert pipeline._is_simple_message("سلام، برنامه امروز چیه؟") is False
 
 
 def test_long_questions_are_not_simple():
@@ -148,6 +153,26 @@ def test_streaming_simple_message_skips_retrieval(monkeypatch):
     texts = [json.loads(e)["data"] for e in events if json.loads(e)["type"] == "text"]
     assert "sources" in kinds
     assert texts == ["سلام!", " خوش اومدی."]
+
+
+def test_streaming_simple_message_preserves_schedule_context(monkeypatch):
+    _patch_offline(monkeypatch)
+    captured = {}
+
+    def capture_messages(question, context, history, student=None, schedule=None):
+        captured["schedule"] = schedule
+        return [{"role": "user", "content": question}]
+
+    monkeypatch.setattr(pipeline, "_build_messages", capture_messages)
+    client = SimpleNamespace(
+        last_usage=SimpleNamespace(total_tokens=1),
+        generate_stream=lambda messages: iter(["باشه"]),
+    )
+    monkeypatch.setattr(pipeline, "get_llm_client", lambda: client)
+
+    schedule = {"week_start": "2026-09-26", "blocks": []}
+    list(pipeline.answer_question_stream("سلام", user_id=1, schedule=schedule))
+    assert captured["schedule"] == schedule
 
 
 import json  # noqa: E402  (used by the streaming test above)

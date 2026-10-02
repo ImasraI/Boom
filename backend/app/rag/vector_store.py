@@ -99,6 +99,7 @@ class VectorStore:
         embeddings: List[List[float]],
         user_id: int,
         category: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> int:
 
         # Generate a unique ID for each chunk
@@ -114,6 +115,7 @@ class VectorStore:
                 "chunk_index": i,
                 "user_id": user_id,
                 "category": category,
+                **(metadata or {}),
             }
             for i in range(len(chunks))
         ]
@@ -224,6 +226,26 @@ class VectorStore:
         }
 
         return sorted(cast(List[str], list(names)))
+
+    def document_fingerprints(self, user_id: int) -> Dict[str, str]:
+        """Return the source fingerprint stored for each user's document.
+
+        Older rows may not have a fingerprint; returning an empty value makes
+        the next ingestion pass refresh them once instead of trusting stale
+        embeddings forever.
+        """
+        all_items = self.collection.get(
+            where={"user_id": user_id},
+            include=cast(Include, ["metadatas"]),
+        )
+        fingerprints: Dict[str, str] = {}
+        for metadata in all_items.get("metadatas") or []:
+            if not metadata:
+                continue
+            name = metadata.get("document_name")
+            if isinstance(name, str):
+                fingerprints.setdefault(name, str(metadata.get("source_fingerprint") or ""))
+        return fingerprints
 
     def delete_document(self, document_name: str, user_id: int) -> None:
         # Delete all chunks belonging to the specified document AND this user,

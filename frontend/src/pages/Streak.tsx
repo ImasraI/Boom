@@ -1,9 +1,5 @@
 import { NavFn } from "../types";
-import { PAST_RECORDS } from "../data";
-
-const DAYS_FA = ["پنج‌شنبه", "جمعه", "شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه"];
-const DAYS_SHORT = ["پ", "ج", "ش", "ی", "د", "س", "چ"];
-const TOTAL_XP = PAST_RECORDS.reduce((s, r) => s + r.xp, 0);
+import { studyRecords, currentStreak } from "../studyStats";
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
@@ -16,6 +12,9 @@ function BackButton({ onClick }: { onClick: () => void }) {
 }
 
 export default function Streak({ nav }: { nav: NavFn }) {
+  const PAST_RECORDS = studyRecords();
+  const TOTAL_XP = PAST_RECORDS.reduce((sum, r) => sum + r.xp, 0);
+  const weekday = (date: string) => new Intl.DateTimeFormat("fa-IR", { weekday: "long" }).format(new Date(date + "T12:00:00"));
   const maxXP = Math.max(...PAST_RECORDS.map(r => r.xp));
 
   return (
@@ -35,7 +34,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
         </div>
         <div>
           <p className="text-[11px] font-bold text-[var(--muted-2)]">استریک فعلی</p>
-          <p className="text-5xl font-bold text-[#C4714A] leading-tight">۷</p>
+          <p className="text-5xl font-bold text-[#C4714A] leading-tight">{currentStreak()}</p>
           <p className="text-[13px] text-[var(--muted)] font-medium">روز متوالی</p>
         </div>
       </div>
@@ -45,11 +44,11 @@ export default function Streak({ nav }: { nav: NavFn }) {
         <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
           <p className="text-[11px] font-bold text-[var(--muted-2)]">مجموع XP</p>
           <p className="text-3xl font-bold text-[var(--text)] mt-1">{TOTAL_XP.toLocaleString("fa-IR")}</p>
-          <p className="text-[12px] text-[var(--muted)] font-medium">کل زمان</p>
+          <p className="text-[12px] text-[var(--muted)] font-medium">۷ روز گذشته</p>
         </div>
         <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
           <p className="text-[11px] font-bold text-[var(--muted-2)]">این هفته</p>
-          <p className="text-3xl font-bold text-[var(--text)] mt-1">۱٬۰۵۰</p>
+          <p className="text-3xl font-bold text-[var(--text)] mt-1">{TOTAL_XP.toLocaleString("fa-IR")}</p>
           <p className="text-[12px] text-[var(--muted)] font-medium">XP کسب‌شده</p>
         </div>
       </div>
@@ -76,7 +75,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
                   />
                 </div>
                 <span className={`text-[9px] font-bold ${isToday ? "text-[#C4714A]" : "text-[var(--muted-2)]"}`}>
-                  {DAYS_SHORT[i]}
+                  {weekday(r.date).slice(0, 1)}
                 </span>
               </div>
             );
@@ -90,7 +89,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
         <div className="flex flex-col gap-2">
           {[...PAST_RECORDS].reverse().map((r, i) => {
             const pct = r.tasksTotal ? Math.round((r.tasksDone / r.tasksTotal) * 100) : 0;
-            const label = i === 0 ? "امروز" : i === 1 ? "دیروز" : DAYS_FA[PAST_RECORDS.length - 1 - i];
+            const label = i === 0 ? "امروز" : i === 1 ? "دیروز" : weekday(r.date);
             return (
               <div key={r.date} className="bg-[var(--card)] rounded-2xl border border-[var(--border)] px-4 py-3 flex items-center gap-3">
                 <div className="flex-1 text-right">

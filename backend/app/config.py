@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # Application settings
-    APP_NAME: str = "RAG-LLM"
+    APP_NAME: str = "Boom"
     APP_ENV: str = "development"
     DEMO_USER_ID: int = 1
 
@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     # Optional provider override for MOCK GENERATION only (e.g. "cerebras"
     # while the chatbot runs on another provider). Empty = LLM_PROVIDER.
     POOL_LLM_PROVIDER: str = ""
+    # Extra providers to CONTINUE on when the pool provider runs out of its
+    # per-day quota (comma-separated, e.g. "groq,cerebras"). Quotas are per
+    # provider and per model, so a spent free tier is another provider's
+    # problem; a per-day limit cannot clear inside a request, and a booklet
+    # needs many. Each fallback uses its own key/model from settings. Empty
+    # (default) = no failover: pool generation fails fast with the reason.
+    POOL_LLM_FALLBACK_PROVIDERS: str = ""
     VISION_LLM_PROVIDER: str = "gemini"  # Options: "gemini", "groq", "ollama", "mock"
     VISION_LLM_MODEL_NAME: str = "gemini-3.6-flash"
 
@@ -94,7 +101,10 @@ class Settings(BaseSettings):
     AI_DAILY_WEEKLY_PLAN: int = 20
     AI_DAILY_TODAY_TESTS: int = 30
     AI_DAILY_MOCK_GENERATE: int = 10
-    AI_DAILY_ARENA_JOIN: int = 3
+    # Ranked duels burn a booklet each; 5/day leaves room for a few
+    # rematches while still capping AI cost. Failed accepts are refunded
+    # (see arena.accept_scheduled), so only real bookings count.
+    AI_DAILY_ARENA_JOIN: int = 5
     # Rough daily per-user token budget across ALL AI features (prompt +
     # completion). ~200k tokens ≈ a full mock booklet + a few dozen chats.
     # Set 0 (or negative) in .env for unlimited.
@@ -115,6 +125,18 @@ class Settings(BaseSettings):
     # Pre-generated mock pool: pending_use booklets kept per (major,
     # difficulty) shelf by the pool worker (and the admin restock button).
     MOCK_POOL_TARGET: int = 5
+    # Run the pool top-up INSIDE the API process (a background thread sweeps
+    # every POOL_SWEEP_INTERVAL_SECONDS and refills low shelves through the
+    # same pool_core.sweep the dedicated worker uses). Set false when you
+    # run scripts/mock_pool_worker.py as its own process instead, so the
+    # two never double-generate.
+    POOL_WORKER_INPROCESS: bool = True
+    POOL_SWEEP_INTERVAL_SECONDS: int = 900
+    # Max booklets the IN-PROCESS worker generates per sweep. A shelf starts
+    # empty and a booklet costs many LLM calls, so capping keeps the free
+    # tiers alive: 2 per 15 min fills the whole pool in a few hours without
+    # hammering quotas. The dedicated worker script stays uncapped.
+    POOL_SWEEP_MAX_BOOKLETS: int = 2
 
     # ================= Question-bank transcription (vision RAG) ==========
     # Structured per-page transcription of the scanned books (questions,

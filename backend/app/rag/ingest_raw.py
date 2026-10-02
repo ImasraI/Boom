@@ -91,21 +91,26 @@ def ingest_raw_pdfs(user_id: int | None = None) -> dict:
 
     # Already-ingested documents are skipped so startup stays fast.
     image_store = get_image_vector_store()
-    known = set(image_store.list_documents(user_id=user_id))
+    known_fingerprints = image_store.document_fingerprints(user_id=user_id)
 
     ingested: List[str] = []
     skipped: List[str] = []
 
     for pdf in pdfs:
         category = category_for_pdf(pdf)
+        stat = pdf.stat()
+        source_fingerprint = f"{stat.st_size}:{stat.st_mtime_ns}"
         logger.info(
             "Processing raw PDF: %s (%.1f MB, category='%s')",
             pdf.name, pdf.stat().st_size / 1e6, category,
         )
-        if pdf.name in known:
-            logger.info("  already ingested, skipping.")
+        if known_fingerprints.get(pdf.name) == source_fingerprint:
+            logger.info("  already ingested and unchanged, skipping.")
             skipped.append(pdf.name)
             continue
+
+        if pdf.name in known_fingerprints:
+            logger.info("  source changed or predates fingerprints; refreshing embeddings.")
 
         logger.info("  rendering + embedding each page...")
         count = ingest_pdf_as_images(
@@ -114,6 +119,7 @@ def ingest_raw_pdfs(user_id: int | None = None) -> dict:
             user_id=user_id,
             dpi=settings.RAW_INGEST_DPI,
             category=category,
+            source_fingerprint=source_fingerprint,
         )
         logger.info("  done: %d page image(s) stored for '%s'.", count, pdf.name)
         ingested.append(pdf.name)

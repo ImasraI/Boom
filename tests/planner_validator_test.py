@@ -81,3 +81,64 @@ if __name__ == "__main__":
     test_complete_week_plan_fills_all_days()
     test_default_week_plan_has_study_and_test()
     print("\nAll planner validator tests passed!")
+
+def _assert_safe(blocks, cap):
+    for day in range(7):
+        rows = sorted([b for b in blocks if b["day"] == day], key=lambda b: b["startHour"])
+        assert sum(b["duration"] for b in rows) <= cap
+        assert all(a["startHour"] + a["duration"] <= b["startHour"] for a, b in zip(rows, rows[1:]))
+
+
+def test_live_validator_rejects_overlap_and_overcapacity():
+    blocks = [{"day": 0, "startHour": 8, "duration": 3, "type": "study", "title": "a"},
+              {"day": 0, "startHour": 9, "duration": 3, "type": "test", "title": "b"},
+              {"day": 0, "startHour": 14, "duration": 3, "type": "test", "title": "c"}]
+    _assert_safe(_complete_week_plan(blocks, [], 4, {}), 4)
+
+
+def test_short_fallback_day_never_exceeds_budget():
+    for cap in (0, 0.5, 1, 1.5, 2, 4, 8, 16):
+        _assert_safe(_default_week_plan([], cap), cap)
+
+
+def test_fallback_blocks_do_not_collide_after_class():
+    fixed = [{"day": d, "startHour": 6, "duration": 6} for d in range(7)]
+    _assert_safe(_default_week_plan([], 4, occupied=fixed), 4)
+
+
+def test_live_plan_honors_persian_daily_hours_and_wake_time():
+    student = {"dailyHours": {"شنبه": 0, "یکشنبه": 1}, "wakeTime": "10:00", "sleepHours": 8}
+    blocks = _complete_week_plan([], [], 4, student)
+    assert not any(b["day"] == 0 for b in blocks)
+    assert sum(b["duration"] for b in blocks if b["day"] == 1) <= 1
+    assert all(b["startHour"] >= 10 for b in blocks)
+
+
+def test_weekly_endpoint_falls_back_offline_and_anchors_saturday(monkeypatch):
+    from types import SimpleNamespace
+    from datetime import date
+    from app.routers import boom_ai
+    from app.rag import pipeline
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("service unavailable")
+    monkeypatch.setattr(boom_ai, "check_ai_quota", lambda *a: None)
+    monkeypatch.setattr(boom_ai, "record_ai_use", lambda *a: (_ for _ in ()).throw(AssertionError("failed call billed")))
+    monkeypatch.setattr(boom_ai, "get_embedding_model", unavailable)
+    monkeypatch.setattr(boom_ai, "get_llm_client", unavailable)
+    monkeypatch.setattr(boom_ai, "_subject_book_context", unavailable)
+    monkeypatch.setattr(pipeline, "_retrieve_image_hits", unavailable)
+    monkeypatch.setattr(boom_ai, "_pick_main_book", lambda *a: "math")
+    monkeypatch.setattr(boom_ai, "book_catalog", lambda: [])
+    monkeypatch.setattr(boom_ai, "_extract_week_mock", lambda *a, **kw: None)
+    monkeypatch.setattr(boom_ai, "_weakness_summary", lambda *a, **kw: {})
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.auth.database import Base
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        result = boom_ai.generate_weekly_plan(boom_ai.WeeklyPlanRequest(daily_hours=2), SimpleNamespace(id=1), db)
+    assert result["llm_used"] is False
+    assert date.fromisoformat(result["week_start"]).weekday() == 5
+    assert result["blocks"]
+    _assert_safe(result["blocks"], 2)

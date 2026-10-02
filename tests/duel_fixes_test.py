@@ -47,7 +47,7 @@ def _mk_duel_row(db, title="duel booklet"):
     db.add(GeneratedMock(
         student_id=0, title=title, major="ریاضی فیزیک", grade="",
         duration_minutes=30,
-        questions='[{"_id":1,"subject":"ریاضی","topic":"","text":"سوال؟",'
+        questions='[{"verification_status":"verified","_id":1,"subject":"ریاضی","topic":"","text":"سوال؟",'
                   '"options":["a","b","c","d"],"answer":1,"explanation":""}]',
         status="pending_use", difficulty=pool_core.DUEL_DIFFICULTY,
     ))

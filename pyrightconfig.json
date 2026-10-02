@@ -1,0 +1,9 @@
+{
+  "include": ["backend", "tests", "ocr-kit", "ocr-workers"],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "extraPaths": ["backend"]
+    }
+  ]
+}

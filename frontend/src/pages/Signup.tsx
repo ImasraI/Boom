@@ -1,6 +1,7 @@
+import { accountStorage } from "../accountStorage";
 import { useState } from "react";
 import { apiUrl, readApiError } from "../api";
-import { NavFn, SignupData } from "../types";
+import { NavFn, SignupData, normalizeSignupData } from "../types";
 import { MAJORS, GRADES, EXAM_YEARS, TARGET_RANKS, STUDY_HOURS_OPTIONS, TEST_EXAM_OPTIONS } from "../data";
 import {
   AuthOrbs, BackButton, ErrorBanner, StepHeading, PrimaryButton,
@@ -47,6 +48,11 @@ export default function Signup({ nav, onComplete }: Props) {
   const [customExam, setCustomExam] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // The number already belongs to an account (server flags it on
+  // request-code): show the intercept instead of a fake fresh signup.
+  const [phoneTaken, setPhoneTaken] = useState(false);
+  // Explicit reset flow: the user chose "reset password" on the intercept.
+  const [resetMode, setResetMode] = useState(false);
 
   const TOTAL = 10;
 
@@ -67,14 +73,32 @@ export default function Signup({ nav, onComplete }: Props) {
         const res = await fetch(apiUrl("/api/auth/register/complete"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone, code, password }),
+          body: JSON.stringify({ phone, code, password, reset: resetMode }),
         });
         if (!res.ok) {
+          if (res.status === 409) {
+            // Race: the account appeared after the intercept check.
+            setResetMode(false);
+            setPhoneTaken(true);
+            setStep(1);
+          }
           setError(await readApiError(res, "خطا در تایید کد"));
           return;
         }
         const data = await res.json();
         localStorage.setItem("boom-token", data.access_token);
+        if (resetMode) {
+          // Reset complete: this is an EXISTING account with an existing
+          // profile - log straight in instead of running the signup wizard.
+          let profile: SignupData;
+          try {
+            profile = normalizeSignupData(JSON.parse(accountStorage.getItem("boom-user-data") || "{}"), phone);
+          } catch {
+            profile = normalizeSignupData({ phone, name: phone }, phone);
+          }
+          onComplete(profile);
+          return;
+        }
         setStep(4);
       } catch {
         setError("خطا در ارتباط با سرور");
@@ -119,6 +143,13 @@ export default function Signup({ nav, onComplete }: Props) {
       setDebugCode(data.debug_code || "");
       setBypassMode(Boolean(data.bypass_mode));
       setAuthDisabled(Boolean(data.auth_disabled));
+      if (data.account_exists) {
+        // Existing account: intercept here — never continue as a fresh
+        // signup (the old flow silently overwrote the password).
+        setPhoneTaken(true);
+        return;
+      }
+      setPhoneTaken(false);
       // Dev convenience (DISABLE_AUTH=true): skip the code entry step and go
       // straight to setting a password.
       setStep(Boolean(data.auth_disabled) ? 3 : 2);
@@ -146,11 +177,19 @@ export default function Signup({ nav, onComplete }: Props) {
       setDebugCode(data.debug_code || "");
       setBypassMode(Boolean(data.bypass_mode));
       setAuthDisabled(Boolean(data.auth_disabled));
+      setPhoneTaken(Boolean(data.account_exists));
     } catch {
       setError("خطا در ارتباط با سرور");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function startReset() {
+    // The first request-code already delivered an SMS code for this number:
+    // reuse it — no second SMS, straight to code entry with reset mode on.
+    setResetMode(true);
+    setStep(2);
   }
 
   const canContinue = [
@@ -179,12 +218,47 @@ export default function Signup({ nav, onComplete }: Props) {
     {
       q: "شماره موبایلت چیه؟",
       sub: "برای ورود به حسابت ازش استفاده می‌کنی.",
-      content: <PhoneInput value={phone} onChange={setPhone} autoFocus onEnter={() => canContinue && advance()} />,
+      content: (
+        <div>
+          <PhoneInput
+            value={phone}
+            onChange={v => { setPhone(v); setPhoneTaken(false); setResetMode(false); }}
+            autoFocus
+            onEnter={() => canContinue && advance()}
+          />
+          {phoneTaken && (
+            <div className="mt-4 rounded-2xl border border-[var(--accent-soft-border)] bg-[var(--accent-soft)] p-4 anim-fade-up">
+              <p className="text-[13.5px] font-bold text-[var(--text)] text-right">
+                این شماره قبلاً ثبت‌نام کرده است
+              </p>
+              <p className="text-[12px] text-[var(--muted)] leading-relaxed text-right mt-1">
+                برای {phone} حساب فعال وجود دارد. وارد شوید یا رمز عبورتان را بازنشانی کنید — ثبت‌نام دوباره حساب جدیدی نمی‌سازد.
+              </p>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={() => { localStorage.setItem("boom-login-phone", phone); nav("login"); }}
+                  className="press flex-1 py-3 rounded-xl bg-[var(--accent)] text-[var(--surface)] text-[12.5px] font-bold hover:brightness-105 transition-all"
+                >
+                  ورود با همین شماره
+                </button>
+                <button
+                  onClick={startReset}
+                  className="press flex-1 py-3 rounded-xl border border-[var(--border-strong)] text-[var(--muted)] text-[12.5px] font-bold hover:bg-[var(--chip)] transition-colors"
+                >
+                  بازنشانی رمز عبور
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ),
     },
     {
       q: bypassMode ? "کد عبور موقت چیه؟" : "کد تایید پیامک‌شده چیه؟",
       sub: bypassMode
         ? `شماره ${phone} توسط پشتیبانی تأیید شده. کد عبور موقتی که به تو داده شده را وارد کن.`
+        : resetMode
+        ? `کد ۶ رقمی پیامک‌شده به ${phone} را وارد کنید تا رمز جدید تنظیم شود.`
         : `کد ۶ رقمی را که به ${phone} پیامک کردیم وارد کنید.`,
       content: (
         <div>
@@ -209,8 +283,10 @@ export default function Signup({ nav, onComplete }: Props) {
       ),
     },
     {
-      q: "رمز عبورت چیه؟",
-      sub: "حداقل ۴ کاراکتر. برای ورود دوباره ازش استفاده می‌کنی.",
+      q: resetMode ? "رمز عبور جدیدت چیه؟" : "رمز عبورت چیه؟",
+      sub: resetMode
+        ? "حداقل ۴ کاراکتر. با رمز جدید وارد حسابت می‌شوی."
+        : "حداقل ۴ کاراکتر. برای ورود دوباره ازش استفاده می‌کنی.",
       content: (
         <div className="flex flex-col gap-3">
           <PasswordInput value={password} onChange={setPassword} placeholder="••••••••" autoFocus />
@@ -327,7 +403,7 @@ export default function Signup({ nav, onComplete }: Props) {
   const showCta = step === 0 || step === 1 || step === 2 || step === 3 || step === TOTAL - 1;
   const ctaLabel =
     step === 1 ? (submitting ? "در حال ارسال کد..." : "ادامه")
-    : step === 3 ? (submitting ? "در حال تایید..." : "تایید و ساخت حساب ←")
+    : step === 3 ? (resetMode ? (submitting ? "در حال بازنشانی..." : "بازنشانی رمز ←") : (submitting ? "در حال تایید..." : "تایید و ساخت حساب ←"))
     : step === TOTAL - 1 ? "ثبت‌نام و ورود ←"
     : "ادامه";
 

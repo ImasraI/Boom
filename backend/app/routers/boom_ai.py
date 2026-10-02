@@ -4,7 +4,7 @@ import threading
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, List, Optional, cast
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.rag.pipeline import answer_question
@@ -12,7 +12,8 @@ from app.rag.embeddings import get_embedding_model
 from app.rag.hybrid_search import get_hybrid_search
 from app.rag.llm import get_llm_client, get_vision_llm_client
 from app.auth.database import Assessment, User
-from app.auth.deps import get_current_user
+from app.auth.deps import get_current_user, get_db
+from sqlalchemy.orm import Session
 from app.auth.limits import (check_ai_quota, record_ai_use,
                              check_token_budget)
 from app.config import get_settings
@@ -1098,6 +1099,67 @@ def _range_title(count: int, item: dict) -> str:
     return "، ".join(p for p in parts if p)
 
 
+def _day_constraints(day: int, daily_hours: float, student: Optional[dict]):
+    """UI weekday keys are Persian names; numeric profile keys use Monday=0."""
+    student = student or {}
+    availability = student.get("availability") or {}
+    hours = student.get("dailyHours") or student.get("daily_hours") or availability.get("daily_hours") or {}
+    weekday = (day + 5) % 7
+    labels = [_DAY_LABELS[day]]
+    if day == 3:
+        labels += ["سه شنبه", "سه‌شنبه"]
+    value = next((hours[label] for label in labels if label in hours),
+                 hours.get(str(weekday), hours.get("*", daily_hours)))
+    try:
+        cap = max(0.0, min(16.0, float(value)))
+    except (TypeError, ValueError):
+        cap = max(0.0, float(daily_hours))
+    def hour(text, fallback):
+        try:
+            h, m = str(text).split(":")
+            return int(h) + int(m) / 60
+        except (TypeError, ValueError):
+            return fallback
+    wake = hour(student.get("wakeTime") or availability.get("wake"), 6.0)
+    sleep = hour(student.get("sleepTime") or availability.get("sleep"), 24.0)
+    if student.get("sleepHours") is not None or availability.get("sleep_hours") is not None:
+        try:
+            sleep = wake + 24 - float(student.get("sleepHours", availability.get("sleep_hours", 8)))
+        except (TypeError, ValueError):
+            pass
+    if sleep <= wake:
+        sleep += 24
+    # The schedule UI represents calendar days, so do not wrap a block past midnight.
+    return cap, max(6.0, wake), min(24.0, sleep)
+
+
+def _safe_week_blocks(blocks, daily_hours, student, occupied, relocate=False):
+    """Enforce time budgets and conflicts independently of the LLM prompt."""
+    out = []
+    for raw in blocks:
+        b = _normalize_block(raw, len(out))
+        cap, wake, sleep = _day_constraints(b["day"], daily_hours, student)
+        room = cap - sum(x["duration"] for x in out if x["day"] == b["day"])
+        duration = min(b["duration"], int(max(0, room) * 2) / 2)
+        if duration < 0.5:
+            continue
+        busy = list(occupied) + out
+        start = b["startHour"]
+        if relocate:
+            starts = [start] + [h / 2 for h in range(int(wake * 2 + 0.999999), int(sleep * 2))]
+            start = next((h for h in starts if h >= wake and h + duration <= sleep
+                          and not _overlaps_occupied(b["day"], h, duration, busy)), None)
+            if start is None:
+                continue
+        if start < wake or start + duration > sleep or _overlaps_occupied(b["day"], start, duration, busy):
+            continue
+        if b.get("count") is not None and duration < b["duration"]:
+            b["count"] = max(0, int(b["count"] * duration / b["duration"]))
+        b.update(startHour=start, duration=duration)
+        out.append(b)
+    return out
+
+
 def _default_week_plan(
     books: List[str],
     daily_hours: float,
@@ -1123,7 +1185,9 @@ def _default_week_plan(
     main_book = books[0] if books else "کتاب منبع کنکور"
     weak = (student or {}).get("weakSubjects") or (student or {}).get("weak_subjects") or []
     weak_line = f" (اولویت: {'، '.join(weak)})" if weak else ""
-    study_h = max(0.5, float(daily_hours) if daily_hours else 4.0)
+    study_h = max(0.0, float(daily_hours))
+    if study_h == 0:
+        return []
 
     read_share = 0.4 if week_offset % 2 else 0.5
     read_dur = round(min(study_h * read_share, 3.0) * 2) / 2
@@ -1196,7 +1260,7 @@ def _default_week_plan(
                     "title": "مرور و جمعبندی",
                 }, idx))
                 idx += 1
-    return blocks
+    return _safe_week_blocks(blocks, daily_hours, student, occupied, relocate=True)
 
 
 def _complete_week_plan(
@@ -1216,42 +1280,17 @@ def _complete_week_plan(
     Blocks that overlap protected static (user-created) slots are dropped.
     System static blocks can be modified by the LLM.
     """
-    # Separate protected (user-created) statics from system statics
-    protected_statics = protected_statics or []
-    occupied = _occupied_slots(protected_statics)
-    kept = [
-        dict(b) for b in blocks
-        if not _overlaps_occupied(b.get("day", 0), b.get("startHour", 0), b.get("duration", 1), occupied)
-    ]
-    default = _default_week_plan(books, daily_hours, student, occupied,
-                                 user_id=user_id)
-    by_day: dict[int, List[dict]] = {}
-    for b in kept:
-        by_day.setdefault(int(b.get("day", 0)), []).append(dict(b))
-
-    out: List[dict] = []
-    idx = 0
-    for day in range(7):
-        day_blocks = by_day.get(day, [])
-        has_study = any(b["type"] == "study" for b in day_blocks)
-        has_test = any(b["type"] == "test" for b in day_blocks)
-        for db in default:
-            if db["day"] != day:
-                continue
-            if db["type"] == "study" and has_study:
-                continue
-            if db["type"] == "test" and has_test:
-                continue
-            if _overlaps_occupied(db["day"], db["startHour"], db["duration"], occupied):
-                continue
-            if any(_hours_overlap(db["startHour"], db["duration"], b["startHour"], b["duration"]) for b in day_blocks):
-                continue
-            day_blocks.append(dict(db))
-        day_blocks.sort(key=lambda b: b["startHour"])
-        for b in day_blocks:
-            b["id"] = f"gen-{idx}"
-            idx += 1
-            out.append(b)
+    occupied = _occupied_slots(protected_statics or [])
+    kept = _safe_week_blocks(blocks, daily_hours, student, occupied)
+    default = _default_week_plan(books, daily_hours, student, occupied, user_id=user_id)
+    candidates = list(kept)
+    for b in default:
+        if not any(x["day"] == b["day"] and x["type"] == b["type"] for x in kept):
+            candidates.append(b)
+    out = _safe_week_blocks(candidates, daily_hours, student, occupied)
+    out.sort(key=lambda b: (b["day"], b["startHour"]))
+    for idx, b in enumerate(out):
+        b["id"] = f"gen-{idx}"
     return out
 
 
@@ -1754,163 +1793,28 @@ WEEKLY_PLAN_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنک�
 
 
 @router.post("/weekly-plan")
-def generate_weekly_plan(
-    request: WeeklyPlanRequest,
-    current_user: User = Depends(get_current_user),
-):
-    """Generate a standard default weekly plan (study + test blocks) grounded
-    in the retrieved Konkoor books, so empty weeks can be auto-filled by the
-    schedule page."""
-    check_ai_quota(current_user.id, "weekly_plan")
-    student = request.student or {}
-    daily = request.daily_hours
-    major = student.get("major", "ریاضی فیزیک")
-    grade = student.get("grade", "سال کنکور")
-    weak = student.get("weakSubjects") or student.get("weak_subjects") or []
-
-    search_text = (
-        f"برنامه هفتگی مطالعاتی کنکور {major} {grade} با مطالعه، تست و آزمون، "
-        f"راهنمای تست‌زنی و مرور مطالب از کتاب‌های جامع کنکور"
-    )
-    embedder = get_embedding_model()
-    search = get_hybrid_search()
-    q = embedder.embed_query(search_text)
-    chunks = search.search(
-        query_text=search_text,
-        query_embedding=q,
-        user_id=current_user.id,
-        top_k=6,
-    )
-    books = _book_list(chunks)
-
-    # OCR'd book pages live in the text store, so pull each weak subject's
-    # own content (chapters, question types, page ranges) -- this is how the
-    # planner "knows which questions to put".
-    subject_chunks = _subject_book_context(weak, major, grade)
-    if subject_chunks:
-        seen = {(c["document_name"], c["content"][:80]) for c in chunks}
-        for c in subject_chunks:
-            if (c["document_name"], c["content"][:80]) not in seen:
-                seen.add((c["document_name"], c["content"][:80]))
-                chunks.append(c)
-        books = list(dict.fromkeys(books + [_c["document_name"] for _c in subject_chunks]))
-
-    # The text store is often empty (books are scanned page images), so also
-    # name the retrieved books from the image store to ground test blocks.
+def generate_weekly_plan(request: WeeklyPlanRequest,
+                         current_user: User = Depends(get_current_user),
+                         db: Session = Depends(get_db)):
+    from app.planner.adaptive import build_week
     try:
-        from app.rag.pipeline import _retrieve_image_hits
-        img_hits = _retrieve_image_hits(search_text, current_user.id, 4)
-        books = list(dict.fromkeys(books + _book_list(img_hits)))
-    except Exception:
-        img_hits = []
-
-    book_line = "کتاب‌های مرجع تست: " + ("، ".join(books) if books else "نامشخص")
-    context = "\n\n".join(
-        f"[منبع {i + 1}] {c['document_name']}:\n{c['content']}"
-        for i, c in enumerate(chunks)
-    )
-
-    # If retrieval found no book (vector stores hold only plan docs so far),
-    # still ground the plan in a sensible book from the on-disk catalog so
-    # test blocks name a real source instead of a generic placeholder.
-    if not books:
-        picked = _pick_main_book(student)
-        if picked:
-            books = [picked]
-
-    catalog = "، ".join(book_catalog())
-    reference_block = (
-        "منابع موجود در سامانه (کتاب‌های فایل‌شده):\n"
-        + (catalog if catalog else "هنوز کتابی بارگذاری نشده است.")
-        + "\n\n"
-        + ("کتاب‌های به‌دست‌آمده از جستجو: " + "، ".join(books) if books else "کتابی از جستجو به‌دست نیامد.")
-        + ("\n\n" + context if context else "")
-    )
-
-    # Anchor the planning to a concrete week (default: current week) and find
-    # the mock exam scheduled inside it, so the plan prepares the student for
-    # exactly the subjects/chapters tested by that week's mock.
-    try:
-        week_start = date.fromisoformat(request.week_start) if request.week_start else None
-    except ValueError:
-        week_start = None
-    if week_start is None:
         today = date.today()
-        week_start = today - timedelta(days=(today.weekday() + 1) % 7)
-    week_end = week_start + timedelta(days=6)
-    week_range = (
-        f"شنبه {_jalali_date_str(week_start)} تا جمعه {_jalali_date_str(week_end)}"
-        f" (تاریخ میلادی: {week_start.isoformat()} تا {week_end.isoformat()})"
-    )
-    mock = _extract_week_mock(current_user.id, week_start, weeks=2)
-    occupied = _occupied_slots(request.statics)
+        start = date.fromisoformat(request.week_start) if request.week_start else today - timedelta(days=(today.weekday() + 2) % 7)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid week_start date")
+    return build_week(db, current_user.id, request.student, request.daily_hours, start, request.statics)
 
-    # The planner's memory: recent wrong/blank answers decide what gets
-    # extra test blocks and which topics the fallback plan resolves into
-    # concrete page/question ranges.
-    weakness = _weakness_summary(student, student_id=current_user.id)
 
-    prompt = WEEKLY_PLAN_PROMPT.format(
-        daily_hours=daily,
-        weak="، ".join(weak) if weak else "نامشخص",
-        student=_student_context({**student, "ساعات مطالعه روزانه": daily}),
-        history=_history_context(request.history),
-        week_range=week_range,
-        mock=(mock["summary"] if mock else "آزمون هفتگیای این هفته برنامهریزی نشده است."),
-        occupied=_occupied_prompt(occupied),
-        weakness=_weakness_prompt(weakness) or "تست غلط ثبت‌شده‌ای نیست.",
-        context=book_line + ("\n\n" + reference_block if reference_block else ""),
-    )
-    answer = get_llm_client().generate([{"role": "user", "content": prompt}], max_tokens=1600)
-    record_ai_use(current_user.id, "weekly_plan")
-
-    data = _parse_json_from_text(answer)
-    blocks = _plan_blocks(data)
-    if blocks:
-        note = str((data or {}).get("note") or "")
-        llm_used = True
-    else:
-        # Fallback plan is placed directly into the free slots (so it never
-        # collides with the user's class/static blocks) and alternates the
-        # study/test emphasis every other week (week_offset parity).
-        blocks = _default_week_plan(
-            books, daily, student, occupied,
-            weak_topics=weakness.get("pairs") or [],
-            week_offset=week_start.isocalendar()[1] % 2,
-            user_id=current_user.id,
-        )
-        note = "برنامه استاندارد پیش‌فرض (خروجی مدل قابل تفسیر نبود). llm_used=false"
-        llm_used = False
-
-    # Separate user statics (protected) from system statics
-    # User statics are the ones created by the user via static/repeating option
-    # System statics are the pre-defined weekly schedule blocks
-    # For now, we treat request.statics as user statics (protected)
-    # and system statics as empty (to be added later if needed)
-    blocks = _complete_week_plan(blocks, books, daily, student, statics=[],
-                                 protected_statics=request.statics,
-                                 user_id=current_user.id)
-    if books:
-        main = books[0]
-        for b in blocks:
-            if b["type"] == "test" and any(
-                g in b["title"] for g in ("کتاب مرجع", "کتاب منبع", "منبع مرجع", "[نام کتاب]")
-            ):
-                b["title"] = b["title"].replace("کتاب مرجع", main).replace(
-                    "کتاب منبع", main).replace("منبع مرجع", main).replace(
-                    "[نام کتاب]", main)
-
-    response = {
-        "week_start": week_start.isoformat(),
-        "blocks": blocks,
-        "note": note,
-        "source_books": books,
-        "llm_used": llm_used,
-    }
-    if mock:
-        response["mock"] = {
-            "document": mock["document"],
-            "pages": mock["pages"],
-            "summary": mock["summary"],
-        }
-    return response
+@router.get("/plan-overview")
+def plan_overview(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.planner.adaptive import topic_evidence
+    from app.auth.database import TaskProgress
+    today = date.today()
+    exams = db.query(Assessment).filter(Assessment.student_id == current_user.id,
+        Assessment.date >= today).order_by(Assessment.date).limit(20).all()
+    progress = db.query(TaskProgress).filter(TaskProgress.student_id == current_user.id,
+        TaskProgress.date >= today - timedelta(days=6), TaskProgress.date <= today).all()
+    return {"evidence": topic_evidence(db, current_user.id),
+            "exams": [{"title": e.title, "date": e.date.isoformat()} for e in exams],
+            "completed": sum(p.status == "completed" for p in progress), "recorded": sum(p.status != "rescheduled" for p in progress),
+            "actual_minutes": sum(p.actual_minutes for p in progress)}

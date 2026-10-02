@@ -11,8 +11,31 @@ interface UserRow {
 }
 interface UsersPayload { day: string; token_budget: number; limits: Record<string, number>; users: UserRow[] }
 interface Shelf { major_key: string; major: string; difficulty: string; available: number }
-interface PoolPayload { target: number; shelves: Shelf[]; running?: boolean; cancel_requested?: boolean }
+interface PoolProgress {
+  active: boolean; label: string; planned: number; produced: number;
+  current: { major_key: string; major: string; difficulty: string } | null;
+  elapsed_seconds: number;
+  available: number; capacity: number; percent: number;
+  duel_available: number; duel_capacity: number;
+  // Question bookkeeping: a booklet is ~100 questions over several minutes,
+  // so these move long before the booklet counters do.
+  phase?: string;
+  questions_planned: number; questions: number;
+  current_target: number; current_questions: number; current_verified: number;
+  failures: number; last_error: string;
+}
+interface PoolPayload {
+  target: number; shelves: Shelf[]; running?: boolean;
+  cancel_requested?: boolean; progress?: PoolProgress;
+}
 interface SmsCredit { credit: number; configured: boolean; detail: string; bypass_active: boolean }
+
+function formatElapsed(seconds: number) {
+  const total = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(total / 60);
+  if (!minutes) return `${total} ثانیه`;
+  return `${minutes}:${String(total % 60).padStart(2, "0")} دقیقه`;
+}
 
 const FEATURE_FA: Record<string, string> = {
   chat: "چت", study_plan: "برنامه درسی", weekly_plan: "برنامه هفتگی",
@@ -20,6 +43,9 @@ const FEATURE_FA: Record<string, string> = {
 };
 const DIFFICULTY_FA: Record<string, string> = {
   easy: "آسان", konkur: "کنکور", hard: "سخت",
+};
+const PHASE_FA: Record<string, string> = {
+  generating: "تولید سوال", verifying: "راستی‌آزمایی پاسخ‌ها", saving: "ذخیره دفترچه",
 };
 
 export default function Admin({ nav }: { nav: NavFn }) {
@@ -57,8 +83,11 @@ export default function Admin({ nav }: { nav: NavFn }) {
   // While a restock is running, poll the shelves so the numbers move live.
   // The payload also carries the server's run state, so a cancel (or a
   // backend restart) flips the UI back to idle even if this tab missed it.
+  // The server flag drives the poll too, so opening the panel mid-run (or
+  // refreshing) still animates the progress bar.
+  const generating = restocking || Boolean(pool?.running);
   useEffect(() => {
-    if (!restocking) return;
+    if (!generating) return;
     poolTimer.current = window.setInterval(async () => {
       try {
         const res = await fetch(apiUrl("/api/admin/pool"), { headers: { ...authHeaders() } });
@@ -75,7 +104,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
       } catch { /* keep polling */ }
     }, 3000);
     return () => { if (poolTimer.current) window.clearInterval(poolTimer.current); };
-  }, [restocking]);
+  }, [generating]);
 
   async function add() {
     setBusy(true); setErr(""); setMsg("");
@@ -174,6 +203,9 @@ export default function Admin({ nav }: { nav: NavFn }) {
       setMsg("همه قفسه‌ها پر شد");
     }
   }, [pool, restocking]);
+
+  const progress = pool?.progress;
+  const poolPercent = Math.min(100, Math.max(0, progress?.percent ?? 0));
 
   const limits = payload?.limits ?? {};
 
@@ -304,11 +336,11 @@ export default function Admin({ nav }: { nav: NavFn }) {
           <span className="text-[10px] text-[var(--muted-2)] ms-auto">
             هدف هر قفسه: {pool?.target ?? "—"}
           </span>
-          <button onClick={restock} disabled={busy || restocking}
+          <button onClick={restock} disabled={busy || generating}
             className="text-[11px] px-3 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--surface)] font-bold disabled:opacity-40">
-            {restocking ? "در حال تولید..." : "تولید فوری"}
+            {generating ? "در حال تولید..." : "تولید فوری"}
           </button>
-          {restocking && !cancelRequested && (
+          {generating && !cancelRequested && (
             <button onClick={cancelRestock}
               className="text-[11px] px-3 py-1.5 rounded-xl border border-red-400/60 text-red-400 font-bold hover:bg-red-400/10">
               لغو تولید
@@ -318,6 +350,59 @@ export default function Admin({ nav }: { nav: NavFn }) {
             <span className="text-[10px] text-[var(--muted-2)]">
               در حال توقف پس از دفترچه فعلی...
             </span>
+          )}
+        </div>
+        {/* Aggregate fill across every shelf. While a sweep is producing, the
+            bar shimmers and the live run state (booklets done, shelf in
+            flight, elapsed) sits right underneath it. */}
+        <div className="mb-4">
+          <div className="flex items-baseline justify-between text-[11px] text-[var(--muted)] mb-1.5">
+            <span>
+              {generating ? "در حال تولید دفترچه‌ها..." : "موجودی کل قفسه‌ها"}
+            </span>
+            <span className="font-bold text-[var(--text)]">
+              {progress?.available ?? 0} از {progress?.capacity ?? 0} دفترچه
+              {progress ? ` (${poolPercent}٪)` : ""}
+            </span>
+          </div>
+          <div
+            className={`pool-bar ${generating ? "is-running" : ""}`}
+            role="progressbar"
+            aria-valuenow={poolPercent}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <div className="pool-bar-fill" style={{ width: `${poolPercent}%` }} />
+          </div>
+          <div className="flex items-baseline justify-between text-[10px] text-[var(--muted-2)] mt-1.5">
+            <span>
+              {generating && progress ? (
+                <>
+                  {progress.produced} دفترچه · {progress.questions} سوال ساخته شد
+                  {progress.current
+                    ? ` — قفسه فعلی: ${progress.current.major} · ${DIFFICULTY_FA[progress.current.difficulty] ?? progress.current.difficulty}`
+                    : " — در حال بررسی قفسه‌ها"}
+                  {progress.elapsed_seconds > 0 ? ` · ${formatElapsed(progress.elapsed_seconds)}` : ""}
+                </>
+              ) : (
+                "آماده‌ی مصرف دانش‌آموزان"
+              )}
+            </span>
+            <span>
+              دوئل: {progress?.duel_available ?? 0} / {progress?.duel_capacity ?? 0}
+            </span>
+          </div>
+          {/* Question detail for the paper being written right now. */}
+          {generating && progress && progress.current_target > 0 && (progress.current_questions > 0 || progress.current_verified > 0) && (
+            <p className="text-[10px] text-[var(--muted-2)] mt-1">
+              دفترچه فعلی: {progress.current_questions} سوال ساخته، {progress.current_verified} تاییدشده از {progress.current_target}
+              {progress.phase ? ` · مرحله: ${PHASE_FA[progress.phase] ?? progress.phase}` : ""}
+            </p>
+          )}
+          {progress?.last_error && (
+            <p className="text-[10px] text-red-400 mt-1.5 leading-relaxed">
+              تولید متوقف شد: {progress.last_error}
+            </p>
           )}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -339,7 +424,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
             );
           })}
         </div>
-        {restocking && (
+        {generating && (
           <p className="text-[11px] text-[var(--muted-2)] mt-3">
             تولید هر دفترچه چند دقیقه طول می‌کشد (یک فراخوان LLM برای هر درس + یک
             فراخوان راستی‌آزمایی برای هر سوال). صفحه را ببندید و برگردید - عدد‌ها

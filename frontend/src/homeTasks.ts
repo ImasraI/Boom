@@ -1,3 +1,5 @@
+import { queueProgress } from "./progressSync";
+import { accountStorage } from "./accountStorage";
 /**
  * Home to-do list <-> weekly plan sync.
  *
@@ -52,7 +54,7 @@ interface DoneSkipped {
 const TODO_TYPES = new Set<string>(["study", "test"]);
 
 export function loadDoneSkipped(dateISO: string): DoneSkipped {
-  const raw = localStorage.getItem(HOME_TASKS_PREFIX + dateISO);
+  const raw = accountStorage.getItem(HOME_TASKS_PREFIX + dateISO);
   if (!raw) return { done: [], skipped: [] };
   try {
     const parsed = JSON.parse(raw) as Partial<DoneSkipped> | null;
@@ -65,7 +67,7 @@ export function loadDoneSkipped(dateISO: string): DoneSkipped {
 }
 
 export function saveDoneSkipped(dateISO: string, state: DoneSkipped) {
-  localStorage.setItem(HOME_TASKS_PREFIX + dateISO, JSON.stringify(state));
+  accountStorage.setItem(HOME_TASKS_PREFIX + dateISO, JSON.stringify(state));
 }
 
 /** Numeric hash of title+startHour: stable across reloads within a day. */
@@ -113,11 +115,11 @@ export function subjectOf(title: string): string {
 function blockToHomeTask(block: StoredBlock): HomeTask {
   const isTest = block.type === "test";
   return {
-    id: taskHash(block.title, block.startHour),
+    id: taskHash(block.id || block.title, block.startHour),
     planBlock: block,
     title: block.title,
     description: block.description ?? "",
-    subject: subjectOf(block.title),
+    subject: block.subject || subjectOf(block.title),
     type: isTest ? "test" : "study",
     duration: fmtDuration(block.duration),
     scheduledTime: fmtHour(block.startHour),
@@ -188,14 +190,50 @@ function notifyChanged() {
 /** Checkbox handler; `done` omitted = toggle. */
 export function toggleDone(dateISO: string, task: HomeTask, done?: boolean) {
   const state = loadDoneSkipped(dateISO);
+  const completed = done ?? !state.done.includes(task.id);
   const next = {
-    done: state.done.includes(task.id)
-      ? state.done.filter((x) => x !== task.id)
-      : [...state.done, task.id],
-    skipped: state.skipped,
+    done: completed ? Array.from(new Set([...state.done, task.id])) : state.done.filter(x => x !== task.id),
+    skipped: state.skipped.filter(x => x !== task.id),
   };
-  void done; // kept for future explicit set; toggle covers current UI
   saveDoneSkipped(dateISO, next);
+  queueProgress({
+    client_ref: `${dateISO}:${task.planBlock.id || task.id}`, date: dateISO,
+    source_ref: task.planBlock.source_ref,
+    subject: task.subject, topic: task.planBlock.topic || "مرور مباحث",
+    task_type: task.planBlock.task_type || task.type,
+    planned_minutes: Math.max(1, Math.round(task.planBlock.duration * 60)),
+    actual_minutes: completed ? Math.round(task.planBlock.duration * 60) : 0,
+    status: completed ? "completed" : "planned",
+  });
+  notifyChanged();
+}
+
+/** Honest completion report (roadmap §3): what ACTUALLY happened, not just
+ * a checkbox. Queues a real progress row the planner can learn from. */
+export function reportTaskActual(
+  dateISO: string,
+  task: HomeTask,
+  report: { status: "completed" | "partially_completed" | "missed"; actualMinutes: number },
+) {
+  queueProgress({
+    client_ref: `${dateISO}:${task.planBlock.id || task.id}:r`,
+    date: dateISO,
+    subject: task.subject,
+    topic: task.planBlock.topic || "مرور مباحث",
+    task_type: task.planBlock.task_type || task.type,
+    planned_minutes: Math.max(1, Math.round(task.planBlock.duration * 60)),
+    actual_minutes: Math.max(0, Math.round(report.actualMinutes)),
+    status: report.status,
+  });
+  const state = loadDoneSkipped(dateISO);
+  if (report.status === "completed") {
+    state.done = Array.from(new Set([...state.done, task.id]));
+    state.skipped = state.skipped.filter((x) => x !== task.id);
+  } else {
+    state.done = state.done.filter((x) => x !== task.id);
+  }
+  saveDoneSkipped(dateISO, state);
+  notifyChanged();
 }
 
 /** Remove the block from today's list AND copy it into tomorrow's plan
@@ -232,6 +270,18 @@ export function postponeToTomorrow(dateISO: string, task: HomeTask) {
     state.done = state.done.filter((x) => x !== task.id);
     saveDoneSkipped(dateISO, state);
   }
+
+  // The planner must know this block moved (roadmap §3 status set).
+  queueProgress({
+    client_ref: `${dateISO}:${task.planBlock.id || task.id}:p`,
+    date: dateISO,
+    subject: task.subject,
+    topic: task.planBlock.topic || "مرور مباحث",
+    task_type: task.planBlock.task_type || task.type,
+    planned_minutes: Math.max(1, Math.round(task.planBlock.duration * 60)),
+    actual_minutes: 0,
+    status: "rescheduled",
+  });
 }
 
 /** Edit sheet "ذخیره" writes the edit back into the weekly plan block. */
