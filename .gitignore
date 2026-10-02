@@ -44,7 +44,15 @@ backend/server_*.log
 .pytest_cache/
 .ruff_cache/
 .kilo/
+.freebuff/
 debug_output.txt
+
+# One-off local preview/design harnesses (single-file scratch HTML pages
+# opened in a browser during development - never part of the app build).
+*_preview.html
+# Figma Make design harness - optional, vite.config.ts reads it only if it
+# exists. Never part of the app build.
+frontend/.figma/
 nohup.out
 
 # ---------------------------------------------------------------------------
@@ -77,3 +85,6 @@ frontend/CLAUDE.md
 # ---------------------------------------------------------------------------
 worker.env
 ocr-kit/keys.txt
+
+# VM env copies must never be committed
+*.env.vm
