@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.rag.embedding_migration import source_digest, validate_migration
 from app.rag.gemini_embeddings import gemini_collection_name
+from app.rag.collection_ops import get_or_create_collection
 
 
 def _encoded(value):
@@ -106,7 +107,7 @@ def import_shared_corpus(client, path, base_names, owner):
             raise ValueError("An imported ID conflicts with a private user document; import refused.")
     result = {}
     for item in payload["collections"]:
-        target = client.get_or_create_collection(item["name"], embedding_function=None,
+        target = get_or_create_collection(client, item["name"],
             metadata={"hnsw:space": "cosine", "boom:embedding_fingerprint": payload["fingerprint"]})
         for start in range(0, len(item["rows"]), 64):
             batch = item["rows"][start:start + 64]

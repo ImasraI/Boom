@@ -236,7 +236,7 @@ For messages arriving at 08:00 the next day, compare provider acceptance and del
 
 ## Release verification
 
-Local validation for this revision: 379 backend tests passed, 2 skipped; 16 frontend tests passed; TypeScript and the Cloudflare production build passed; pip check passed. Local unauthenticated calendar and SMS-report reads return 401. Desktop planning/profile and mobile layouts were inspected; the knowledge graph rendered 31 nodes for the test account without document-level horizontal overflow.
+Local validation for this revision: 382 backend tests passed, 2 skipped; 16 frontend tests passed; TypeScript and the Cloudflare production build passed; pip check passed. Local unauthenticated calendar and SMS-report reads return 401. Desktop planning/profile and mobile layouts were inspected; the knowledge graph rendered 31 nodes for the test account without document-level horizontal overflow.
 
 The 4 October deployment imported and verified 1,783 shared document chunks and
 126 question-bank chunks using Gemini embeddings at 768 dimensions, plus 18,201
@@ -250,6 +250,8 @@ The local Cerebras pool credential returned HTTP 402; the VM uses a verified
 dedicated Gemini pool key instead, keeping mock generation off the Groq chat
 quota. The VM reranks eight candidates on its two CPU cores. Image retrieval
 skips model loading while page files are absent and detects subsequent uploads.
+Runtime collection opens preserve Chroma's provenance metadata; migrations
+reject an existing incompatible fingerprint before changing any metadata.
 SMS authentication and positive credit passed, but actual OTP delivery timing
 and image-based answers still require verification after an approved recipient
 and page images are available.

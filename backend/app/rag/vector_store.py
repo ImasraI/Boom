@@ -43,8 +43,9 @@ class VectorStore:
         )
 
         # Get the collection or create it if it does not exist
-        self.collection = self.client.get_or_create_collection(
-            name=collection_name,
+        from app.rag.collection_ops import get_or_create_collection
+        self.collection = get_or_create_collection(
+            self.client, collection_name,
             metadata={"hnsw:space": "cosine"}
         )
 

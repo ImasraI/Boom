@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.rag.gemini_embeddings import EmbeddingError, gemini_collection_name
+from app.rag.collection_ops import get_or_create_collection
 
 
 def source_digest(text, metadata):
@@ -22,12 +23,12 @@ def migrate_collection(client, source_name, model, progress=lambda value: None):
     target_name = gemini_collection_name(source_name, model.model, model.dimensions)
     if source_name == target_name:
         raise ValueError("Source and destination collections must be different.")
-    target = client.get_or_create_collection(
-        target_name, embedding_function=None,
+    target = get_or_create_collection(
+        client, target_name,
         metadata={"hnsw:space": "cosine", "boom:embedding_fingerprint": model.fingerprint},
     )
     metadata = target.metadata or {}
-    if metadata.get("boom:embedding_fingerprint", model.fingerprint) != model.fingerprint:
+    if metadata.get("boom:embedding_fingerprint") != model.fingerprint:
         raise EmbeddingError("Destination collection has incompatible embedding provenance.")
     # Capture IDs once: concurrent uploads cannot shift pagination offsets.
     ids = sorted(source.get(include=[])["ids"])
@@ -81,9 +82,9 @@ def migrate_collection_parallel(client, source_name, models, progress=lambda val
     model = models[0]
     source = client.get_collection(source_name, embedding_function=None)
     target_name = gemini_collection_name(source_name, model.model, model.dimensions)
-    target = client.get_or_create_collection(target_name, embedding_function=None,
+    target = get_or_create_collection(client, target_name,
         metadata={"hnsw:space": "cosine", "boom:embedding_fingerprint": model.fingerprint})
-    if (target.metadata or {}).get("boom:embedding_fingerprint", model.fingerprint) != model.fingerprint:
+    if (target.metadata or {}).get("boom:embedding_fingerprint") != model.fingerprint:
         raise EmbeddingError("Destination collection has incompatible embedding provenance.")
     ids = sorted(source.get(include=[])["ids"])
     tasks, completed = [], 0
