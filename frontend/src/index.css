@@ -58,9 +58,8 @@ html.dark {
   --success-bg: #1A2A1E;
   --success-text: #8FCB9B;
   --neutral-chip: #2A241E;
-  /* Dark mode: cream hard offset — the original UI's mirror of the black
-     shadow used in light mode. */
-  --block-shadow: #f5efe8;
+  /* Keep the original sharp blocks with a true shadow behind them. */
+  --block-shadow: rgba(0, 0, 0, 0.55);
   --accent-rgb: 212 132 92;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
   --shadow-md: 0 2px 6px rgb(0 0 0 / 0.45), 0 12px 32px -8px rgb(0 0 0 / 0.55);
@@ -210,6 +209,66 @@ input[type="range"]::-webkit-slider-thumb {
   box-shadow: 0 1px 4px rgba(0,0,0,0.18);
 }
 input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; }
+
+/* Assistant replies can contain lesson plans, tables, math and source links. */
+.chat-markdown { min-width: 0; line-height: 1.9; }
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+.chat-markdown p { margin: 0.55em 0; white-space: pre-wrap; }
+.chat-markdown h1, .chat-markdown h2, .chat-markdown h3,
+.chat-markdown h4, .chat-markdown h5, .chat-markdown h6 {
+  font-weight: 800; line-height: 1.5; margin: 1.1em 0 0.35em;
+  color: var(--text-strong);
+}
+.chat-markdown h1 { font-size: 1.35em; }
+.chat-markdown h2 { font-size: 1.2em; }
+.chat-markdown h3 { font-size: 1.08em; }
+.chat-markdown ul, .chat-markdown ol { padding-inline-start: 1.55em; margin: 0.5em 0; }
+.chat-markdown ul { list-style: disc; }
+.chat-markdown ol { list-style: decimal; }
+.chat-markdown li { padding-inline-start: 0.2em; margin: 0.2em 0; }
+.chat-markdown li::marker { color: var(--accent); font-weight: 700; }
+.chat-markdown li > p { margin: 0; }
+.chat-markdown input[type="checkbox"] { accent-color: var(--accent); margin-inline-end: 0.4em; }
+.chat-markdown blockquote {
+  border-inline-start: 3px solid var(--accent); padding-inline-start: 0.9em;
+  margin: 0.9em 0; color: var(--muted);
+}
+.chat-markdown a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.chat-markdown hr { border: 0; border-top: 1px solid var(--border-strong); margin: 1em 0; }
+.chat-markdown :not(pre) > code {
+  background: var(--chip); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0.05em 0.35em; direction: ltr;
+  unicode-bidi: isolate; font-size: 0.92em;
+}
+.chat-markdown pre {
+  direction: ltr; text-align: left; overflow-x: auto; max-width: 100%;
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  border-radius: 10px; padding: 0.9em 1em; margin: 0.8em 0;
+  font-size: 0.9em; line-height: 1.6;
+}
+.chat-markdown pre code { white-space: pre; }
+.chat-markdown .katex-display { overflow-x: auto; overflow-y: hidden; margin: 0.8em 0; }
+.chat-table-scroll {
+  max-width: 100%; overflow-x: auto; margin: 0.9em 0 1.1em;
+  border: 1px solid var(--border-strong); border-radius: 10px;
+  background: var(--card); scrollbar-width: thin;
+}
+.chat-markdown table { width: 100%; min-width: 440px; border-collapse: collapse; text-align: right; }
+.chat-markdown th, .chat-markdown td {
+  padding: 0.65em 0.9em; border-inline-end: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); vertical-align: top;
+  overflow-wrap: normal; white-space: normal;
+}
+.chat-markdown th:last-child, .chat-markdown td:last-child { border-inline-end: 0; }
+.chat-markdown tr:last-child td { border-bottom: 0; }
+.chat-markdown th {
+  background: var(--accent-soft); color: var(--brown-text);
+  font-weight: 800; white-space: nowrap;
+}
+.chat-markdown tbody tr:nth-child(even) { background: var(--surface-2); }
+.chat-markdown tbody tr:hover { background: var(--chip); }
+.chat-markdown td:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* Hide number-input spinners (clean step forms) */
 .no-spin::-webkit-outer-spin-button,
@@ -391,7 +450,7 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; }
 html.dark .schedule-block {
   color: #f5efe8;
   border-color: #f5efe8;
-  box-shadow: 4px 4px 0 0 #f5efe8;
+  box-shadow: 4px 4px 0 0 var(--block-shadow);
 }
 
 .schedule-block:hover:not(.is-dragging) {
@@ -585,3 +644,38 @@ nav[aria-label='ناوبری موبایل'] .text-\[10px\] {font-size:11px}
 .page-loading i {display:block;height:110px;border-radius:24px;background:linear-gradient(100deg,var(--chip) 25%,var(--surface-2) 45%,var(--chip) 65%);background-size:200% 100%;margin-top:20px;animation:loading-sheen 1.8s ease-in-out infinite}
 .page-loading i:nth-of-type(2) {height:180px}.page-loading i:nth-of-type(3) {height:80px}
 @keyframes loading-sheen {from {background-position:100% 0}to {background-position:-100% 0}}
+
+/* Boom's study desk: continuous sections, quiet rules, readable task rows. */
+.study-section {
+  border: 0;
+  border-block-end: 1px solid var(--border-strong);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.study-section h2, .study-section h3 { line-height: 1.8; }
+.study-field { border-block-end: 1px solid var(--border); background: transparent; }
+.study-field:focus-within { border-block-end-color: var(--accent); }
+.auth-sheet { border-block: 1px solid var(--border-strong); }
+.page-plan .plan-heading { padding-block-end: 24px; border-block-end: 1px solid var(--border-strong); }
+.page-plan .plan-metrics { gap: 0; border-block-end: 1px solid var(--border-strong); }
+.page-plan .plan-metrics > div {
+  border: 0; border-radius: 0; background: transparent;
+  border-inline-end: 1px solid var(--border); padding: 20px 14px;
+}
+.page-plan .plan-metrics > div:last-child { border-inline-end: 0; }
+.page-home .study-hero { background: transparent; padding-block: 28px; }
+.page-home .study-hero::before { display: none; }
+.page-home .task-tile:hover { box-shadow: none; }
+.page-evaluation .eval-card {
+  border: 0; border-block-end: 1px solid var(--border-strong);
+  box-shadow: none !important; transform: none;
+}
+.page-profile .study-field > p:first-child { color: var(--muted); font-size: 12px; }
+.page-profile .study-field input:not([type='range']), .page-profile .study-field select { min-height: 32px; }
+.page-knowledge .study-section { scroll-margin-block-start: 80px; }
+.page-scene h1, .page-scene h2 { letter-spacing: 0; }
+@media (min-width: 768px) {
+  .page-home .study-hero { padding: 32px; }
+  .page-plan .study-section { padding-inline: 0; }
+}

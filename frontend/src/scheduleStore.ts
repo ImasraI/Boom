@@ -1,4 +1,6 @@
 import { accountStorage } from "./accountStorage";
+import { queueCalendar } from "./calendarSync";
+import { expandTemplates, type Recurrence } from "./recurrence";
 /**
  * Shared weekly-schedule storage + date helpers.
  *
@@ -20,10 +22,16 @@ export const GENERATED_KEY = "boom-weekly-generated"
 export type BlockType = "class" | "study" | "test" | "break"
 
 export interface StoredBlock {
+  origin?: "manual" | "generated";
   source_ref?: string;
   subject?: string;
   topic?: string;
   task_type?: string;
+  resource?: string | null;
+  question_start?: number | null;
+  question_end?: number | null;
+  page_start?: number | null;
+  page_end?: number | null;
   id?: string
   day: number
   startHour: number
@@ -35,7 +43,8 @@ export interface StoredBlock {
   description?: string
 }
 
-export interface StoredStatic {
+export interface StoredStatic extends Omit<StoredBlock, "day"> {
+  recurrence?: Recurrence;
   id?: string
   day?: number
   date?: string
@@ -50,6 +59,18 @@ export interface StoredStatic {
 /** Fired (window CustomEvent) whenever the weekly plan or statics change, so
  * views derived from them (e.g. the Home to-do list) can reload live. */
 export const SCHEDULE_CHANGED_EVENT = "boom-schedule-changed"
+
+type TimeSlot = { day: number; startHour: number; duration: number };
+
+export function blocksOverlap(a: TimeSlot, b: TimeSlot): boolean {
+  return a.day === b.day && Math.round(a.startHour * 60) < Math.round((b.startHour + b.duration) * 60)
+    && Math.round(b.startHour * 60) < Math.round((a.startHour + a.duration) * 60);
+}
+
+export function hasScheduleOverlap(blocks: TimeSlot[], fixed: TimeSlot[] = []): boolean {
+  return blocks.some((block, index) => fixed.some(other => blocksOverlap(block, other))
+    || blocks.slice(index + 1).some(other => blocksOverlap(block, other)));
+}
 
 function notifyScheduleChanged() {
   window.dispatchEvent(new CustomEvent(SCHEDULE_CHANGED_EVENT))
@@ -111,7 +132,11 @@ export function loadWeekBlocks(weekISO: string): StoredBlock[] {
 }
 
 export function saveWeekBlocks(weekISO: string, blocks: StoredBlock[]) {
+  if (hasScheduleOverlap(blocks, staticBlocksForWeek(weekISO))) {
+    throw new Error("این زمان با فعالیت دیگری تداخل دارد؛ ساعت یا مدت را تغییر دهید.");
+  }
   accountStorage.setItem(STORAGE_PREFIX + weekISO, JSON.stringify(blocks))
+  queueCalendar({ weeks: { [weekISO]: blocks } });
   notifyScheduleChanged()
 }
 
@@ -121,7 +146,19 @@ export function loadStaticTemplates(): StoredStatic[] {
 
 export function saveStaticTemplates(templates: StoredStatic[]) {
   accountStorage.setItem(STATIC_KEY, JSON.stringify(templates))
+  queueCalendar({ statics: templates });
   notifyScheduleChanged()
+}
+
+/** Converting a single activity to/from a series changes both stores at once. */
+export function saveCalendarWeek(weekISO: string, blocks: StoredBlock[], templates: StoredStatic[]) {
+  if (hasScheduleOverlap(blocks, expandTemplates(templates, weekISO))) {
+    throw new Error("این زمان با فعالیت دیگری تداخل دارد؛ ساعت یا مدت را تغییر دهید.");
+  }
+  accountStorage.setItem(STORAGE_PREFIX + weekISO, JSON.stringify(blocks));
+  accountStorage.setItem(STATIC_KEY, JSON.stringify(templates));
+  queueCalendar({ weeks: { [weekISO]: blocks }, statics: templates });
+  notifyScheduleChanged();
 }
 
 export function loadGeneratedMarkers(): Record<string, boolean> {
@@ -139,6 +176,10 @@ export function markWeekGenerated(weekISO: string) {
   const markers = loadGeneratedMarkers()
   markers[weekISO] = true
   accountStorage.setItem(GENERATED_KEY, JSON.stringify(markers))
+}
+
+export function staticBlocksForWeek(weekISO: string): StoredBlock[] {
+  return expandTemplates(loadStaticTemplates(), weekISO);
 }
 
 export function unmarkWeekGenerated(weekISO: string) {
@@ -160,9 +201,6 @@ export function weeklyScheduleContext(weekISO?: string): {
   return {
     week_start: iso,
     blocks: loadWeekBlocks(iso),
-    statics: loadStaticTemplates().map((t) => ({
-      ...t,
-      day: staticWeekday(t),
-    })),
+    statics: staticBlocksForWeek(iso),
   }
 }

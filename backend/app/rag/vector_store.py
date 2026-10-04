@@ -269,11 +269,12 @@ class VectorStore:
 def get_vector_store() -> VectorStore:
     # Load application settings
     settings = get_settings()
+    from app.rag.gemini_embeddings import text_collection_name
 
     # Create and cache the vector store instance
     return VectorStore(
         persist_dir=settings.CHROMA_DIR,
-        collection_name=settings.CHROMA_COLLECTION
+        collection_name=text_collection_name(settings, settings.CHROMA_COLLECTION)
     )
 
 
@@ -286,9 +287,10 @@ def get_question_vector_store() -> VectorStore:
     never mix.
     """
     settings = get_settings()
+    from app.rag.gemini_embeddings import text_collection_name
     return VectorStore(
         persist_dir=settings.CHROMA_DIR,
-        collection_name=settings.CHROMA_QA_COLLECTION,
+        collection_name=text_collection_name(settings, settings.CHROMA_QA_COLLECTION),
     )
 
 

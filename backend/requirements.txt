@@ -1,19 +1,20 @@
-fastapi==0.115.0
+fastapi==0.142.2
+starlette==1.3.1
 uvicorn[standard]==0.30.6
 pydantic==2.9.2
 pydantic-settings==2.5.2
-python-multipart==0.0.9
+python-multipart==0.0.32
 
 # RAG stack
 chromadb==0.5.5
-langchain-community==0.2.0
 
-python-dotenv==1.0.1
-python-jose[cryptography]==3.3.0
+python-dotenv==1.2.4
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 # passlib 1.7.4 reads bcrypt.__about__, removed in bcrypt 4.1+; pin 4.0.1
 bcrypt==4.0.1
 httpx==0.27.0
+requests==2.34.2
 
 #pdfrender 
 PyMuPDF==1.24.14
@@ -24,8 +25,8 @@ PyMuPDF==1.24.14
 numpy==1.26.4
 
 # Page-as-image RAG pipeline: default "clip" embedding backend + vision LLM images
-sentence-transformers==3.0.1
-Pillow==10.4.0
+sentence-transformers==6.1.0
+Pillow==12.3.0
 # Note: ColPali/ColQwen backend needs extra heavy deps (torch, transformers,
 # colpali-engine). Install requirements-colpali.txt only if you switch
 # IMAGE_EMBEDDING_BACKEND=colpali in .env.

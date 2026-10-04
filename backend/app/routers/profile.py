@@ -26,6 +26,49 @@ router = APIRouter(prefix="/api/profile", tags=["profile"])
 logger = get_logger(__name__)
 
 
+class CalendarIn(BaseModel):
+    version: int = Field(ge=0)
+    weeks: dict[str, list[dict]] = Field(default_factory=dict)
+    statics: Optional[list[dict]] = None
+
+
+@router.get("/calendar")
+def get_calendar(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.planner.calendar import calendar_row, payload
+    row = calendar_row(db, current_user.id)
+    db.commit()
+    return payload(row)
+
+
+@router.patch("/calendar")
+def patch_calendar(body: CalendarIn, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.planner.calendar import calendar_row, payload, validate_blocks, occurrences, overlaps, protected_blocks, write_calendar
+    row = calendar_row(db, current_user.id)
+    current = payload(row)
+    if body.version != row.version:
+        raise HTTPException(409, {"message": "برنامه روی دستگاه دیگری تغییر کرده است", "calendar": current})
+    weeks = {**current["weeks"], **body.weeks}
+    statics = body.statics if body.statics is not None else current["statics"]
+    validate_blocks(statics, templates=True)
+    for iso, blocks in weeks.items():
+        try:
+            start = date.fromisoformat(iso)
+        except ValueError:
+            raise HTTPException(422, "تاریخ هفته نامعتبر است")
+        if start.weekday() != 5:
+            raise HTTPException(422, "هفته باید از شنبه آغاز شود")
+        validate_blocks(blocks)
+        fixed = occurrences(statics, start)
+        if overlaps(protected_blocks(blocks) + fixed):
+            raise HTTPException(422, "فعالیت‌های ثابت هم‌پوشانی دارند")
+        # New repeat commitments take priority over generated work in other
+        # weeks; regenerate around them when that week is next requested.
+        weeks[iso] = [b for b in blocks if b in protected_blocks(blocks) or not overlaps([b] + fixed)]
+        if overlaps(weeks[iso] + fixed):
+            raise HTTPException(422, "فعالیت‌های برنامه هم‌پوشانی دارند")
+    return write_calendar(db, row, weeks, statics, body.version)
+
+
 # ---------------------------------------------------------------------------
 # Profile (project 1)
 # ---------------------------------------------------------------------------
@@ -320,6 +363,11 @@ def delete_session(session_id: int,
 class ProgressIn(BaseModel):
     client_ref: str = Field(min_length=1, max_length=200)
     source_ref: Optional[str] = Field(default=None, max_length=200)
+    resource: Optional[str] = Field(default=None, max_length=300)
+    question_start: Optional[int] = Field(default=None, ge=1)
+    question_end: Optional[int] = Field(default=None, ge=1)
+    page_start: Optional[int] = Field(default=None, ge=1)
+    page_end: Optional[int] = Field(default=None, ge=1)
     date: date
     subject: str = Field(min_length=1, max_length=100)
     topic: str = Field(default="", max_length=300)
@@ -334,7 +382,15 @@ def save_progress(payload: ProgressIn, current_user: User = Depends(get_current_
                   db: Session = Depends(get_db)):
     from app.auth.database import TaskProgress
     from sqlalchemy.dialects.sqlite import insert
+    for start, end in ((payload.question_start, payload.question_end), (payload.page_start, payload.page_end)):
+        if start is not None and end is not None and end < start:
+            raise HTTPException(status_code=422, detail="بازهٔ منبع نامعتبر است")
     values = payload.model_dump()
+    # Older clients report completion without source metadata. Keep the
+    # assignment saved by the planner instead of clearing it on completion.
+    for key in ("resource", "question_start", "question_end", "page_start", "page_end"):
+        if key not in payload.model_fields_set:
+            values.pop(key)
     statement = insert(TaskProgress).values(student_id=current_user.id, **values)
     statement = statement.on_conflict_do_update(
         index_elements=[TaskProgress.student_id, TaskProgress.client_ref],

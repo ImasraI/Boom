@@ -16,6 +16,7 @@ import { accountStorage } from "./accountStorage";
  */
 import {
   addDays,
+  blocksOverlap,
   fromISO,
   loadStaticTemplates,
   loadWeekBlocks,
@@ -23,6 +24,7 @@ import {
   SCHEDULE_CHANGED_EVENT,
   startOfWeek,
   staticWeekday,
+  staticBlocksForWeek,
   toISO,
   weekdayOf,
   type StoredBlock,
@@ -199,6 +201,8 @@ export function toggleDone(dateISO: string, task: HomeTask, done?: boolean) {
   queueProgress({
     client_ref: `${dateISO}:${task.planBlock.id || task.id}`, date: dateISO,
     source_ref: task.planBlock.source_ref,
+    resource: task.planBlock.resource, question_start: task.planBlock.question_start, question_end: task.planBlock.question_end,
+    page_start: task.planBlock.page_start, page_end: task.planBlock.page_end,
     subject: task.subject, topic: task.planBlock.topic || "مرور مباحث",
     task_type: task.planBlock.task_type || task.type,
     planned_minutes: Math.max(1, Math.round(task.planBlock.duration * 60)),
@@ -216,7 +220,10 @@ export function reportTaskActual(
   report: { status: "completed" | "partially_completed" | "missed"; actualMinutes: number },
 ) {
   queueProgress({
-    client_ref: `${dateISO}:${task.planBlock.id || task.id}:r`,
+    client_ref: `${dateISO}:${task.planBlock.id || task.id}`,
+    source_ref: task.planBlock.source_ref,
+    resource: task.planBlock.resource, question_start: task.planBlock.question_start, question_end: task.planBlock.question_end,
+    page_start: task.planBlock.page_start, page_end: task.planBlock.page_end,
     date: dateISO,
     subject: task.subject,
     topic: task.planBlock.topic || "مرور مباحث",
@@ -245,7 +252,8 @@ export function postponeToTomorrow(dateISO: string, task: HomeTask) {
   const block = task.planBlock;
   const moved: StoredBlock = {
     ...block,
-    id: undefined,
+    id: crypto.randomUUID(),
+    origin: "manual",
     day: weekdayOf(tomorrow),
   };
   const weekISO = weekOf(tomorrow);
@@ -257,6 +265,13 @@ export function postponeToTomorrow(dateISO: string, task: HomeTask) {
       b.title === moved.title,
   );
   if (!exists) {
+    const occupied = [...blocks, ...staticBlocksForWeek(weekISO)];
+    const hours = Array.from({ length: 72 }, (_, i) => 6 + i / 4);
+    const starts = [moved.startHour, ...hours.filter(hour => hour > moved.startHour), ...hours.filter(hour => hour < moved.startHour)];
+    const free = starts.find(hour => hour + moved.duration <= 24
+      && !occupied.some(other => blocksOverlap({ ...moved, startHour: hour }, other)));
+    if (free === undefined) throw new Error("فردا زمان آزاد کافی برای این فعالیت وجود ندارد.");
+    moved.startHour = free;
     blocks.push(moved);
     saveWeekBlocks(weekISO, blocks); // fires SCHEDULE_CHANGED_EVENT
   } else {
@@ -273,7 +288,10 @@ export function postponeToTomorrow(dateISO: string, task: HomeTask) {
 
   // The planner must know this block moved (roadmap §3 status set).
   queueProgress({
-    client_ref: `${dateISO}:${task.planBlock.id || task.id}:p`,
+    client_ref: `${dateISO}:${task.planBlock.id || task.id}`,
+    source_ref: task.planBlock.source_ref,
+    resource: task.planBlock.resource, question_start: task.planBlock.question_start, question_end: task.planBlock.question_end,
+    page_start: task.planBlock.page_start, page_end: task.planBlock.page_end,
     date: dateISO,
     subject: task.subject,
     topic: task.planBlock.topic || "مرور مباحث",
@@ -282,6 +300,7 @@ export function postponeToTomorrow(dateISO: string, task: HomeTask) {
     actual_minutes: 0,
     status: "rescheduled",
   });
+  notifyChanged();
 }
 
 /** Edit sheet "ذخیره" writes the edit back into the weekly plan block. */
@@ -301,7 +320,7 @@ export function saveTaskEdit(
       x.title === b.title,
   );
   if (idx >= 0) {
-    const next: StoredBlock = { ...blocks[idx], title: patch.title, description: patch.description };
+    const next: StoredBlock = { ...blocks[idx], title: patch.title, description: patch.description, origin: "manual" };
     const hour = parseScheduledTime(patch.scheduledTime);
     if (hour !== null) next.startHour = hour;
     const dur = parseDuration(patch.duration);

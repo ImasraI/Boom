@@ -1,4 +1,4 @@
-import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
@@ -11,11 +11,21 @@ const siteConfiguration = existsSync(siteConfigurationPath)
 
 // Vite config — https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, import.meta.dirname, ['VITE_', 'PORT', 'FIGMA_PUBLIC_URL'])
+  if (process.env.CF_PAGES && mode === 'production' && !env.VITE_API_URL) {
+    throw new Error('Set VITE_API_URL=https://api.boomedu.ir in the Cloudflare Pages build environment.')
+  }
+  if (mode === 'production' && env.VITE_API_URL) {
+    const api = new URL(env.VITE_API_URL)
+    if (api.protocol !== 'https:' || api.pathname !== '/' || api.search || api.hash || api.username || api.password) {
+      throw new Error('Production VITE_API_URL must be an HTTPS origin without /api, credentials or query parameters.')
+    }
+  }
   // .figma/make/deploy-preview passes `--mode development` for cached-preview builds.
   const emitSourcemaps = mode === 'development'
 
   return {
-    base: process.env.FIGMA_PUBLIC_URL ? `${process.env.FIGMA_PUBLIC_URL}/` : '/',
+    base: env.FIGMA_PUBLIC_URL ? `${env.FIGMA_PUBLIC_URL}/` : '/',
     build: {
       sourcemap: emitSourcemaps ? 'inline' : false,
       minify: !emitSourcemaps,
@@ -36,18 +46,18 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/api': {
-          target: process.env.VITE_API_URL || 'http://127.0.0.1:8000',
+          target: env.VITE_API_URL || 'http://127.0.0.1:8000',
           changeOrigin: true,
         },
       },
       host: '0.0.0.0',
-      port: parseInt(process.env.PORT || '8443'),
+      port: parseInt(env.PORT || '8443'),
       strictPort: true,
       watch: { ignored: ['**/.figma/**'] },
     },
     preview: {
       host: '0.0.0.0',
-      port: parseInt(process.env.PORT || '8443'),
+      port: parseInt(env.PORT || '8443'),
     },
   }
 })
@@ -91,8 +101,8 @@ function figmaSiteConfiguration(config: FigmaSiteConfiguration): Plugin {
     return html.replace(`<!-- ${slotName} -->`, content)
   }
 
-  const title = config.title ?? "Boom"
-  const description = config.description ?? ''
+  const title = config.title ?? 'بوم | برنامه‌ریزی کنکور، تمرین و آزمون'
+  const description = config.description ?? 'برنامه هفتگی کنکور بر اساس وقت، آزمون‌ها و عملکرد تو؛ تمرین از منابع درسی، نقشه یادگیری و تحلیل نقاط ضعف.'
   const favicon = config.icons?.icon ?? ''
   const socialImage = config.openGraph?.image ?? ''
   const language = sanitizeHtmlValue(config.language) || 'fa'

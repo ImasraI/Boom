@@ -17,7 +17,7 @@ function BackButton({ onClick }: { onClick: () => void }) {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="bg-[var(--field)] rounded-xl px-4 py-3">
+    <div className="study-field px-1 py-4">
       <p className="text-[10px] font-bold text-[var(--muted-2)] mb-1.5 text-right">{label}</p>
       {children}
     </div>
@@ -227,7 +227,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
           className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)]" />
       </Field>
 
-      <div className="bg-[var(--field)] rounded-xl px-4 py-3">
+      <div className="study-field px-1 py-4">
         <p className="text-[10px] font-bold text-[var(--muted-2)] mb-3 text-right">ساعت مطالعه در هر روز هفته</p>
         <div className="space-y-3">
           {DAYS_FA.map(d => (
@@ -242,7 +242,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
         </div>
       </div>
 
-      <div className="bg-[var(--field)] rounded-xl px-4 py-3">
+      <div className="study-field px-1 py-4">
         <p className="text-[10px] font-bold text-[var(--muted-2)] mb-2 text-right">حداکثر ساعت مطالعهی پشت سر هم</p>
         <div className="flex items-center gap-3">
           <span className="text-[13px] font-bold text-[var(--accent)] flex-shrink-0">{maxConsec} ساعت</span>
@@ -258,7 +258,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
         </div>
       </Field>
 
-      <div className="bg-[var(--field)] rounded-xl px-4 py-3">
+      <div className="study-field px-1 py-4">
         <p className="text-[10px] font-bold text-[var(--muted-2)] mb-2 text-right">ساعت خواب شبانه</p>
         <div className="flex items-center gap-3">
           <span className="text-[13px] font-bold text-[var(--accent)] flex-shrink-0">{sleepHours} ساعت</span>
@@ -330,7 +330,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
     // هوش مصنوعی و برنامهریزی
     <div className="space-y-3" key="ai">
       {reviewQueue.length > 0 && (
-        <div className="space-y-2 rounded-2xl bg-[var(--field)] p-4">
+        <div className="study-section space-y-3 py-4">
           <p className="text-right text-[12px] font-bold text-[var(--text)]">صف مرور فاصله‌دار</p>
           {reviewQueue.slice(0, 5).map(item => (
             <div key={`${item.subject}-${item.topic}`} className="flex items-center justify-between gap-3 text-[11px]">
@@ -367,7 +367,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
           className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)]" />
       </Field>
 
-      <div className="bg-[var(--field)] rounded-xl px-4 py-3 flex items-center justify-between">
+      <div className="study-field px-1 py-4 flex items-center justify-between">
         <button
           onClick={() => setNotifs(n => !n)}
           className={`w-11 h-6 rounded-full transition-all relative flex-shrink-0 ${notifs ? "bg-[var(--accent)]" : "bg-[var(--toggle-off)]"}`}
@@ -384,7 +384,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
 
     // تنظیمات — theme and sound first so they're the top controls.
     <div className="space-y-3" key="settings">
-      <div className="bg-[var(--field)] rounded-xl px-4 py-3 flex items-center justify-between">
+      <div className="study-field px-1 py-4 flex items-center justify-between">
         <button onClick={toggleDark} role="switch" aria-label="حالت تاریک" aria-checked={dark}
           className={`w-11 h-6 rounded-full transition-all relative flex-shrink-0 ${dark ? "bg-[var(--accent)]" : "bg-[var(--toggle-off)]"}`}
         >
@@ -396,7 +396,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
           <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">تغییر تم برنامه به حالت شب</p>
         </div>
       </div>
-      <div className="bg-[var(--field)] rounded-xl px-4 py-3 flex items-center justify-between">
+      <div className="study-field px-1 py-4 flex items-center justify-between">
         <button onClick={toggleSound} role="switch" aria-label="صدا" aria-checked={prefs.sound}
           className={`w-11 h-6 rounded-full transition-all relative flex-shrink-0 ${prefs.sound ? "bg-[var(--accent)]" : "bg-[var(--toggle-off)]"}`}
         >
@@ -411,7 +411,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
           </div>
         </div>
       </div>
-      <div className="bg-[var(--field)] rounded-xl px-4 py-3">
+      <div className="study-field px-1 py-4">
         <p className="text-[13px] font-semibold text-[var(--text)] text-right">رنگ اصلی</p>
         <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5 text-right">حال‌وهوای رنگی برنامه</p>
         <div className="flex gap-2 mt-3">
@@ -432,7 +432,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
           })}
         </div>
       </div>
-      <div className="bg-[var(--field)] rounded-xl px-4 py-3 flex items-center justify-between">
+      <div className="study-field px-1 py-4 flex items-center justify-between">
         <button onClick={toggleCalm} role="switch" aria-label="حرکت کمتر" aria-checked={prefs.calm}
           className={`w-11 h-6 rounded-full transition-all relative flex-shrink-0 ${prefs.calm ? "bg-[var(--accent)]" : "bg-[var(--toggle-off)]"}`}
         >
@@ -444,7 +444,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
           <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">فضایی آرام‌تر برای تمرکز</p>
         </div>
       </div>
-      <div className="bg-[var(--field)] rounded-xl px-4 py-3 flex items-center justify-between">
+      <div className="study-field px-1 py-4 flex items-center justify-between">
         <button onClick={logout} aria-label="خروج از حساب"
           className="w-11 h-6 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center"
         >
@@ -466,7 +466,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
         <BackButton onClick={() => nav("home")} />
         <div className="text-right">
           <h1 className="font-display text-xl text-[var(--text)]">تکمیل پروفایل</h1>
-          <p className="text-[12px] text-[var(--muted-2)] font-medium">به هوش مصنوعی کمک میکنه همه چیز رو شخصی کنه</p>
+          <p className="text-[12px] text-[var(--muted-2)] font-medium">وقت مطالعه، هدف کنکور و وضعیت درس‌هایت را تنظیم کن.</p>
         </div>
       </div>
 

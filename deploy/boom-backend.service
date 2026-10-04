@@ -1,15 +1,17 @@
 [Unit]
 Description=Boom Backend API
-After=network.target ollama.service
-Wants=ollama.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=ubuntu
 Group=ubuntu
-WorkingDirectory=/home/ubuntu/boom/backend
-Environment=PATH=/home/ubuntu/boom/backend/.venv/bin
-ExecStart=/home/ubuntu/boom/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+WorkingDirectory=/home/ubuntu/Boom/backend
+Environment=PATH=/home/ubuntu/Boom/backend/.venv/bin
+Environment=PYTHONUNBUFFERED=1
+# Keep one API worker: arena matchmaking and rate limits are process-local.
+ExecStart=/home/ubuntu/Boom/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips 127.0.0.1
 Restart=always
 RestartSec=3
 StandardOutput=journal

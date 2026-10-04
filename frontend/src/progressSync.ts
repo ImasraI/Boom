@@ -5,6 +5,8 @@ const KEY = "study-progress-outbox";
 export interface ProgressUpdate {
   client_ref: string; source_ref?: string; date: string; subject: string; topic: string;
   task_type: string; planned_minutes: number; actual_minutes: number;
+  resource?: string | null; question_start?: number | null; question_end?: number | null;
+  page_start?: number | null; page_end?: number | null;
   status: "planned" | "completed" | "missed" | "partially_completed" | "rescheduled";
 }
 

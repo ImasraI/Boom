@@ -22,7 +22,7 @@ Thumbs.db
 # ---------------------------------------------------------------------------
 # EVERYTHING under backend/data/ is generated or user-supplied runtime data.
 # It lives on disk (laptop + server), never in git:
-#   - raw/        raw book PDFs (user-supplied; scp/rsync to the server once)
+#   - raw/        raw book PDFs (laptop-only; not required on the VM)
 #   - 1/, page_images/, uploads/   rendered/uploaded page images (~GBs)
 #   - chroma_db/  Chroma vector store (127MB+ sqlite + binaries; rebuilt by
 #                 ingest, or scp'd to the server - see DEPLOYMENT.md)
@@ -67,7 +67,7 @@ scanned-pending/
 *.bat
 
 # Laptop-only scripts (GPU EasyOCR fleet / bulk transcription drivers).
-# The server needs none of these - retrieval runs off the committed data.
+# The server needs none of these - retrieval uses separately uploaded data.
 backend/scripts/bulk_easyocr.py
 backend/scripts/bulk_tesseract.py
 backend/scripts/run_question_bank.py
@@ -88,3 +88,31 @@ ocr-kit/keys.txt
 
 # VM env copies must never be committed
 *.env.vm
+.env.*
+!.env.example
+!.env.production.example
+tmp/
+
+# Local credentials, database journals, embedding/OCR exports and caches.
+*.key
+*.pem
+*.sqlite3-wal
+*.sqlite3-shm
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite3-journal
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage/
+.cache/
+*.tsbuildinfo
+backend/models/
+backend/model_cache/
+embedding-output/
+corpus-exports/
+backups/
+poolstate.txt
+/AGENTS.md

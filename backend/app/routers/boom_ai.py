@@ -180,6 +180,7 @@ class WeeklyPlanRequest(BaseModel):
     statics: List[dict] = []
     schedule: Optional[dict] = None
     history: Optional[List[dict]] = None
+    calendar_version: Optional[int] = None
 
 
 _BLOCK_COLORS = {
@@ -605,6 +606,33 @@ def _book_list(chunks: List[dict]) -> List[str]:
     return seen
 
 
+def _chat_plan_update_is_safe(update, schedule, student):
+    """Validate an edit against the retained plan and fixed commitments."""
+    schedule = schedule or {}
+    def same(a, b):
+        return all(a.get(key) == b.get(key) for key in ("day", "startHour", "title"))
+    retained = [block for block in schedule.get("blocks", [])
+                if not any(same(block, removed) for removed in update.get("removed", []))]
+    occupied = _occupied_slots(schedule.get("statics")) + retained
+    hours = re.search(r"\d+(?:\.\d+)?", _norm_digits(str((student or {}).get("studyHours") or "4")))
+    daily_hours = float(hours.group()) if hours else 4
+    for block in update.get("blocks", []):
+        duplicate = next((other for other in retained if same(block, other)
+                          and block.get("duration") == other.get("duration")), None)
+        if duplicate:
+            continue
+        cap, wake, sleep = _day_constraints(block["day"], daily_hours, student)
+        if (block["startHour"] < wake or block["startHour"] + block["duration"] > sleep
+                or _overlaps_occupied(block["day"], block["startHour"], block["duration"], occupied)):
+            return False
+        study_load = sum(float(other.get("duration", 0)) for other in occupied
+                         if other.get("day") == block["day"] and other.get("type") in ("study", "test"))
+        if block["type"] in ("study", "test") and study_load + block["duration"] > cap:
+            return False
+        occupied.append(block)
+    return True
+
+
 @router.post("/chat")
 def boom_chat(
     request: BoomChatRequest,
@@ -633,8 +661,10 @@ def boom_chat(
     # user's schedule.
     clean, plan_update = _extract_plan_update(result["answer"])
     result["answer"] = clean
-    if plan_update:
+    if plan_update and _chat_plan_update_is_safe(plan_update, request.schedule, request.student):
         result["plan_update"] = plan_update
+    elif plan_update:
+        result["answer"] += "\n\nتغییر پیشنهادی با زمان آزاد یا فعالیت‌های فعلی تداخل داشت؛ برنامه تغییر نکرد. زمان دیگری انتخاب کنید."
     record_ai_use(current_user.id, "chat")
     return result
 
@@ -1802,7 +1832,26 @@ def generate_weekly_plan(request: WeeklyPlanRequest,
         start = date.fromisoformat(request.week_start) if request.week_start else today - timedelta(days=(today.weekday() + 2) % 7)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid week_start date")
-    return build_week(db, current_user.id, request.student, request.daily_hours, start, request.statics)
+    from app.planner.calendar import calendar_row, payload, protected_blocks, occurrences, overlaps, write_calendar
+    row = calendar_row(db, current_user.id)
+    state = payload(row)
+    if request.calendar_version is not None and request.calendar_version != row.version:
+        raise HTTPException(409, detail="برنامه تغییر کرده است؛ دوباره بارگذاری و بازسازی کنید.")
+    if start.weekday() != 5:
+        raise HTTPException(422, detail="هفته باید از شنبه آغاز شود")
+    protected = protected_blocks(state["weeks"].get(start.isoformat(), []))
+    fixed = occurrences(state["statics"], start)
+    # Legacy clients can still supply fixed activities; deduplicate slots.
+    for block in request.statics:
+        if not any(all(block.get(k) == b.get(k) for k in ("day", "startHour", "duration", "title")) for b in fixed):
+            fixed.append(block)
+    if overlaps(protected + fixed):
+        raise HTTPException(422, detail="فعالیت‌های ثابت هم‌پوشانی دارند؛ ابتدا زمان آن‌ها را اصلاح کنید.")
+    result = build_week(db, current_user.id, request.student, request.daily_hours, start, fixed,
+                        protected=protected, commit=False)
+    calendar = write_calendar(db, row, {**state["weeks"], start.isoformat(): result["blocks"]}, state["statics"], state["version"])
+    result["calendar_version"] = calendar["version"]
+    return result
 
 
 @router.get("/plan-overview")

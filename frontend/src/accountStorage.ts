@@ -3,8 +3,9 @@ export function accountId(token = localStorage.getItem("boom-token")): string | 
   try {
     const segment = token?.split(".")[1];
     if (!segment) return null;
-    const payload = JSON.parse(atob(segment.replace(/-/g, "+").replace(/_/g, "/")));
-    return typeof payload.sub === "string" && payload.sub ? payload.sub : null;
+    const base64 = segment.replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")));
+    return (typeof payload.sub === "string" && payload.sub) || (typeof payload.sub === "number" && Number.isSafeInteger(payload.sub)) ? String(payload.sub) : null;
   } catch { return null; }
 }
 

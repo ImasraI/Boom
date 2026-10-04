@@ -11,7 +11,7 @@ type Overview = {
   completed: number; recorded: number; actual_minutes: number;
 };
 const faDate = (iso: string) => new Intl.DateTimeFormat("fa-IR", { dateStyle: "full" }).format(fromISO(iso));
-const card = "plan-card bg-[var(--card)] rounded-2xl border border-[var(--border)] p-5";
+const card = "study-section py-5";
 
 export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupData | null }) {
   const [data, setData] = useState<Overview | null>(null);
@@ -50,7 +50,7 @@ export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupDa
     finally { setSaving(false); }
   }
   return <div className="min-h-screen p-5 md:p-8 space-y-5 max-w-5xl mx-auto text-right">
-    <header className="plan-heading"><span className="eyebrow">مسیر یادگیری تو</span><h1 className="font-display text-2xl text-[var(--text)]">قدم‌های کوچک، پیشرفت ماندگار.</h1><p className="text-[var(--muted)] mt-3">هدف: {userData?.targetRank || "هنوز هدفی ثبت نشده"}</p></header>
+    <header className="plan-heading"><span className="eyebrow">مسیر کنکور تو</span><h1 className="font-display text-2xl text-[var(--text)]">از برنامهٔ این هفته تا آزمون بعدی</h1><p className="text-[var(--muted)] mt-3">هدف: {userData?.targetRank || "هنوز هدفی ثبت نشده"}</p></header>
     {data && <div className="plan-metrics"><div><span>زمان ثبت‌شده</span><strong>{data.actual_minutes.toLocaleString("fa-IR")} <small>دقیقه</small></strong></div><div><span>قدم‌های کامل</span><strong>{data.completed.toLocaleString("fa-IR")} <small>فعالیت</small></strong></div><div><span>آزمون پیش رو</span><strong>{data.exams.length.toLocaleString("fa-IR")} <small>آزمون</small></strong></div></div>}
     {error && <div role="alert" className={card}>{error}<button className="block text-[var(--accent)] mt-2" onClick={() => setRevision(n => n + 1)}>تلاش دوباره</button></div>}
     <div className={card}>

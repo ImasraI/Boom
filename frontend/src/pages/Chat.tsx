@@ -2,35 +2,8 @@ import { accountStorage } from "../accountStorage";
 import { useState, useRef, useEffect } from "react";
 import { apiUrl, authHeaders } from "../api";
 import { NavFn, SignupData } from "../types";
-import { weeklyScheduleContext, loadWeekBlocks, saveWeekBlocks, getWeekISO, StoredBlock } from "../scheduleStore";
-import katex from "katex";
-import "katex/dist/katex.min.css";
-
-function renderMath(text: string): React.ReactNode {
-  // Split by $$...$$ (display math) and $...$ (inline math)
-  const parts = text.split(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g).filter(p => p !== "");
-  return parts.map((part, i) => {
-    if (part.startsWith("$$") && part.endsWith("$$")) {
-      // Display math
-      try {
-        const latex = part.slice(2, -2);
-        return <div key={i} className="my-2 overflow-x-auto" dangerouslySetInnerHTML={{ __html: katex.renderToString(latex, { displayMode: true, throwOnError: false }) }} />;
-      } catch {
-        return <span key={i}>{part}</span>;
-      }
-    }
-    if (part.startsWith("$") && part.endsWith("$")) {
-      // Inline math
-      try {
-        const latex = part.slice(1, -1);
-        return <span key={i} dangerouslySetInnerHTML={{ __html: katex.renderToString(latex, { displayMode: false, throwOnError: false }) }} />;
-      } catch {
-        return <span key={i}>{part}</span>;
-      }
-    }
-    return <span key={i}>{part}</span>;
-  });
-}
+import { weeklyScheduleContext, loadWeekBlocks, saveWeekBlocks, getWeekISO, hasScheduleOverlap, StoredBlock } from "../scheduleStore";
+import ChatMarkdown from "../components/ChatMarkdown";
 
 interface Msg {
   role: "user" | "ai";
@@ -109,107 +82,13 @@ function isPlanRequest(t: string) {
   return /(برنامه|پلن).*(ماه|ماهه|هفته|کنکور)|\d+\s*ماه/.test(t);
 }
 
-// Very small markdown renderer covering what the AI model actually sends:
-// **bold**, "# / ## " headings, "* / -" bullets and "1." numbered lists.
-// Avoids pulling in a full markdown library for a handful of patterns.
-function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
-  // First render math, then bold
-  const withMath = renderMath(text);
-  // Since renderMath returns React.ReactNode (array-like), convert to array and process bold
-  const nodes = Array.isArray(withMath) ? withMath : [withMath];
-  return nodes.map((node, i) => {
-    if (typeof node === "object" && node !== null && "props" in node) {
-      const props = node.props as any;
-      if (props.children && typeof props.children === "string") {
-        // Split by **...** for bold
-        const boldParts: string[] = props.children.split(/(\*\*[^*]+\*\*)/g).filter((p: string) => p !== "");
-        if (boldParts.length > 1) {
-          return <span key={`${keyPrefix}-${i}`}>{boldParts.map((part, j) => 
-            part.startsWith("**") && part.endsWith("**") && part.length > 4
-              ? <strong key={j} className="font-bold">{part.slice(2, -2)}</strong>
-              : <span key={j}>{part}</span>
-          )}</span>;
-        }
-      }
-    }
-    return <span key={`${keyPrefix}-${i}`}>{node}</span>;
-  });
-}
-
-function renderMarkdown(text: string): React.ReactNode {
-  const lines = text.split("\n");
-  let inCodeBlock = false;
-  let codeBlockLines: string[] = [];
-  let lang = "";
-
-  return lines.map((rawLine, i) => {
-    const line = rawLine.trim();
-
-    if (line.startsWith("```")) {
-      if (inCodeBlock) {
-        // End code block
-        inCodeBlock = false;
-        const result = (
-          <pre key={i} className="bg-[var(--surface-2)] p-3 rounded-xl overflow-x-auto text-[12px] font-mono mt-2 mb-2 border border-[var(--border)]">
-            <code>{codeBlockLines.join("\n")}</code>
-          </pre>
-        );
-        codeBlockLines = [];
-        return result;
-      } else {
-        // Start code block
-        inCodeBlock = true;
-        lang = line.slice(3).trim();
-        return null;
-      }
-    }
-
-    if (inCodeBlock) {
-      codeBlockLines.push(rawLine);
-      return null;
-    }
-
-    if (!line) return <div key={i} className="h-2" />;
-
-    const heading = line.match(/^#{1,6}\s+(.*)$/);
-    if (heading) {
-      return (
-        <div key={i} className="font-bold text-[14px] mt-1 mb-1">
-          {renderInline(heading[1], `h${i}`)}
-        </div>
-      );
-    }
-
-    const bullet = line.match(/^[*-]\s+(.*)$/);
-    if (bullet) {
-      return (
-        <div key={i} className="flex gap-1.5 items-start">
-          <span className="text-[var(--accent)] mt-0.5 flex-shrink-0">•</span>
-          <span className="min-w-0 break-words [overflow-wrap:anywhere]">{renderInline(bullet[1], `b${i}`)}</span>
-        </div>
-      );
-    }
-
-    const numbered = line.match(/^(\d+)[.)]\s+(.*)$/);
-    if (numbered) {
-      return (
-        <div key={i} className="flex gap-1.5 items-start">
-          <span className="text-[var(--muted-2)] font-bold flex-shrink-0">{numbered[1]}.</span>
-          <span className="min-w-0 break-words [overflow-wrap:anywhere]">{renderInline(numbered[2], `n${i}`)}</span>
-        </div>
-      );
-    }
-
-    return <div key={i} className="break-words [overflow-wrap:anywhere]">{renderInline(line, `p${i}`)}</div>;
-  });
-}
-
 export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupData | null }) {
   const name = userData?.name ?? "دانشآموز";
   const storeKey = storageKey(userData);
   const [sessions, setSessions] = useState<Record<string, ChatSession>>({});
   const [activeId, setActiveId] = useState("");
   const [input, setInput] = useState("");
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   const processingRef = useRef<Set<string>>(new Set());
@@ -278,13 +157,16 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
       weak_subjects: [], strong_subjects: [], notes: query,
     } : { question: query, history, student: currentUser || {}, schedule: weeklyScheduleContext() };
 
+    const requestToken = localStorage.getItem("boom-token");
     fetch(apiUrl(endpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     })
       .then(r => r.json())
-.then(data => {
+      .then(data => {
+        if (localStorage.getItem("boom-token") !== requestToken) return;
+        let updateNotice = "";
         // Handle plan update if present
         if (data.plan_update) {
           const weekISO = getWeekISO();
@@ -292,7 +174,6 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
           
           // Handle removed blocks (delete)
           if (data.plan_update.removed && data.plan_update.removed.length > 0) {
-            const removedBlocks = data.plan_update.removed;
             currentBlocks = currentBlocks.filter((existingBlock: StoredBlock) => {
               return !data.plan_update.removed.some((removedBlock: StoredBlock) =>
                 existingBlock.day === removedBlock.day &&
@@ -300,13 +181,11 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
                 existingBlock.title === removedBlock.title
               );
             });
-            saveWeekBlocks(weekISO, currentBlocks);
           }
           
           // Handle added/updated blocks
           if (data.plan_update.blocks && data.plan_update.blocks.length > 0) {
             const newBlocks = data.plan_update.blocks;
-            currentBlocks = loadWeekBlocks(weekISO) || [];
             
             const mergedBlocks = [...currentBlocks];
             newBlocks.forEach((newBlock: StoredBlock) => {
@@ -317,17 +196,25 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
                 b.title === newBlock.title
               );
               if (idx >= 0) {
-                mergedBlocks[idx] = { ...mergedBlocks[idx], ...newBlock };
+                mergedBlocks[idx] = { ...mergedBlocks[idx], ...newBlock, id: mergedBlocks[idx].id, origin: "manual" };
               } else {
-                mergedBlocks.push(newBlock);
+                mergedBlocks.push({ ...newBlock, id: newId(), origin: "manual" });
               }
             });
             
-            saveWeekBlocks(weekISO, mergedBlocks);
+            currentBlocks = mergedBlocks;
+          }
+          // Apply deletions and additions together only after checking the
+          // latest local plan; it may have changed while the request ran.
+          const context = weeklyScheduleContext(weekISO);
+          if (hasScheduleOverlap(currentBlocks, context.statics.map(staticBlock => ({ ...staticBlock, day: staticBlock.day ?? 0 })))) {
+            updateNotice = "\n\nتغییر پیشنهادی با برنامه فعلی تداخل دارد؛ برنامه تغییر نکرد.";
+          } else {
+            saveWeekBlocks(weekISO, currentBlocks);
           }
         }
         
-        const answer = data.plan || data.answer || "پاسخی دریافت نشد.";
+        const answer = (data.plan || data.answer || "پاسخی دریافت نشد.") + updateNotice;
         const current = sessionsRef.current;
         if (!current[sessionId]) return;
         commit({
@@ -370,6 +257,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
     if (!sessionsRef.current[id]) return;
     setActiveId(id);
     setInput("");
+    setSessionsOpen(false);
   }
 
   function createSession() {
@@ -377,6 +265,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
     commit({ ...sessionsRef.current, [session.id]: session });
     setActiveId(session.id);
     setInput("");
+    setSessionsOpen(false);
     requestAnimationFrame(() => {
       tabsRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     });
@@ -442,6 +331,9 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
             <h1 className="flex-1 text-right font-bold text-lg text-[var(--text)] truncate">
               {active?.name || "گفتگو"}
             </h1>
+            <button type="button" onClick={() => setSessionsOpen(true)} className="sm:hidden w-9 h-9 rounded-xl bg-[var(--chip)] flex items-center justify-center text-[var(--text)]" aria-label="فهرست گفتگوها" aria-expanded={sessionsOpen}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h11" /></svg>
+            </button>
           </div>
         </div>
 
@@ -454,9 +346,9 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
                     {m.text}
                   </div>
                 ) : (
-                  <div className="max-w-[85%] min-w-0 text-[13px] leading-relaxed text-[var(--text)] break-words [overflow-wrap:anywhere]">
+                  <div className="w-full max-w-[920px] min-w-0 text-[13px] leading-relaxed text-[var(--text)] break-words [overflow-wrap:anywhere]">
                     {m.confidence && <div className="mb-2 text-[10px] font-semibold text-[var(--muted-2)]">{m.confidence.label}</div>}
-                    {renderMarkdown(m.text)}
+                    <ChatMarkdown text={m.text} />
                   </div>
                 )}
               </div>
@@ -490,7 +382,8 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
       </div>
 
       {/* Session list — second in RTL so it sits on the left */}
-      <aside className="w-[148px] sm:w-[180px] flex-shrink-0 flex flex-col bg-[var(--card)] border-r border-[var(--border)]">
+      {sessionsOpen && <button type="button" className="sm:hidden fixed inset-0 z-20 bg-black/40" onClick={() => setSessionsOpen(false)} aria-label="بستن فهرست گفتگوها" />}
+      <aside className={`fixed sm:static z-30 inset-y-0 left-0 w-[min(82vw,280px)] sm:w-[180px] flex-shrink-0 flex flex-col bg-[var(--card)] border-r border-[var(--border)] shadow-[var(--shadow-lg)] sm:shadow-none transition-transform sm:translate-x-0 sm:visible ${sessionsOpen ? "visible translate-x-0" : "invisible -translate-x-full"}`} aria-label="گفتگوها">
         <div className="flex-shrink-0 px-3 pt-12 pb-3 border-b border-[var(--border)]">
           <div className="flex items-center gap-2">
             <h2 className="flex-1 text-right font-bold text-sm text-[var(--text)]">گفتگوها</h2>

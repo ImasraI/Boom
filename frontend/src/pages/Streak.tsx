@@ -25,7 +25,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
       </div>
 
       {/* Streak hero */}
-      <div className="mx-5 mt-2 bg-[var(--card)] rounded-3xl p-6 border border-[var(--border)] flex items-center gap-5">
+      <div className="study-section mx-5 mt-2 p-6 flex items-center gap-5">
         <div className="w-20 h-20 rounded-2xl bg-[#FFF5F0] flex items-center justify-center">
           <svg width="36" height="36" viewBox="0 0 24 24" fill="#C4714A">
             <path d="M12 2C9 7 6 8 7 13c.7 3 3 5 5 5s4.3-2 5-5c1-5-2-6-5-11z"/>
@@ -41,12 +41,12 @@ export default function Streak({ nav }: { nav: NavFn }) {
 
       {/* XP grid */}
       <div className="mx-5 mt-3 grid grid-cols-2 gap-3">
-        <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
+        <div className="study-section p-4">
           <p className="text-[11px] font-bold text-[var(--muted-2)]">مجموع XP</p>
           <p className="text-3xl font-bold text-[var(--text)] mt-1">{TOTAL_XP.toLocaleString("fa-IR")}</p>
           <p className="text-[12px] text-[var(--muted)] font-medium">۷ روز گذشته</p>
         </div>
-        <div className="bg-[var(--card)] rounded-2xl p-4 border border-[var(--border)]">
+        <div className="study-section p-4">
           <p className="text-[11px] font-bold text-[var(--muted-2)]">این هفته</p>
           <p className="text-3xl font-bold text-[var(--text)] mt-1">{TOTAL_XP.toLocaleString("fa-IR")}</p>
           <p className="text-[12px] text-[var(--muted)] font-medium">XP کسب‌شده</p>
@@ -54,7 +54,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
       </div>
 
       {/* Bar chart */}
-      <div className="mx-5 mt-4 bg-[var(--card)] rounded-3xl p-5 border border-[var(--border)]">
+      <div className="study-section mx-5 mt-4 p-5">
         <p className="text-[12px] font-bold text-[var(--muted-2)] mb-4">۷ روز گذشته</p>
         <div className="flex items-end justify-between gap-1.5 h-28">
           {PAST_RECORDS.map((r, i) => {
@@ -91,7 +91,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
             const pct = r.tasksTotal ? Math.round((r.tasksDone / r.tasksTotal) * 100) : 0;
             const label = i === 0 ? "امروز" : i === 1 ? "دیروز" : weekday(r.date);
             return (
-              <div key={r.date} className="bg-[var(--card)] rounded-2xl border border-[var(--border)] px-4 py-3 flex items-center gap-3">
+              <div key={r.date} className="study-section px-4 py-3 flex items-center gap-3">
                 <div className="flex-1 text-right">
                   <p className="text-[13px] font-semibold text-[var(--text)]">{label}</p>
                   <p className="text-[11px] text-[var(--muted-2)] font-medium">{r.tasksDone}/{r.tasksTotal} تکلیف · {r.xp} XP</p>

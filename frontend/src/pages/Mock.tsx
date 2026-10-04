@@ -79,7 +79,7 @@ function ConfigView({ onStart }: { onStart: (cfg: Record<string, unknown>) => vo
       </div>
 
       <div className="px-4 mt-5 space-y-4 max-w-[430px] mx-auto">
-        <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4">
+        <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">سطح دشواری</p>
           <div className="grid grid-cols-3 gap-2">
             {DIFFICULTIES.map(d => (
@@ -95,7 +95,7 @@ function ConfigView({ onStart }: { onStart: (cfg: Record<string, unknown>) => vo
           </div>
         </div>
 
-        <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4">
+        <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">تعداد سوال هر درس</p>
           <div className="grid grid-cols-3 gap-2">
             {[0, 5, 10].map(n => (
@@ -111,7 +111,7 @@ function ConfigView({ onStart }: { onStart: (cfg: Record<string, unknown>) => vo
           </div>
         </div>
 
-        <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4">
+        <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2">مباحث هدف (اختیاری)</p>
           <textarea rows={2} value={topics} onChange={e => setTopics(e.target.value)}
             placeholder="مثلاً: حرکت‌شناسی، اثر داپلر، استوکیومتری — هر مبحث در یک خط"
@@ -313,7 +313,7 @@ function ResultView({ result, onBack, onRetry }: { result: MockResult; onBack: (
         {tab === "summary" ? (
           <>
             {result.subjects.map(s => (
-              <div key={s.name} className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4">
+              <div key={s.name} className="study-section p-4">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-[12px] font-bold">{s.score}٪</span>
                   <p className="text-[13px] font-bold text-[var(--text)]">{s.name}</p>

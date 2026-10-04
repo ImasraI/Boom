@@ -59,7 +59,7 @@ export default function Recovery({ nav }: { nav: NavFn }) {
 
       <div className="px-5 mt-2 space-y-4">
         {/* Mood */}
-        <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-5">
+        <div className="study-section p-5">
           <p className="text-[12px] font-bold text-[var(--muted-2)] mb-4 text-right">خلق‌وخوی کلی</p>
           <div className="flex gap-2 justify-between">
             {MOODS.map((m, i) => (
@@ -76,7 +76,7 @@ export default function Recovery({ nav }: { nav: NavFn }) {
         </div>
 
         {/* Sleep */}
-        <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-5">
+        <div className="study-section p-5">
           <p className="text-[12px] font-bold text-[var(--muted-2)] mb-1 text-right">خواب</p>
           <div className="py-4 border-b border-[var(--border)]">
             <div className="flex justify-between mb-3">
@@ -94,14 +94,14 @@ export default function Recovery({ nav }: { nav: NavFn }) {
         </div>
 
         {/* Energy & stress */}
-        <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-5">
+        <div className="study-section p-5">
           <p className="text-[12px] font-bold text-[var(--muted-2)] mb-1 text-right">وضعیت ذهنی</p>
           <ScaleRow label="سطح انرژی" value={energy} onChange={setEnergy} low="خسته" high="پرانرژی" />
           <ScaleRow label="سطح استرس" value={stress} onChange={setStress} low="آرام" high="خیلی استرس‌زا" />
         </div>
 
         {/* Notes */}
-        <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-5">
+        <div className="study-section p-5">
           <p className="text-[12px] font-bold text-[var(--muted-2)] mb-3 text-right">چیز دیگه‌ای هست؟</p>
           <textarea value={notes} onChange={e => setNotes(e.target.value)}
             placeholder="مثلاً سردرد دارم، نگران آزمون فردام، صبح تمرکز داشتم..."

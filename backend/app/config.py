@@ -19,11 +19,16 @@ class Settings(BaseSettings):
     CHROMA_COLLECTION: str = "documents"
 
     # Embedding model configuration
-    EMBEDDING_PROVIDER: str = "ollama"  # Options: "ollama", "groq", "openai"
+    EMBEDDING_PROVIDER: str = "ollama"  # ollama, gemini, groq, openai, huggingface
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_MODEL_NAME: str = "nomic-embed-text"
     EMBEDDING_BASE_URL: str = "http://localhost:11434"
     EMBEDDING_DEVICE: str = "cpu"
+    EMBEDDING_DIMENSIONS: int = 768
+    EMBEDDING_BATCH_SIZE: int = 24
+    EMBEDDING_REQUESTS_PER_MINUTE: int = 10
+    EMBEDDING_GEMINI_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+    EMBEDDING_PROXY: str = ""
     CHROMA_TELEMETRY: bool = False
 
     # LLM provider configuration
@@ -64,11 +69,11 @@ class Settings(BaseSettings):
     CEREBRAS_BASE_URL: str = "https://api.cerebras.ai/v1"
     CEREBRAS_MODEL_NAME: str = "gpt-oss-120b"
 
-    # SMS signup verification (SMS.ir / Melipayamak panel).
-    # Create a verification template containing {CODE} in the panel, then put
-    # its numeric template id in SMS_VERIFY_TEMPLATE_ID.
+    # SMS.ir fast verification: use an approved template. Parameter names
+    # are case-sensitive and must match the panel (for example #OTP#).
     SMS_API_KEY: str = ""
     SMS_VERIFY_TEMPLATE_ID: str = ""
+    SMS_VERIFY_PARAMETER_NAME: str = "OTP"
     SECRET_KEY: str = ""  # JWT + code-hashing secret (set it in .env!)
     SMS_BASE_URL: str = "https://api.sms.ir"
     # false = ignore env-var/Windows-registry proxies for SMS.ir calls
@@ -76,8 +81,7 @@ class Settings(BaseSettings):
     SMS_TRUST_ENV: bool = False
     # Optional HTTP proxy used as a FAILOVER when the direct route to
     # api.sms.ir stalls (ISP-level TLS interference on domestic HTTPS).
-    # Example: http://127.0.0.1:10809 (v2rayN HTTP port). Empty = fall back
-    # to GEMINI_PROXY when that is set; if both are empty, direct only.
+    # Never reuse GEMINI_PROXY: SMS and AI providers have separate routing.
     SMS_PROXY: str = ""
     # SMS-template-approval stopgap: numbers on the admin-managed signup
     # allowlist can complete signup with this shared passcode instead of a

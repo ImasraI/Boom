@@ -199,7 +199,7 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, wanted, onTogg
       </div>
 
       <div className="px-4 mt-5 max-w-[430px] mx-auto space-y-4">
-        <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-5 text-right">
+        <div className="study-section p-5 text-right">
           <p className="text-[13px] font-bold text-[var(--text)] mb-2">چطور کار می‌کند؟</p>
           <ul className="text-[12px] text-[var(--muted-2)] leading-relaxed space-y-1.5">
             <li>• وارد صف شو؛ تا وقتی حریف هم‌سطح پیدا نشود در صف می‌مانی — بدون ربات.</li>
@@ -211,7 +211,7 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, wanted, onTogg
           </ul>
         </div>
 
-        <div className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right">
+        <div className="study-section p-4 text-right">
           <div className="flex items-center justify-between mb-1.5">
             <p className="text-[13px] font-bold text-[var(--text)]">فیلتر دروس (اختیاری)</p>
             {wanted.length > 0 && (
@@ -583,13 +583,13 @@ function ScheduledView({ me, open, mine, quota, busyId, error, onCreate, onAccep
         <section>
           <p className="text-[13px] font-bold text-[var(--text)] mb-2">مسابقه‌های رزروشده من</p>
           {mine.length === 0 ? (
-            <p className="text-[12px] text-[var(--muted-2)] bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 leading-relaxed">
+            <p className="study-section text-[12px] text-[var(--muted-2)] p-4 leading-relaxed">
               هنوز دوئلی رزرو نکرده‌ای. یک زمان پیشنهاد بده یا از فهرست زیر یکی را رزرو کن.
             </p>
           ) : (
             <div className="space-y-2">
               {mine.map(row => (
-                <div key={row.match_id} className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4">
+                <div key={row.match_id} className="study-section p-4">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-right">
                       <p className="text-[13px] font-bold text-[var(--text)]">حریف: {row.opponent}</p>
@@ -625,13 +625,13 @@ function ScheduledView({ me, open, mine, quota, busyId, error, onCreate, onAccep
         <section>
           <p className="text-[13px] font-bold text-[var(--text)] mb-2">مسابقه‌های در انتظار حریف</p>
           {open.length === 0 ? (
-            <p className="text-[12px] text-[var(--muted-2)] bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4">
+            <p className="study-section text-[12px] text-[var(--muted-2)] p-4">
               فعلاً پیشنهادی در صف نیست — اولین نفر باش!
             </p>
           ) : (
             <div className="space-y-2">
               {open.map(row => (
-                <div key={row.id} className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-3.5 flex items-center gap-3">
+                <div key={row.id} className="study-section p-3.5 flex items-center gap-3">
                   <div className="flex-1 text-right min-w-0">
                     <p className="text-[13px] font-bold text-[var(--text)] truncate">
                       {row.host} {row.is_mine && <span className="text-[10px] text-[var(--accent)]">(پیشنهاد تو)</span>}
@@ -663,7 +663,7 @@ function ScheduledView({ me, open, mine, quota, busyId, error, onCreate, onAccep
         </section>
 
         {/* Create an offer */}
-        <section className="bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4">
+        <section className="study-section p-4">
           <p className="text-[13px] font-bold text-[var(--text)] mb-1">پیشنهاد دوئل بده</p>
           <p className="text-[11px] text-[var(--muted-2)] leading-relaxed mb-3">
             فقط یک زمان را بزن؛ پیشنهادت در فهرست بالا می‌آید تا حریفی هم‌سطح آن را رزرو کند. در زمان مقرر دوئل برای هر دو شروع می‌شود.

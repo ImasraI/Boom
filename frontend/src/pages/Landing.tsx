@@ -14,7 +14,7 @@ export default function Landing({ nav }: { nav: NavFn }) {
       <div className="relative flex-1 flex flex-col items-center justify-center text-center px-8">
         {/* Animated logo */}
         <div className="anim-pop mb-6 flex flex-col items-center">
-          <img src="/logo.png" alt="لوگوی بوم" className="w-20 h-20 mb-4 floaty"
+          <img src="/logo-v2.png" alt="لوگوی بوم" className="w-20 h-20 mb-4 floaty"
                style={{ filter: "drop-shadow(0 10px 22px rgba(0,0,0,0.28))" }} />
           <h1 className="font-display text-5xl text-[var(--text)] leading-none">بوم</h1>
           <p className="text-[11px] font-bold tracking-[0.25em] text-[var(--accent)] mt-1">BOOM</p>
@@ -30,7 +30,7 @@ export default function Landing({ nav }: { nav: NavFn }) {
         {/* Floating feature cards (desktop only) */}
         <div className="anim-fade-up delay-3 hidden lg:flex gap-4 mt-12">
           {HIGHLIGHTS.map((h) => (
-            <div key={h.title} className="card-elevated px-5 py-4 w-[190px] text-right">
+            <div key={h.title} className="study-section px-5 py-4 w-[190px] text-right">
               <span className="text-xl">{h.icon}</span>
               <p className="font-bold text-[13px] text-[var(--text)] mt-1.5">{h.title}</p>
               <p className="text-[11.5px] text-[var(--muted)] mt-0.5 leading-relaxed">{h.sub}</p>

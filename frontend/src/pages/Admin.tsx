@@ -29,6 +29,7 @@ interface PoolPayload {
   cancel_requested?: boolean; progress?: PoolProgress;
 }
 interface SmsCredit { credit: number; configured: boolean; detail: string; bypass_active: boolean }
+interface SmsDelivery { message_id: number; send_at: number | null; delivery_at: number | null; delivery_state: number | null }
 
 function formatElapsed(seconds: number) {
   const total = Math.max(0, Math.round(seconds));
@@ -53,6 +54,10 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [payload, setPayload] = useState<UsersPayload | null>(null);
   const [pool, setPool] = useState<PoolPayload | null>(null);
   const [sms, setSms] = useState<SmsCredit | null>(null);
+  const [messageId, setMessageId] = useState("");
+  const [delivery, setDelivery] = useState<SmsDelivery | null>(null);
+  const [deliveryError, setDeliveryError] = useState("");
+  const [checkingDelivery, setCheckingDelivery] = useState(false);
   const [phone, setPhone] = useState("");
   const [note, setNote] = useState("");
   const [msg, setMsg] = useState("");
@@ -61,6 +66,16 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [restocking, setRestocking] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
   const poolTimer = useRef<number | null>(null);
+  async function checkDelivery() {
+    setCheckingDelivery(true); setDelivery(null); setDeliveryError("");
+    try {
+      const response = await fetch(apiUrl(`/api/admin/sms-delivery/${messageId}`), { headers: authHeaders() });
+      if (!response.ok) throw new Error(await readApiError(response, "گزارش پیامک دریافت نشد"));
+      setDelivery(await response.json());
+    } catch (error) { setDeliveryError(error instanceof Error ? error.message : "خطای ارتباط"); }
+    finally { setCheckingDelivery(false); }
+  }
+  const smsTime = (timestamp: number | null) => timestamp == null ? "ثبت نشده" : new Date(timestamp * 1000).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" });
 
   const load = useCallback(async () => {
     try {
@@ -222,15 +237,15 @@ export default function Admin({ nav }: { nav: NavFn }) {
       {err && <p className="text-xs text-red-400">{err}</p>}
 
       {/* ------------------------------------------------ sms credit ---- */}
-      <section className="rounded-3xl bg-[var(--card)] border border-[var(--border)] p-4 flex items-center gap-3">
+      <section className="study-section p-4 flex items-center gap-3">
         <div>
           <div className="text-[10px] text-[var(--muted-2)]">اعتبار پیامک (sms.ir)</div>
           <div className={`font-display text-xl ${sms && sms.credit > 0 ? "text-[var(--text)]" : "text-red-400"}`} dir="ltr">
             {sms ? sms.credit.toLocaleString("fa-IR") : "—"}
           </div>
           <div className="text-[10px] text-[var(--muted-2)] mt-0.5">
-            هر کد تأیید ≈ ۱ واحد
-            {sms?.bypass_active && " · کد عبور ۱۱۱۱۱۱ فعال است"}
+            اعتبار از پنل پیامک خوانده می‌شود
+            {sms?.bypass_active && " · ورود با کد پشتیبانی فعال است"}
             {sms && !sms.configured && ` · ${sms.detail}`}
             {sms?.configured && sms.credit === 0 && sms.detail && ` · ${sms.detail}`}
           </div>
@@ -242,7 +257,21 @@ export default function Admin({ nav }: { nav: NavFn }) {
       </section>
 
       {/* ------------------------------------------------ allowlist ---- */}
-      <section className="rounded-3xl bg-[var(--card)] border border-[var(--border)] p-5 space-y-3">
+      <section className="study-section px-4 py-5">
+        <h2 className="font-bold text-sm mb-2">پیگیری زمان تحویل کد تأیید</h2>
+        <p className="text-xs text-[var(--muted)] mb-3">شناسهٔ پیامک را از گزارش ارسال وارد کن. زمان‌ها به وقت تهران نمایش داده می‌شوند.</p>
+        <div className="flex gap-3">
+          <input aria-label="شناسه پیامک" inputMode="numeric" dir="ltr" value={messageId} disabled={checkingDelivery} onChange={event => { setMessageId(event.target.value.replace(/[^0-9]/g, "")); setDelivery(null); setDeliveryError(""); }} className="min-w-0 flex-1 border-b border-[var(--border-strong)] bg-transparent px-1 py-2 text-sm" />
+          <button type="button" onClick={checkDelivery} disabled={checkingDelivery || !/^[1-9][0-9]*$/.test(messageId)} className="text-sm text-[var(--accent)] disabled:opacity-40">{checkingDelivery ? "در حال بررسی…" : "بررسی تحویل"}</button>
+        </div>
+        {deliveryError && <p role="alert" className="text-xs text-red-400 mt-3">{deliveryError}</p>}
+        {delivery && <dl className="grid grid-cols-2 gap-3 mt-4 text-xs" role="status">
+          <dt className="text-[var(--muted)]">زمان ارسال</dt><dd>{smsTime(delivery.send_at)}</dd>
+          <dt className="text-[var(--muted)]">زمان تحویل</dt><dd>{smsTime(delivery.delivery_at)}</dd>
+          <dt className="text-[var(--muted)]">کد وضعیت سرویس</dt><dd>{delivery.delivery_state ?? "ثبت نشده"}</dd>
+        </dl>}
+      </section>
+      <section className="study-section p-5 space-y-3">
         <h2 className="font-bold text-[var(--text)] text-sm">افزودن شماره به لیست عبور</h2>
         <div className="flex flex-col sm:flex-row gap-2">
           <input value={phone} onChange={e => setPhone(e.target.value)}
@@ -274,7 +303,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
       </section>
 
       {/* --------------------------------------- users + usage/reset ---- */}
-      <section className="rounded-3xl bg-[var(--card)] border border-[var(--border)] p-5">
+      <section className="study-section p-5">
         <div className="flex items-center gap-2 mb-3">
           <h2 className="font-bold text-[var(--text)] text-sm">
             کاربران و مصرف امروز ({payload?.users.length ?? 0})
@@ -328,7 +357,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
       </section>
 
       {/* ------------------------------------------------ mock pool ---- */}
-      <section className="rounded-3xl bg-[var(--card)] border border-[var(--border)] p-5">
+      <section className="study-section p-5">
         <div className="flex items-center gap-2 mb-3">
           <h2 className="font-bold text-[var(--text)] text-sm">
             موجودی آزمون‌های آماده

@@ -434,12 +434,27 @@ class StudentProfile(Base):
                         onupdate=datetime.utcnow)
 
 
+class StudentCalendar(Base):
+    """Account-owned calendar, with a version to reject stale device writes."""
+    __tablename__ = "student_calendars"
+    student_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    weeks = Column(Text, nullable=False, default="{}")
+    statics = Column(Text, nullable=False, default="[]")
+    version = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class TaskProgress(Base):
     """One latest outcome per student and calendar task; retries replace, not duplicate."""
     __tablename__ = "task_progress"
     student_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
     client_ref = Column(String, primary_key=True)
     source_ref = Column(String, nullable=True)
+    resource = Column(String, nullable=True)
+    question_start = Column(Integer, nullable=True)
+    question_end = Column(Integer, nullable=True)
+    page_start = Column(Integer, nullable=True)
+    page_end = Column(Integer, nullable=True)
     date = Column(Date, nullable=False)
     subject = Column(String, nullable=False)
     topic = Column(String, nullable=False, default="")
@@ -492,6 +507,9 @@ def ensure_schema() -> None:
     """Create missing tables and backfill columns added after initial create_all."""
     Base.metadata.create_all(bind=engine)
     _ensure_column("task_progress", "source_ref", "VARCHAR")
+    _ensure_column("task_progress", "resource", "VARCHAR")
+    for column in ("question_start", "question_end", "page_start", "page_end"):
+        _ensure_column("task_progress", column, "INTEGER")
     # users.phone was added after the first schema create; migrate existing DBs.
     _ensure_column("users", "phone", "VARCHAR")
     _ensure_column("users", "phone_verified", "BOOLEAN DEFAULT 0")

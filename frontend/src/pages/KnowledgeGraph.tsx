@@ -170,7 +170,7 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
       {!data && !error && <div className="p-8 text-center text-sm text-[var(--muted)]">در حال ساختن مسیر یادگیری...</div>}
       {data && tabData && (
         <>
-          <section className="mx-5 mt-5 rounded-3xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm">
+          <section className="study-section mx-5 mt-5 p-4">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div className="text-right">
                 <p className="text-[11px] font-bold text-[var(--muted-2)]">رشته</p>
@@ -189,11 +189,11 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
           </section>
 
           {tabData.nodes.length === 0 && (
-            <div className="mx-5 mt-4 rounded-3xl border border-[var(--border)] bg-[var(--card)] p-6 text-center text-[12px] font-semibold text-[var(--muted)]">
+            <div className="study-section mx-5 mt-4 p-6 text-center text-[12px] font-semibold text-[var(--muted)]">
               در این دسته درسی وجود ندارد.
             </div>
           )}
-          <section className={`mx-5 mt-4 overflow-x-auto rounded-3xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-sm ${tabData.nodes.length === 0 ? "hidden" : ""}`} dir="ltr">
+          <section className={`study-section mx-5 mt-4 overflow-x-auto p-3 ${tabData.nodes.length === 0 ? "hidden" : ""}`} dir="ltr">
             <svg width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="tree" aria-label="درخت کامل مباحث درسی">
               <g opacity=".45">
                 {[10, 11, 12].map(year => <line key={year} x1={LESSON_X0 + (year - 10) * COL_W} y1="20" x2={LESSON_X0 + (year - 10) * COL_W} y2={layout.height - 20} stroke="var(--border)" strokeDasharray="4 8" />)}
@@ -240,7 +240,7 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
             </svg>
           </section>
 
-          {selected && <section className="mx-5 mt-4 rounded-3xl border border-[var(--border)] bg-[var(--card)] p-5 text-right shadow-sm">
+          {selected && <section className="study-section mx-5 mt-4 p-5 text-right">
             <div className="flex items-start justify-between gap-3">
               <div><p className="text-[10px] font-bold text-[var(--muted-2)]">اهمیت {selected.importance} از ۵</p><h2 className="mt-1 text-lg font-bold text-[var(--text)]">{selected.title}</h2></div>
               <span className="rounded-xl px-3 py-1 text-[11px] font-bold" style={{ color: masteryColor(selected), backgroundColor: `${masteryColor(selected)}18` }}>{selected.opened ? "باز شده" : "قفل مسیر"}</span>

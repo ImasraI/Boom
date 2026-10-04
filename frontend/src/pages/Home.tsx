@@ -94,11 +94,14 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
   const [description, setDescription] = useState(task.description);
   const [duration, setDuration] = useState(task.duration);
   const [scheduledTime, setScheduledTime] = useState(task.scheduledTime);
+  const [error, setError] = useState("");
 
   function handleSave() {
-    onSave({ ...task, title, description, duration, scheduledTime });
-    setEditing(false);
-    onClose();
+    try {
+      onSave({ ...task, title, description, duration, scheduledTime });
+      setEditing(false);
+      onClose();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "ثبت تغییرات انجام نشد."); }
   }
 
   return (
@@ -109,6 +112,7 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
         <div className="w-10 h-1 bg-[#D5CCC3] rounded-full mx-auto mb-5" />
 
         {/* Type badge + title */}
+        {error && <p role="alert" className="text-xs text-red-600 mb-3">{error}</p>}
         <div className="flex items-start gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
             style={{ background: typeBg[task.type], color: typeColor[task.type] }}>
@@ -174,7 +178,7 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
           <>
             <ReportActualBlock task={task} onClose={onClose} />
             <div className="flex gap-2.5">
-              <button onClick={onPostpone}
+              <button onClick={() => { try { onPostpone(); } catch (cause) { setError(cause instanceof Error ? cause.message : "جابه‌جایی انجام نشد."); } }}
                 className="flex-1 py-3.5 rounded-2xl border border-[#E5DDD4] text-[var(--muted)] font-bold text-[13px] hover:bg-[#F0EBE3] transition-colors">
                 تعویق به فردا
               </button>
@@ -340,10 +344,10 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
   }
 
   function handlePostpone(task: HomeTask) {
+    postponeToTomorrow(todayISO, task);
     setSelectedTask(null);
     setPostponingId(task.id);
     setTimeout(() => {
-      postponeToTomorrow(todayISO, task);
       setPostponingId(null);
     }, 380);
   }
@@ -429,7 +433,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                   <div className="absolute inset-y-0 right-0 rounded-full transition-all duration-1000"
                     style={{ width: `${AI_LEVEL}%`, background: "linear-gradient(to left, #C4714A, #E8A070)" }} />
                 </div>
-                <p className="text-[11px] text-[var(--muted-2)]">هر تکلیف که انجام بدی، بوم بیشتر یاد می‌گیره</p>
+                <p className="text-[11px] text-[var(--muted-2)]">انجام تکالیف و نتیجهٔ تست‌ها، برنامهٔ بعدی تو را دقیق‌تر می‌کند.</p>
                 <div className="mt-4 pt-4 border-t border-[var(--border)] flex items-center justify-between">
                   <div>
                     <p className="text-[10px] text-[var(--muted-2)]">XP امروز</p>

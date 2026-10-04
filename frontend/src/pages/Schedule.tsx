@@ -1,19 +1,25 @@
 import { flushProgress } from "../progressSync";
 import { accountStorage } from "../accountStorage";
+import { acceptGeneratedCalendar, calendarVersion, calendarSyncError, flushCalendar, pullCalendar } from "../calendarSync";
+import { expandTemplates, type Recurrence } from "../recurrence";
 import { useEffect, useMemo, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
 import { apiUrl, authHeaders, readApiError } from "../api"
 import GroqChart from "../components/GroqChart"
 import {
   addDays,
+  blocksOverlap,
+  hasScheduleOverlap,
   fromISO,
   LEGACY_KEY,
   loadGeneratedMarkers,
   loadStaticTemplates,
   markWeekGenerated,
   saveWeekBlocks,
+  saveStaticTemplates,
+  saveCalendarWeek,
+  SCHEDULE_CHANGED_EVENT,
   startOfWeek,
-  STATIC_KEY,
   STORAGE_PREFIX,
   toISO,
   weekdayOf,
@@ -40,6 +46,7 @@ const HOURS = Array.from({ length: SLOT_COUNT }, (_, i) => {
 })
 
 const SLOT_HEIGHT = 32
+const HEADER_HEIGHT = 52
 const MIN_DURATION = 0.5
 const MAX_DURATION = 6
 
@@ -69,11 +76,17 @@ const PERSIAN_MONTHS = [
 type BlockType = "class" | "study" | "test" | "break"
 
 interface ScheduleBlock {
+  origin?: "manual" | "generated";
   source_ref?: string;
   description?: string;
   subject?: string;
   topic?: string;
   task_type?: string;
+  resource?: string | null;
+  question_start?: number | null;
+  question_end?: number | null;
+  page_start?: number | null;
+  page_end?: number | null;
   count?: number;
   id: string
   day: number
@@ -87,6 +100,7 @@ interface ScheduleBlock {
 // A "static" timeblock is anchored to a specific date (YYYY-MM-DD) and
 // automatically repeats every year on the same month/day.
 interface StaticBlock {
+  recurrence?: Recurrence;
   id: string
   date?: string
   day?: number
@@ -260,7 +274,9 @@ function loadBlocks(weekStart: Date): ScheduleBlock[] {
 
 function loadStatics(): StaticBlock[] {
   return loadStaticTemplates().map((t) => ({
+    ...t,
     id: t.id ?? newId(),
+    recurrence: t.recurrence,
     date: t.date,
     day: t.day,
     startHour: t.startHour,
@@ -293,55 +309,7 @@ function staticInstancesForWeek(
   statics: StaticBlock[],
   weekStart: Date,
 ): StaticInstance[] {
-  const out: StaticInstance[] = []
-  const weekEnd = addDays(weekStart, 6)
-
-  for (const t of statics) {
-    if (typeof t.day === "number") {
-      // Weekly repeating: appears every week.
-      out.push({
-        id: t.id,
-        static: true,
-        templateId: t.id,
-        day: t.day,
-        startHour: t.startHour,
-        duration: t.duration,
-        title: t.title,
-        type: t.type,
-        color: t.color,
-      })
-    } else if (t.date) {
-      // Yearly repeating: anchored to a specific date.
-      const [, m, d] = t.date.split("-").map(Number)
-      const years = [
-        weekStart.getFullYear() - 1,
-        weekStart.getFullYear(),
-        weekStart.getFullYear() + 1,
-      ]
-      for (const y of years) {
-        const dt = new Date(y, m - 1, d)
-        if (dt.getMonth() !== m - 1 || dt.getDate() !== d) continue
-        if (
-          dt.getTime() >= weekStart.getTime() &&
-          dt.getTime() <= weekEnd.getTime()
-        ) {
-          out.push({
-            id: t.id,
-            static: true,
-            templateId: t.id,
-            day: weekdayOf(dt),
-            startHour: t.startHour,
-            duration: t.duration,
-            title: t.title,
-            type: t.type,
-            color: t.color,
-          })
-          break
-        }
-      }
-    }
-  }
-  return out
+  return expandTemplates(statics, toISO(weekStart)).map(t => ({ ...t, id: t.id!, static: true, templateId: t.templateId! }))
 }
 
 export default function Schedule({
@@ -360,6 +328,9 @@ export default function Schedule({
   const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null)
   const [editingStatic, setEditingStatic] = useState<StaticBlock | null>(null)
   const [recurring, setRecurring] = useState(false)
+  const [repeatRule, setRepeatRule] = useState<Recurrence>({ frequency: "weekly", interval: 1 });
+  const [repeatEnd, setRepeatEnd] = useState<"never" | "until" | "count">("never");
+  const mountedToken = useRef(localStorage.getItem("boom-token"));
   const [showModal, setShowModal] = useState(false)
   const [selectedDay, setSelectedDay] = useState(0)
   const [newBlock, setNewBlock] = useState<BlockDraft>(DEFAULT_DRAFT)
@@ -367,6 +338,7 @@ export default function Schedule({
   const [generating, setGenerating] = useState(false)
   const [generatingWeeks, setGeneratingWeeks] = useState<Set<string>>(new Set())
   const [planMessage, setPlanMessage] = useState("")
+  const [blockError, setBlockError] = useState("")
   const genBusyRef = useRef<Record<string, boolean>>({})
   const genAbortRef = useRef<Record<string, AbortController>>({})
   const skipPersistRef = useRef(true)
@@ -413,11 +385,20 @@ export default function Schedule({
 
   // Load blocks whenever the displayed week changes.
   useEffect(() => {
-    const loaded = loadBlocks(weekStart)
-    setBlocks(loaded)
     setEditingBlock(null)
     setEditingStatic(null)
     setShowModal(false)
+    setBlocks(loadBlocks(weekStart))
+    let cancelled = false;
+    void (async () => {
+    if (!await flushCalendar() || !await pullCalendar()) {
+      if (!cancelled) setPlanMessage(calendarSyncError());
+      return;
+    }
+    if (cancelled || mountedToken.current !== localStorage.getItem("boom-token")) return;
+    const loaded = loadBlocks(weekStart), templates = loadStatics();
+    setBlocks(loaded);
+    setStatics(templates);
     // Empty FUTURE weeks get auto-filled once with the standard generated
     // plan (unless the user explicitly cleared them, tracked via the marker).
     // The current and past weeks must NOT auto-fill: mid-week generation
@@ -425,11 +406,19 @@ export default function Schedule({
     // capacity-zero), which produced a grid full of thin blocks with no
     // explanation. The user generates those weeks explicitly via بازسازی.
     const isCurrentOrPast = weekDiff(weekStart, todayWeekStart) <= 0
-    if (loaded.length === 0 && !isCurrentOrPast && !loadGeneratedMarkers()[toISO(weekStart)]) {
+    const conflicts = hasScheduleOverlap(loaded, staticInstancesForWeek(templates, weekStart))
+    const needsUpgrade = loaded.some(block => !!block.source_ref && !block.origin);
+    if ((conflicts || needsUpgrade) && loaded.every(block => !!block.source_ref) && weekDiff(weekStart, todayWeekStart) >= 0) {
+      void generateWeekPlan(weekStart)
+    } else if (conflicts) {
+      setPlanMessage("فعالیت‌های برنامه قبلی هم‌پوشانی دارند؛ زمان آن‌ها را اصلاح کنید یا «بازسازی» را بزنید.")
+    } else if (loaded.length === 0 && !isCurrentOrPast && !loadGeneratedMarkers()[toISO(weekStart)]) {
       void generateWeekPlan(weekStart)
     } else if (loaded.length === 0 && isCurrentOrPast && !loadGeneratedMarkers()[toISO(weekStart)] && !generating) {
       setPlanMessage("برنامهٔ این هفته هنوز ساخته نشده. با دکمهٔ «بازسازی» بسازش.")
     }
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekStart])
 
@@ -440,14 +429,32 @@ export default function Schedule({
       skipPersistRef.current = false
       return
     }
-    const key = STORAGE_PREFIX + toISO(weekStartRef.current)
-    accountStorage.setItem(key, JSON.stringify(blocks))
+    if (mountedToken.current !== localStorage.getItem("boom-token")) return;
+    const iso = toISO(weekStartRef.current);
+    if (JSON.stringify(loadBlocks(weekStartRef.current)) !== JSON.stringify(blocks)) {
+      try { saveWeekBlocks(iso, blocks); } catch (error) { setPlanMessage(String(error)); }
+    }
   }, [blocks])
 
   // Persist static templates separately (they are global / yearly).
   useEffect(() => {
-    accountStorage.setItem(STATIC_KEY, JSON.stringify(statics))
+    if (mountedToken.current !== localStorage.getItem("boom-token")) return;
+    if (JSON.stringify(loadStatics()) !== JSON.stringify(statics)) saveStaticTemplates(statics);
   }, [statics])
+
+  useEffect(() => {
+    function reload() {
+      if (mountedToken.current !== localStorage.getItem("boom-token")) return;
+      setBlocks(loadBlocks(weekStartRef.current));
+      setStatics(loadStatics());
+      if (calendarSyncError()) setPlanMessage(calendarSyncError());
+    }
+    window.addEventListener(SCHEDULE_CHANGED_EVENT, reload);
+    return () => {
+      window.removeEventListener(SCHEDULE_CHANGED_EVENT, reload);
+      Object.values(genAbortRef.current).forEach(controller => controller.abort());
+    };
+  }, []);
 
   const staticInstances = useMemo(
     () => staticInstancesForWeek(statics, weekStart),
@@ -490,34 +497,41 @@ export default function Schedule({
     const requestToken = localStorage.getItem("boom-token");
     try {
       if (!await flushProgress()) throw new Error("ثبت پیشرفت انجام نشد؛ اتصال را بررسی و دوباره تلاش کنید.");
+      if (!await flushCalendar()) throw new Error(calendarSyncError() || "ثبت برنامه انجام نشد؛ دوباره تلاش کنید.");
       if (localStorage.getItem("boom-token") !== requestToken) return;
       const resp = await fetch(apiUrl("/api/boom/weekly-plan"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           week_start: key,
+          calendar_version: calendarVersion(),
           daily_hours: Math.max(0.5, Math.min(16, Number(
             (userData?.studyHours || "4").replace(/[۰-۹٠-٩]/g, digit =>
               String("۰۱۲۳۴۵۶۷۸۹".includes(digit) ? "۰۱۲۳۴۵۶۷۸۹".indexOf(digit) : "٠١٢٣٤٥٦٧٨٩".indexOf(digit))
             ).match(/[0-9]+(?:\.[0-9]+)?/)?.[0] || 4))),
           student: userData ?? undefined,
-          statics: staticInstancesForWeek(statics, ws),
+          statics: staticInstancesForWeek(loadStatics(), ws),
         }),
         signal: abortController.signal,
       })
       if (!resp.ok) throw new Error(await readApiError(resp, "ساخت برنامه انجام نشد؛ دوباره تلاش کنید."))
       const data: any = await resp.json()
       if (localStorage.getItem("boom-token") !== requestToken) return
-      if (data.unscheduled?.length) setPlanMessage(`${data.unscheduled.length} فعالیت در زمان آزاد جا نشد. زمان آزاد یا تعهدات ثابت را بازبینی کنید.`)
+      const notices = (data.warnings ?? []).filter((message: string) => !/heavy study load/.test(message));
+      if (data.unscheduled?.length) notices.unshift(`${data.unscheduled.length} فعالیت در زمان آزاد جا نشد. زمان آزاد یا تعهدات ثابت را بازبینی کنید.`)
+      setPlanMessage(notices.join(" "))
       const list: ScheduleBlock[] = Array.isArray(data.blocks)
         ? data.blocks.map(
             (b: any): ScheduleBlock => ({
               id: b.id ?? newId(),
+              origin: b.origin,
               day: Number(b.day) || 0,
               startHour: Number(b.startHour) || 0,
               duration: Number(b.duration) || 1,
               title: String(b.title ?? "فعالیت"),
               source_ref: b.source_ref, subject: b.subject, topic: b.topic, task_type: b.task_type, description: b.description,
+              resource: b.resource, question_start: b.question_start, question_end: b.question_end,
+              page_start: b.page_start, page_end: b.page_end,
               type: (b.type in TYPE_LABELS ? b.type : "study") as BlockType,
               color: resolveColor(String(b.color ?? TYPE_COLORS.study)),
               count: b.count,
@@ -525,7 +539,11 @@ export default function Schedule({
           )
         : []
       if (Array.isArray(data.blocks)) {
-        saveWeekBlocks(key, list)
+        if (hasScheduleOverlap(list, staticInstancesForWeek(statics, ws))) {
+          throw new Error("برنامهٔ دریافت‌شده هم‌پوشانی دارد؛ برنامه قبلی نگه داشته شد.")
+        }
+        acceptGeneratedCalendar(key, list, data.calendar_version)
+        accountStorage.setItem(`boom-weekly-version:${key}`, data.planner ?? "adaptive-v3")
         markWeekGenerated(key)
         if (toISO(weekStartRef.current) === key) setBlocks(list)
       }
@@ -564,15 +582,21 @@ export default function Schedule({
   }
 
   function openAdd(day: number, hour: number) {
+    if (genBusyRef.current[toISO(weekStartRef.current)]) return;
+    setBlockError("")
     setSelectedDay(day)
     setNewBlock({ ...DEFAULT_DRAFT(), startHour: hour })
     setEditingBlock(null)
     setEditingStatic(null)
     setRecurring(false)
+    setRepeatRule({ frequency: "weekly", interval: 1, weekdays: [day] });
+    setRepeatEnd("never");
     setShowModal(true)
   }
 
   function openEdit(block: ScheduleBlock) {
+    if (genBusyRef.current[toISO(weekStartRef.current)]) return;
+    setBlockError("")
     setSelectedDay(block.day)
     setNewBlock({
       title: block.title,
@@ -584,10 +608,14 @@ export default function Schedule({
     setEditingBlock(block)
     setEditingStatic(null)
     setRecurring(false)
+    setRepeatRule({ frequency: "weekly", interval: 1, weekdays: [block.day] });
+    setRepeatEnd("never");
     setShowModal(true)
   }
 
   function openEditStatic(instance: StaticInstance) {
+    if (genBusyRef.current[toISO(weekStartRef.current)]) return;
+    setBlockError("")
     const template = statics.find((t) => t.id === instance.templateId)
     if (!template) return
     setSelectedDay(instance.day)
@@ -597,14 +625,19 @@ export default function Schedule({
       duration: template.duration,
       type: template.type,
       color: resolveColor(template.color),
+      day: template.day,
+      date: template.date,
     })
     setEditingBlock(null)
     setEditingStatic(template)
     setRecurring(true)
+    setRepeatRule(template.recurrence ?? { frequency: template.day !== undefined ? "weekly" : "yearly", interval: 1, weekdays: [instance.day] });
+    setRepeatEnd(template.recurrence?.until ? "until" : template.recurrence?.count ? "count" : "never");
     setShowModal(true)
   }
 
   function saveBlock() {
+    if (genBusyRef.current[toISO(weekStartRef.current)]) { setBlockError("ابتدا منتظر پایان بازسازی بمانید."); return; }
     if (!newBlock.title.trim()) return
     const startHour = clamp(
       newBlock.startHour,
@@ -613,7 +646,7 @@ export default function Schedule({
     )
     const duration = clamp(
       newBlock.duration,
-      MIN_DURATION,
+      editingBlock ? Math.min(MIN_DURATION, editingBlock.duration) : MIN_DURATION,
       maxDurationForHour(startHour),
     )
     const base = {
@@ -622,50 +655,61 @@ export default function Schedule({
       duration,
       color: resolveColor(newBlock.color),
     }
+    const candidate = { ...base, day: selectedDay };
+    const occupied = displayedBlocks.filter(block => block.id !== editingBlock?.id
+      && (!isStaticInstance(block) || block.templateId !== editingStatic?.id));
+    if (occupied.some(block => blocksOverlap(candidate, block))) {
+      setBlockError("این زمان با فعالیت دیگری تداخل دارد. ساعت یا مدت را تغییر دهید.");
+      return;
+    }
 
+    let nextBlocks = [...blocks], nextStatics = [...statics];
     if (recurring) {
-      const day = newBlock.day !== undefined ? newBlock.day : selectedDay
-      const date = newBlock.date ?? (newBlock.day === undefined ? toISO(addDays(startOfWeek(weekStartRef.current), selectedDay)) : undefined)
-      if (editingStatic) {
-        setStatics((prev) =>
-          prev.map((t) =>
-            t.id === editingStatic.id ? { ...t, ...base, day, date } : t,
-          ),
-        )
-      } else {
-        setStatics((prev) => [...prev, { id: newId(), day, date, ...base }])
+      const date = editingStatic?.date ?? toISO(addDays(weekStartRef.current, selectedDay));
+      const recurrence: Recurrence = { ...repeatRule, weekdays: repeatRule.weekdays?.length ? repeatRule.weekdays : [selectedDay],
+        until: repeatEnd === "until" ? repeatRule.until : undefined, count: repeatEnd === "count" ? repeatRule.count : undefined };
+      if ((repeatEnd === "until" && (!recurrence.until || recurrence.until < date)) || (repeatEnd === "count" && (!recurrence.count || recurrence.count < 1))) {
+        setBlockError("تاریخ پایان یا تعداد تکرار را مشخص کنید."); return;
       }
+      const template: StaticBlock = { ...(editingBlock || editingStatic), ...base, id: editingStatic?.id ?? newId(), date, day: undefined, recurrence };
+      nextStatics = editingStatic ? statics.map(t => t.id === editingStatic.id ? template : t) : [...statics, template];
+      nextBlocks = blocks.filter(b => b.id !== editingBlock?.id);
+      const repeats = staticInstancesForWeek(nextStatics, weekStartRef.current);
+      if (hasScheduleOverlap(nextBlocks, repeats)) { setBlockError("یکی از تکرارها با فعالیت دیگری تداخل دارد."); return; }
     } else if (editingBlock) {
-      setBlocks((prev) =>
-        prev.map((b) =>
-          b.id === editingBlock.id ? { ...b, ...base, day: selectedDay } : b,
-        ),
+      nextBlocks = blocks.map((b) =>
+          b.id === editingBlock.id ? { ...b, ...base, day: selectedDay, origin: "manual" } : b,
       )
     } else {
-      setBlocks((prev) => [
-        ...prev,
+      nextBlocks = [
+        ...blocks,
         {
           id: newId(),
+          origin: "manual",
           day: selectedDay,
           ...base,
         },
-      ])
+      ]
     }
+    if (editingStatic && !recurring) nextStatics = statics.filter(t => t.id !== editingStatic.id);
+    try { saveCalendarWeek(toISO(weekStartRef.current), nextBlocks, nextStatics); }
+    catch (error) { setBlockError(error instanceof Error ? error.message : "ذخیره انجام نشد"); return; }
+    setBlocks(nextBlocks);
+    setStatics(nextStatics);
     setShowModal(false)
   }
 
   function deleteCurrentBlock() {
-    if (recurring && editingStatic) {
-      setStatics((prev) => prev.filter((t) => t.id !== editingStatic.id))
-    } else if (editingBlock) {
-      setBlocks((prev) => prev.filter((b) => b.id !== editingBlock.id))
-    }
+    if (genBusyRef.current[toISO(weekStartRef.current)]) return;
+    const nextStatics = editingStatic ? statics.filter(t => t.id !== editingStatic.id) : statics;
+    const nextBlocks = editingBlock ? blocks.filter(b => b.id !== editingBlock.id) : blocks;
+    try { saveCalendarWeek(toISO(weekStartRef.current), nextBlocks, nextStatics); }
+    catch (error) { setBlockError(error instanceof Error ? error.message : "حذف انجام نشد"); return; }
+    setBlocks(nextBlocks); setStatics(nextStatics);
     setShowModal(false)
   }
 
   function toggleRecurring(v: boolean) {
-    // Only allowed when adding a new block or editing a static template.
-    if (editingBlock) return
     setRecurring(v)
   }
 
@@ -675,7 +719,7 @@ export default function Schedule({
     const rect = grid.getBoundingClientRect()
     const isRtl = getComputedStyle(grid).direction === "rtl"
     const x = isRtl ? rect.right - clientX : clientX - rect.left
-    const y = clientY - rect.top - SLOT_HEIGHT
+    const y = clientY - rect.top - HEADER_HEIGHT
     const colWidth = rect.width / 8
     const visualCol = Math.floor(x / colWidth)
     const day = clamp(visualCol - 1, 0, DAYS.length - 1)
@@ -716,7 +760,8 @@ export default function Schedule({
             MIN_DURATION,
             maxDurationForHour(current.startHour),
           )
-          return { ...block, duration }
+          const candidate = { ...block, duration, origin: "manual" as const };
+          return [...prev.filter(other => other.id !== block.id), ...staticInstances].some(other => blocksOverlap(candidate, other)) ? block : candidate;
         }
         const day = clamp(current.startDay + deltaDay, 0, DAYS.length - 1)
         const maxStart = HOUR_START + TOTAL_HOURS - current.startDuration
@@ -725,7 +770,8 @@ export default function Schedule({
           HOUR_START,
           Math.max(HOUR_START, maxStart),
         )
-        return { ...block, day, startHour }
+        const candidate = { ...block, day, startHour, origin: "manual" as const };
+        return [...prev.filter(other => other.id !== block.id), ...staticInstances].some(other => blocksOverlap(candidate, other)) ? block : candidate;
       }),
     )
   }
@@ -735,6 +781,7 @@ export default function Schedule({
     block: ScheduleBlock,
     mode: DragMode,
   ) {
+    if (genBusyRef.current[toISO(weekStartRef.current)]) return;
     e.preventDefault()
     e.stopPropagation()
     const originSlot = slotFromPoint(e.clientX, e.clientY) ?? {
@@ -900,7 +947,7 @@ export default function Schedule({
           ref={gridRef}
           className="relative grid grid-cols-8 min-w-[720px] select-none"
           style={{
-            gridTemplateRows: `${SLOT_HEIGHT}px repeat(${SLOT_COUNT}, ${SLOT_HEIGHT}px)`,
+            gridTemplateRows: `${HEADER_HEIGHT}px repeat(${SLOT_COUNT}, ${SLOT_HEIGHT}px)`,
           }}
         >
           <div className="sticky top-0 z-20 bg-[var(--card)] border-b border-l border-[var(--border)] p-2 text-center text-xs font-bold text-[var(--muted)]">
@@ -929,6 +976,9 @@ export default function Schedule({
                   dir="rtl"
                 >
                   {faNum(jd)} {jd === 1 ? PERSIAN_MONTHS[jm - 1] : ""}
+                </p>
+                <p className="text-[9px] text-[var(--muted)] mt-0.5">
+                  {faNum(Math.round(displayedBlocks.filter(b => b.day === i && (b.type === "study" || b.type === "test")).reduce((sum, b) => sum + b.duration, 0) * 10) / 10)} ساعت
                 </p>
               </div>
             )
@@ -967,7 +1017,7 @@ export default function Schedule({
           <div
             className="absolute pointer-events-none"
             style={{
-              top: SLOT_HEIGHT,
+              top: HEADER_HEIGHT,
               left: 0,
               right: "calc(100% / 8)",
               bottom: 0,
@@ -1003,6 +1053,7 @@ export default function Schedule({
                 <div
                   key={b.id}
                   onPointerDown={(e) => startInteraction(e, b, "move")}
+                  title={`${b.title}${b.description ? `\n${b.description}` : ""}`}
                   onClick={(e) => e.stopPropagation()}
                   className={`schedule-block pointer-events-auto absolute z-10 overflow-hidden px-1.5 py-1 text-xs ${
                     draggingId === b.id ? "is-dragging z-30" : ""
@@ -1018,7 +1069,7 @@ export default function Schedule({
                     } as React.CSSProperties
                   }
                 >
-                  <div className="font-bold truncate pointer-events-none">
+                  <div className={`font-bold leading-snug pointer-events-none ${b.duration < 1 ? "truncate" : "line-clamp-3"}`}>
                     {b.title}
                   </div>
                   <div className="text-[10px] opacity-80 pointer-events-none">
@@ -1047,21 +1098,31 @@ export default function Schedule({
 
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[var(--card)] rounded-2xl p-5 w-80 max-w-[90vw]">
+          <div className="bg-[var(--card)] rounded-2xl p-5 w-80 max-h-[85vh] overflow-y-auto max-w-[90vw]">
             <h2 className="text-right font-bold mb-4">
-              {editingStatic
-                ? "ویرایش بلاک ثابت سالانه"
-                : `افزودن ${recurring ? "بلاک ثابت سالانه" : "فعالیت"}`}
+              {editingStatic || editingBlock ? "ویرایش فعالیت" : `افزودن ${recurring ? "فعالیت تکراری" : "فعالیت"}`}
             </h2>
 
             <div className="space-y-3">
+              {blockError && <p role="alert" className="text-xs text-red-600">{blockError}</p>}
+              {editingBlock?.resource && <div className="text-xs leading-relaxed bg-[var(--surface-2)] rounded-xl p-3">
+                <p className="font-bold">{editingBlock.title}</p>
+                {editingBlock.page_start && <p>صفحه {editingBlock.page_start} تا {editingBlock.page_end}</p>}
+                {editingBlock.description && <p className="text-[var(--muted)]">{editingBlock.description}</p>}
+              </div>}
               <div>
                 <label className="block text-xs text-[var(--muted)] mb-1 text-right">
                   روز
                 </label>
                 <select
                   value={selectedDay}
-                  onChange={(e) => setSelectedDay(Number(e.target.value))}
+                  onChange={(e) => {
+                    const day = Number(e.target.value);
+                    if (!editingStatic && (!repeatRule.weekdays?.length || repeatRule.weekdays.length === 1)) {
+                      setRepeatRule(r => ({ ...r, weekdays: [day] }));
+                    }
+                    setSelectedDay(day);
+                  }}
                   className="w-full border rounded-xl px-3 py-2 text-sm bg-[var(--card)] text-[var(--text)]"
                 >
                   {DAYS.map((d, i) => (
@@ -1156,6 +1217,7 @@ export default function Schedule({
                     }
                     className="w-full border rounded-xl px-3 py-2 text-sm bg-[var(--card)] text-[var(--text)]"
                   >
+                    {newBlock.startHour * 2 % 1 !== 0 && <option value={newBlock.startHour}>{formatTime(newBlock.startHour)}</option>}
                     {Array.from({ length: SLOT_COUNT }, (_, i) => {
                       const val = HOUR_START + i * 0.5
                       return (
@@ -1180,6 +1242,7 @@ export default function Schedule({
                     }
                     className="w-full border rounded-xl px-3 py-2 text-sm bg-[var(--card)] text-[var(--text)]"
                   >
+                    {newBlock.duration * 2 % 1 !== 0 && <option value={newBlock.duration}>{Math.round(newBlock.duration * 60)} دقیقه</option>}
                     {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6].map(
                       (d) => (
                         <option key={d} value={d}>
@@ -1191,62 +1254,37 @@ export default function Schedule({
                 </div>
               </div>
 
-              {/* Static (yearly repeating) toggle */}
-              {!editingBlock && (
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => toggleRecurring(!recurring)}
-                    className={`w-full flex items-center gap-2 rounded-xl border px-3 py-2.5 text-right text-xs font-bold transition-colors ${
-                      recurring
-                        ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-                        : "border-[var(--border-strong)] text-[var(--muted)]"
-                    }`}
-                  >
-                    <span style={{ opacity: recurring ? 1 : 0.4 }}>↻</span>
-                    <span className="flex-1">
-                      بلاک ثابت (تکرارشونده)
-                    </span>
-                    <span
-                      className={`w-8 h-4.5 rounded-full relative transition-colors ${
-                        recurring
-                          ? "bg-[var(--accent)]"
-                          : "bg-[var(--toggle-off)]"
-                      }`}
-                      style={{ height: 18 }}
-                    >
-                      <span
-                        className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-white transition-all ${
-                          recurring ? "right-0.5" : "right-[16px]"
-                        }`}
-                        style={{ top: 2, width: 14, height: 14 }}
-                      />
-                    </span>
-                  </button>
-                  {recurring && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setNewBlock(b => ({ ...b, date: undefined, day: selectedDay }))}
-                        className={`flex-1 py-1 rounded-lg text-xs font-bold border ${newBlock.day !== undefined ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border-strong)] text-[var(--muted)]"}`}
-                      >
-                        هفتگی
-                      </button>
-                      <button
-                        onClick={() => setNewBlock(b => ({ ...b, day: undefined, date: toISO(addDays(startOfWeek(weekStartRef.current), selectedDay)) }))}
-                        className={`flex-1 py-1 rounded-lg text-xs font-bold border ${newBlock.date !== undefined ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border-strong)] text-[var(--muted)]"}`}
-                      >
-                        سالانه
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-              {recurring && (
-                <p className="text-[10px] text-[var(--muted-2)] text-right leading-relaxed">
-                  این بلاک هر سال در همین هفته به‌صورت خودکار ظاهر می‌شود (مثلاً
-                  آزمون‌های سالانه).
-                </p>
-              )}
+              <div className="space-y-2 text-right">
+                <label className="block text-xs text-[var(--muted)]">تکرار فعالیت</label>
+                <select aria-label="تکرار فعالیت" className="w-full border rounded-xl px-3 py-2 bg-[var(--card)] text-sm" value={recurring ? repeatRule.frequency : "none"}
+                  onChange={e => { toggleRecurring(e.target.value !== "none"); if (e.target.value !== "none") setRepeatRule(r => ({ ...r, frequency: e.target.value as Recurrence["frequency"] })); }}>
+                  <option value="none">بدون تکرار</option><option value="daily">روزانه</option><option value="weekly">هفتگی</option>
+                  <option value="monthly">ماهانه</option><option value="yearly">سالانه</option>
+                </select>
+                {recurring && <>
+                  <div className="flex items-center gap-2 text-xs"><span>هر</span>
+                    <input aria-label="فاصلهٔ تکرار" type="number" min={1} max={365} value={repeatRule.interval} className="w-16 border rounded-lg p-2 bg-[var(--card)]"
+                      onChange={e => setRepeatRule(r => ({ ...r, interval: Math.max(1, Math.min(365, Number(e.target.value) || 1)) }))} />
+                    <span>{{ daily: "روز", weekly: "هفته", monthly: "ماه", yearly: "سال" }[repeatRule.frequency]}</span>
+                  </div>
+                  {repeatRule.frequency === "weekly" && <div className="flex flex-wrap gap-1">
+                    {DAYS.map((day, i) => <button type="button" key={i}
+                      className={`px-2 py-1 rounded-md border text-[10px] ${repeatRule.weekdays?.includes(i) ? "bg-[var(--accent)] text-white" : "text-[var(--muted)]"}`}
+                      onClick={() => setRepeatRule(r => ({ ...r, weekdays: r.weekdays?.includes(i) ? r.weekdays.filter(d => d !== i) : [...(r.weekdays || []), i] }))}>{day}</button>)}
+                  </div>}
+                  <label className="block text-xs text-[var(--muted)]">پایان تکرار</label>
+                  <select aria-label="پایان تکرار" value={repeatEnd} className="w-full border rounded-xl px-3 py-2 bg-[var(--card)] text-sm"
+                    onChange={e => setRepeatEnd(e.target.value as typeof repeatEnd)}>
+                    <option value="never">بدون پایان</option><option value="until">تا تاریخ</option><option value="count">بعد از چند بار</option>
+                  </select>
+                  {repeatEnd === "until" && <input aria-label="تاریخ پایان تکرار" type="date" min={editingStatic?.date || toISO(addDays(weekStart, selectedDay))}
+                    value={repeatRule.until || ""} className="w-full border rounded-xl p-2 bg-[var(--card)]" onChange={e => setRepeatRule(r => ({ ...r, until: e.target.value }))} />}
+                  {repeatEnd === "count" && <input aria-label="تعداد تکرار" type="number" min={1} max={10000} value={repeatRule.count || ""}
+                    className="w-full border rounded-xl p-2 bg-[var(--card)]" onChange={e => setRepeatRule(r => ({ ...r, count: Math.max(1, Math.min(10000, Number(e.target.value))) }))} />}
+                  <p className="text-[10px] text-[var(--muted)]">تکرار از {klarLabel(fromISO(editingStatic?.date || toISO(addDays(weekStart, selectedDay))))} آغاز می‌شود. ویرایش و حذف روی کل این مجموعه اعمال می‌شود.</p>
+                  {(repeatRule.frequency === "monthly" || repeatRule.frequency === "yearly") && <p className="text-[10px] text-[var(--muted)]">تکرار بر اساس تاریخ میلادی است؛ ماه‌هایی که این روز را ندارند رد می‌شوند.</p>}
+                </>}
+              </div>
             </div>
 
             <div className="flex gap-2 mt-5">

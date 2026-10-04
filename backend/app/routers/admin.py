@@ -155,6 +155,18 @@ def sms_credit_view():
     return result
 
 
+@router.get("/sms-delivery/{message_id}")
+def sms_delivery_view(message_id: int):
+    """Admin-only provider timing report; excludes OTPs and recipient details."""
+    if message_id <= 0:
+        raise HTTPException(status_code=400, detail="شناسه پیامک معتبر نیست")
+    from ..auth.sms import sms_delivery_report
+    try:
+        return sms_delivery_report(message_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("/pool")
 def pool_levels(db: Session = Depends(get_db)):
     """pending_use stock per (major, difficulty) shelf + the target the

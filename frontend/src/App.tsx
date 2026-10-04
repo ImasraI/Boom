@@ -1,8 +1,9 @@
-import { accountStorage } from "./accountStorage";
+import { accountStorage, accountId } from "./accountStorage";
+import { pullCalendar, flushCalendar } from "./calendarSync";
 import { Component, lazy, Suspense, useEffect, useState } from "react";
 import { apiUrl, authHeaders } from "./api";
 import { pullServerProfile, toSignupData } from "./profileSync";
-import { Screen, SignupData, normalizeSignupData } from "./types";
+import { Screen, SignupData, normalizeSignupData, emptySignupData } from "./types";
 import { PANELS, panelOf } from "./navConfig";
 import PanelTabs from "./components/PanelTabs";
 import Landing from "./pages/Landing";
@@ -71,7 +72,7 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
     <aside className="boom-sidebar hidden md:flex flex-col fixed top-0 right-0 bottom-0 w-[220px] bg-[var(--card)] border-r border-[var(--border)] z-30">
       <div className="px-5 pt-7 pb-5 border-b border-[var(--border)]">
         <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="بوم" className="w-10 h-10 flex-shrink-0" />
+          <img src="/logo-v2.png" alt="بوم" className="w-10 h-10 flex-shrink-0" />
           <div>
             <p className="font-display text-2xl text-[var(--text)] leading-none">بوم</p>
             <p className="text-[10px] text-[var(--muted-2)] font-medium mt-0.5">برنامه ریز کنکور</p>
@@ -202,6 +203,7 @@ export default function App() {
     if (!token) return;
     fetch(apiUrl("/api/auth/me"), { headers: authHeaders(token) })
       .then(res => {
+        if (localStorage.getItem(TOKEN_KEY) !== token) return null;
         if (res.status === 401) {
           localStorage.removeItem(TOKEN_KEY);
           accountStorage.removeItem(USER_KEY);
@@ -212,20 +214,20 @@ export default function App() {
         }
         return res.ok ? res.json() : null;
       })
-      .then(me => setIsAdmin(Boolean(me?.is_admin)))
+      .then(me => { if (localStorage.getItem(TOKEN_KEY) === token) setIsAdmin(Boolean(me?.is_admin)); })
       .catch(() => {});
   }, []);
 
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY);
     const savedUser = accountStorage.getItem(USER_KEY);
-    if (!token || !savedUser) {
+    if (!token) {
       accountStorage.removeItem(USER_KEY);
       if (!token) localStorage.removeItem(TOKEN_KEY);
       return;
     }
     try {
-      const profile = normalizeSignupData(JSON.parse(savedUser));
+      const profile = savedUser ? normalizeSignupData(JSON.parse(savedUser)) : emptySignupData();
       setUserData(profile);
       setScreen("home");
       // Growth-readiness project 1: refresh the cache from the server so a
@@ -233,6 +235,7 @@ export default function App() {
       pullServerProfile().then(server => {
         if (server && localStorage.getItem(TOKEN_KEY) === token) setUserData(prev => (prev ? toSignupData(server, prev) : prev));
       });
+      void flushCalendar(token).then(ok => ok && pullCalendar(token));
     } catch {
       accountStorage.removeItem(USER_KEY);
     }
@@ -258,6 +261,7 @@ export default function App() {
     persistUser(profile);
     setUserData(profile);
     nav("home");
+    void flushCalendar(token).then(ok => ok && pullCalendar(token));
     pullServerProfile().then(server => {
       if (server && localStorage.getItem(TOKEN_KEY) === token) {
         const refreshed = toSignupData(server, profile);
@@ -300,7 +304,7 @@ export default function App() {
   const settingsProps = { dark, toggleDark, onSave: handleSaveProfile, logout };
 
   return (
-    <Shell screen={screen} nav={nav} isAdmin={isAdmin}>
+    <Shell key={accountId() || "anonymous"} screen={screen} nav={nav} isAdmin={isAdmin}>
       {screen === "landing" && <Landing {...p} />}
       {screen === "login" && <Login {...p} onLogin={handleLogin} />}
       {screen === "signup" && <Signup {...p} onComplete={handleSignupComplete} />}

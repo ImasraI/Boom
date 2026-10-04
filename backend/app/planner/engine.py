@@ -83,6 +83,7 @@ class PlannerInput:
     # ISO date the plan starts from. Default = today. Set explicitly in
     # tests/simulations so plans are reproducible regardless of clock.
     start_date: Optional[str] = None
+    balance_subjects: bool = False
 
 
 @dataclass
@@ -254,13 +255,20 @@ def generate_plan(inp: PlannerInput) -> PlannerResult:
         # Missing availability means the waking window; explicit zero is rest.
         capacity = max(0, int(float(raw) * 60)) if raw is not None else 24 * 60
         used = 0
+        subject_minutes = {}
         for start, end in _free_slots_for_day(day, inp.profile, inp.fixed_events, min_block=1):
             cursor = start
             while cursor < end and used < capacity:
-                task = next((t for t in tasks if t["_remaining"] > 0
+                eligible = [t for t in tasks if t["_remaining"] > 0
                              and not t.get("_blocked") and ready(t)
                              and (not t.get("not_before") or date_key >= t["not_before"])
-                             and (not t.get("deadline") or date_key <= t["deadline"])), None)
+                             and (not t.get("deadline") or date_key <= t["deadline"])]
+                if inp.balance_subjects:
+                    eligible.sort(key=lambda t: (
+                        0 if t.get("overdue") else 1,
+                        subject_minutes.get(t.get("subject", ""), 0) / (0.5 + float(t.get("weakness") or 0)),
+                        tasks.index(t)))
+                task = eligible[0] if eligible else None
                 if task is None:
                     break
                 room = min(capacity - used,
@@ -308,6 +316,7 @@ def generate_plan(inp: PlannerInput) -> PlannerResult:
                 task["_items"].append(item)
                 task["_remaining"] -= block
                 used += block
+                subject_minutes[task.get("subject", "")] = subject_minutes.get(task.get("subject", ""), 0) + block
                 cursor = finish + timedelta(minutes=break_minutes)
                 if task["_remaining"] == 0:
                     finished_tasks.add(task["id"])

@@ -123,7 +123,7 @@ export default function Exams({ nav }: { nav: NavFn }) {
 
           {examResults.map(e => (
             <button key={e.id} onClick={() => setSelected(e.id)}
-              className="w-full bg-[var(--card)] rounded-2xl border border-[var(--border)] p-4 text-right hover:border-[#E5DDD4] active:scale-[0.98] transition-all">
+              className="study-section w-full p-4 text-right hover:border-[#E5DDD4] active:scale-[0.98] transition-all">
               <div className="flex items-start justify-between mb-3">
                 <div className="text-left">
                   <p className="text-2xl font-bold text-[#C4714A]">{e.totalScore}%</p>
@@ -150,7 +150,7 @@ export default function Exams({ nav }: { nav: NavFn }) {
         </div>
       ) : exam ? (
         <div className="px-5 space-y-4">
-          <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-5">
+          <div className="study-section p-5">
             <div className="flex items-center justify-between mb-2">
               <div className="text-left">
                 <p className="text-[11px] font-bold text-[var(--muted-2)]">رتبه‌ی کشوری</p>
@@ -163,7 +163,7 @@ export default function Exams({ nav }: { nav: NavFn }) {
             </div>
           </div>
 
-          <div className="bg-[var(--card)] rounded-3xl border border-[var(--border)] p-5">
+          <div className="study-section p-5">
             <p className="text-[12px] font-bold text-[var(--muted-2)] mb-4 text-right">جزئیات هر درس</p>
             <div className="space-y-4">
               {exam.subjects.map(s => (

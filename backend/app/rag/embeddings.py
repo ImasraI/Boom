@@ -3,13 +3,15 @@ Embedding layer for converting text into vector representations.
 
 Supports:
 - Ollama local embeddings (nomic-embed-text, etc.)
+- Gemini hosted embeddings (gemini-embedding-2)
 - OpenAI-compatible APIs (Groq, Omniroute, etc.)
 - HuggingFace embeddings (local or hub)
 
-Recommended models for Persian: nomic-embed-text (via Ollama)
+Gemini text collections are isolated by model, dimensions and retrieval format.
 """
 
 from abc import ABC, abstractmethod
+from functools import lru_cache
 from typing import List
 import httpx
 
@@ -144,12 +146,12 @@ class OllamaEmbeddingModel(BaseEmbeddingModel):
 
 
 class HuggingFaceEmbeddingModel(BaseEmbeddingModel):
-    """LangChain-backed HuggingFace embedding model."""
+    """Local SentenceTransformer embeddings, without the unused LangChain stack."""
 
     def __init__(self, model_name: str):
         try:
-            from langchain_community.embeddings import HuggingFaceEmbeddings
-            self.model = HuggingFaceEmbeddings(model_name=model_name)
+            from sentence_transformers import SentenceTransformer
+            self.model = SentenceTransformer(model_name, trust_remote_code=False)
         except Exception as e:
             logger.warning(f"Failed to initialize HuggingFace embeddings: {e}")
             self.model = None
@@ -157,12 +159,16 @@ class HuggingFaceEmbeddingModel(BaseEmbeddingModel):
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         if self.model is None:
             return []
-        return self.model.embed_documents(texts)
+        if not texts:
+            return []
+        # Preserve the former wrapper's preprocessing and unnormalized output.
+        return self.model.encode([text.replace('\n', ' ') for text in texts],
+                                 convert_to_numpy=True, normalize_embeddings=False).tolist()
 
     def embed_query(self, text: str) -> List[float]:
         if self.model is None:
             return []
-        return self.model.embed_query(text)
+        return self.embed_documents([text])[0]
 
 
 _GROQ_EMBEDDING_ALIASES = {
@@ -232,9 +238,23 @@ class OpenAICompatibleEmbeddingModel(BaseEmbeddingModel):
         return results[0] if results else []
 
 
+@lru_cache(maxsize=4)
+def _gemini_model(api_key, model_name, dimensions, batch_size, rpm, base_url, proxy):
+    from app.rag.gemini_embeddings import GeminiEmbeddingModel
+    return GeminiEmbeddingModel(api_key, model_name, dimensions, batch_size, rpm, base_url, proxy)
+
+
 def get_embedding_model() -> BaseEmbeddingModel:
     settings = get_settings()
     provider = (settings.EMBEDDING_PROVIDER or "").strip().lower()
+
+    if provider == "gemini":
+        return _gemini_model(
+            settings.EMBEDDING_API_KEY or settings.GEMINI_API_KEY,
+            settings.EMBEDDING_MODEL_NAME, settings.EMBEDDING_DIMENSIONS,
+            settings.EMBEDDING_BATCH_SIZE, settings.EMBEDDING_REQUESTS_PER_MINUTE,
+            settings.EMBEDDING_GEMINI_BASE_URL, settings.EMBEDDING_PROXY or settings.GEMINI_PROXY,
+        )
 
     if provider == "groq":
         if not settings.EMBEDDING_API_KEY:
