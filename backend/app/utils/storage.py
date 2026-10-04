@@ -8,6 +8,18 @@ Fallback to local disk only — no R2 or external dependencies.
 import os
 
 
+def has_page_images() -> bool:
+    """Check local page availability without loading models or reading books.
+
+    Recheck on each query so a later image upload becomes usable immediately.
+    Local storage uses data/ for both student uploads and shared page caches.
+    """
+    for _directory, _subdirs, filenames in os.walk("data"):
+        if any(name.lower().endswith((".png", ".jpg", ".jpeg", ".webp")) for name in filenames):
+            return True
+    return False
+
+
 def put_object(key: str, data: bytes) -> None:
     """Write bytes to local disk under data/<key>."""
     local_path = os.path.join("data", key.lstrip("/"))

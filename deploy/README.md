@@ -236,7 +236,23 @@ For messages arriving at 08:00 the next day, compare provider acceptance and del
 
 ## Release verification
 
-Local validation for this revision: 377 backend tests passed, 2 skipped; 16 frontend tests passed; TypeScript and the Cloudflare production build passed; pip check passed. Local unauthenticated calendar and SMS-report reads return 401. Desktop planning/profile and mobile layouts were inspected; the knowledge graph rendered 31 nodes for the test account without document-level horizontal overflow.
+Local validation for this revision: 379 backend tests passed, 2 skipped; 16 frontend tests passed; TypeScript and the Cloudflare production build passed; pip check passed. Local unauthenticated calendar and SMS-report reads return 401. Desktop planning/profile and mobile layouts were inspected; the knowledge graph rendered 31 nodes for the test account without document-level horizontal overflow.
+
+The 4 October deployment imported and verified 1,783 shared document chunks and
+126 question-bank chunks using Gemini embeddings at 768 dimensions, plus 18,201
+processed OCR files. Existing accounts and learning records and the persistent
+JWT secret were verified against the private VM backup. Cloudflare served the
+new build, real logo PNG and self-hosted font files. Authenticated VM smoke checks
+used an isolated application database: daily 480-minute planning, verified book
+question ranges, no overlaps, manual/repeat stability, account isolation,
+knowledge graph, semantic retrieval, cited chat and live mock generation passed.
+The local Cerebras pool credential returned HTTP 402; the VM uses a verified
+dedicated Gemini pool key instead, keeping mock generation off the Groq chat
+quota. The VM reranks eight candidates on its two CPU cores. Image retrieval
+skips model loading while page files are absent and detects subsequent uploads.
+SMS authentication and positive credit passed, but actual OTP delivery timing
+and image-based answers still require verification after an approved recipient
+and page images are available.
 
 The direct pinned-dependency audit was reduced from 69 advisory entries across eight packages to three entries for Chroma alone. These are advisory entries, not 69 distinct confirmed exploitable application bugs. Chroma's format-sensitive dependency was retained; its remaining advisories need deployment-context review. Frontend production dependencies had no reported npm audit vulnerabilities. This is not a claim that every transitive dependency or production workflow has been cleared.
 

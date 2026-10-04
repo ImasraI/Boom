@@ -18,6 +18,26 @@ import pytest
 from app.rag import pipeline
 
 
+def test_image_vectors_without_files_do_not_load_clip(monkeypatch):
+    monkeypatch.setattr("app.utils.storage.has_page_images", lambda: False)
+    monkeypatch.setattr(pipeline, "get_image_vector_store",
+                        lambda: (_ for _ in ()).throw(AssertionError("unavailable pages must not be searched")))
+    monkeypatch.setattr("app.rag.image_embeddings.get_image_embedding_model",
+                        lambda: (_ for _ in ()).throw(AssertionError("CLIP must not load without page files")))
+    assert pipeline._retrieve_image_hits("تابع", 1, 3) == []
+
+
+def test_page_upload_is_detected_on_next_query(tmp_path, monkeypatch):
+    from app.utils.storage import has_page_images
+    monkeypatch.chdir(tmp_path)
+    directory = tmp_path / "data" / "page_images"
+    directory.mkdir(parents=True)
+    (directory / "page.txt").write_text("OCR")
+    assert not has_page_images()
+    (directory / "page.png").write_bytes(b"page-image")
+    assert has_page_images()
+
+
 def _patch_nothing_available(monkeypatch):
     """Strip pipeline down to a deterministic, offline state."""
     settings = SimpleNamespace(TOP_K=2, IMAGE_TOP_K=2)

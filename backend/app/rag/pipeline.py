@@ -432,8 +432,13 @@ def _retrieve_image_hits(
     """
     from app.config import get_settings
     from app.rag.image_embeddings import get_image_embedding_model
+    from app.utils.storage import has_page_images
 
     try:
+        # A transferred vector corpus can arrive before its PNGs. Do not load
+        # CLIP or search vectors that cannot supply a readable page yet.
+        if not has_page_images():
+            return []
         settings = get_settings()
         image_vector_store = get_image_vector_store()
         if image_vector_store.collection.count() == 0:
