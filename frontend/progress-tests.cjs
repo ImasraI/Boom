@@ -27,6 +27,47 @@ function harness(fetch = async () => ({ ok: true })) {
 }
 const update = status => ({client_ref:'one', date:'2026-09-28', subject:'math', topic:'limits', task_type:'study', planned_minutes:60, actual_minutes:status === 'completed' ? 60 : 0, status});
 
+test('browser-only signup preferences initialize an empty server profile once', async () => {
+  const calls = [];
+  const h = harness(async (url, options = {}) => {
+    calls.push(options);
+    const profile = options.method === 'PATCH'
+      ? { ...JSON.parse(options.body), version: 1 }
+      : { version: 0, major: null, grade: null, study_hours: null, test_exams: [] };
+    return { ok: true, status: 200, json: async () => ({ profile }) };
+  });
+  h.login(1);
+  const sync = h.load('./profileSync');
+  const base = { major: 'ریاضی', grade: 'دوازدهم', studyHours: '8', testExams: ['ماز'] };
+  const saved = await sync.hydrateServerProfile(base);
+  assert.equal(saved.study_hours, '8');
+  assert.equal(JSON.parse(calls[1].body).version, 0);
+  assert.deepEqual(JSON.parse(calls[1].body).test_exams, ['ماز']);
+});
+
+test('existing server preferences win and switching accounts prevents migration', async () => {
+  let writes = 0;
+  const h = harness(async (url, options = {}) => {
+    if (options.method === 'PATCH') writes++;
+    return { ok: true, status: 200, json: async () => ({ profile: { version: 3, study_hours: '6' } }) };
+  });
+  h.login(1);
+  const base = { major: 'ریاضی', grade: 'دوازدهم', studyHours: '8', testExams: [] };
+  assert.equal((await h.load('./profileSync').hydrateServerProfile(base)).study_hours, '6');
+  assert.equal(writes, 0);
+  let release;
+  const slow = harness((url, options = {}) => {
+    if (options.method === 'PATCH') writes++;
+    return new Promise(resolve => { release = resolve; });
+  });
+  slow.login(1);
+  const pending = slow.load('./profileSync').hydrateServerProfile(base);
+  slow.login(2);
+  release({ok:true,json:async()=>({profile:{version:0}})});
+  assert.equal(await pending, null);
+  assert.equal(writes, 0);
+});
+
 test('account caches isolate two students and late writes stay with original account', () => {
   const h = harness(); h.login('one');
   const storage = h.load('./accountStorage');

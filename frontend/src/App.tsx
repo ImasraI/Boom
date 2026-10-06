@@ -2,7 +2,7 @@ import { accountStorage, accountId } from "./accountStorage";
 import { pullCalendar, flushCalendar } from "./calendarSync";
 import { Component, lazy, Suspense, useEffect, useState } from "react";
 import { apiUrl, authHeaders } from "./api";
-import { pullServerProfile, toSignupData } from "./profileSync";
+import { hydrateServerProfile, toSignupData } from "./profileSync";
 import { Screen, SignupData, normalizeSignupData, emptySignupData } from "./types";
 import { PANELS, panelOf } from "./navConfig";
 import PanelTabs from "./components/PanelTabs";
@@ -232,7 +232,7 @@ export default function App() {
       setScreen("home");
       // Growth-readiness project 1: refresh the cache from the server so a
       // second device (or a cleared storage) converges on the same state.
-      pullServerProfile().then(server => {
+      hydrateServerProfile(profile).then(server => {
         if (server && localStorage.getItem(TOKEN_KEY) === token) setUserData(prev => (prev ? toSignupData(server, prev) : prev));
       });
       void flushCalendar(token).then(ok => ok && pullCalendar(token));
@@ -262,7 +262,7 @@ export default function App() {
     setUserData(profile);
     nav("home");
     void flushCalendar(token).then(ok => ok && pullCalendar(token));
-    pullServerProfile().then(server => {
+    hydrateServerProfile(profile).then(server => {
       if (server && localStorage.getItem(TOKEN_KEY) === token) {
         const refreshed = toSignupData(server, profile);
         persistUser(refreshed);
@@ -280,6 +280,14 @@ export default function App() {
     persistUser(profile);
     setUserData(profile);
     nav("home");
+    const token = localStorage.getItem(TOKEN_KEY);
+    hydrateServerProfile(profile).then(server => {
+      if (server && token && localStorage.getItem(TOKEN_KEY) === token) {
+        const refreshed = toSignupData(server, profile);
+        persistUser(refreshed);
+        setUserData(refreshed);
+      }
+    });
   }
 
   function handleUpdateProfile(data: SignupData) {

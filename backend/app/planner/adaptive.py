@@ -7,7 +7,7 @@ from collections import defaultdict
 
 from sqlalchemy import select
 from app.auth.database import (StudentProfile, StudySession, TaskProgress, MockAttempt,
-                               GeneratedMock, WrongAnswer, Assessment, DailyTask)
+                               GeneratedMock, WrongAnswer, Assessment, DailyTask, BankQuestion, StudentCalendar)
 from app.planner.engine import PlannerInput, generate_plan, validate_plan_items
 
 DAYS = ["شنبه", "یکشنبه", "دوشنبه", "سهشنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
@@ -46,16 +46,23 @@ def student_state(db, user_id, supplied=None):
     return student
 
 
-def topic_evidence(db, user_id):
+def topic_evidence(db, user_id, *, trusted_only=False):
     """Count correct, wrong and blank outcomes; never infer accuracy from misses alone."""
     stats = defaultdict(lambda: {"attempted": 0, "correct": 0, "wrong": 0, "blank": 0})
     since = datetime.utcnow() - timedelta(days=90)
     attempts = db.execute(select(MockAttempt, GeneratedMock).join(
         GeneratedMock, MockAttempt.mock_id == GeneratedMock.id).where(
         MockAttempt.student_id == user_id, MockAttempt.created_at >= since)).all()
+    bank_ids = {q.get("bank_id") for _, mock in attempts for q in decoded(mock.questions, [])
+                if isinstance(q, dict) and q.get("bank_id")}
+    invalid_bank_ids = set(db.scalars(select(BankQuestion.id).where(
+        BankQuestion.id.in_(bank_ids), (BankQuestion.status != "active") | (BankQuestion.verified.is_(False))))) if bank_ids else set()
     for attempt, mock in attempts:
         answers = decoded(attempt.answers, {})
         for q in decoded(mock.questions, []):
+            if not isinstance(q, dict) or (trusted_only and (
+                    q.get("verification_status") != "verified" or q.get("bank_id") in invalid_bank_ids)):
+                continue
             key = (q.get("subject") or "عمومی", q.get("topic") or "مرور مباحث")
             stat = stats[key]
             value = answers.get(str(q.get("_id", q.get("id"))))
@@ -79,6 +86,20 @@ MIN_FRAGMENT_MINUTES = 30
 HARD_MAX_BLOCK_MINUTES = 120
 
 
+def focus_parts(minutes, cap, minimum):
+    """Rebalance 45+15 into 30+30 before tasks become separate calendar blocks."""
+    parts = []
+    while minutes > cap:
+        parts.append(cap)
+        minutes -= cap
+    if minutes:
+        if parts and minutes < minimum and parts[-1] - (minimum - minutes) >= minimum:
+            parts[-1] -= minimum - minutes
+            minutes = minimum
+        parts.append(minutes)
+    return parts
+
+
 def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=None, protected=None, commit=True):
     from app.routers.boom_ai import _day_constraints, _occupied_slots
     student = student_state(db, user_id, supplied)
@@ -91,12 +112,13 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
         daily_hours = max(0.5, min(16, float(re.search(r"\d+(?:\.\d+)?", value).group())))
     except (ValueError, AttributeError):
         pass
-    evidence = topic_evidence(db, user_id)
+    evidence = topic_evidence(db, user_id, trusted_only=True)
+    ignored_legacy_evidence = bool(topic_evidence(db, user_id)) and not evidence
     major = student.get("major", "ریاضی")
     subjects = next((v for k, v in SUBJECTS.items() if k in major), SUBJECTS["ریاضی"])
     confidence = student.get("confidence") or {}
     completion = student.get("completion") or {}
-    from app.planner.resources import available_books, _topic_score, _subject, _grade, specific_topic
+    from app.planner.resources import available_books, _topic_score, _subject, _grade, specific_topic, topic_heading_rank
     subjects = [_subject(s) for s in subjects]
     books = available_books(db, student, user_id)
     topic_scores = {(_subject(e["subject"]), e["topic"]): 1 - e["accuracy"] for e in evidence if _subject(e["subject"]) in subjects}
@@ -104,6 +126,8 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     # Manual mistakes identify topics but do not invent an accuracy denominator.
     for row in db.query(WrongAnswer).filter(WrongAnswer.student_id == user_id,
             WrongAnswer.created_at >= datetime.utcnow() - timedelta(days=90)).all():
+        if row.source == "mock":
+            continue  # Verified mock answers already own their accuracy denominator.
         subject = _subject(row.subject)
         if subject in subjects:
             key = (subject, row.topic or "مرور مباحث")
@@ -118,7 +142,14 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                 weakness = 0.5
             matching_books = [b for b in books if b["subject"] == subject]
             matching_books.sort(key=lambda b: (b["grade"] == _grade(student), b["grade"] == 33), reverse=True)
-            topics = list(dict.fromkeys(r["topic"] for b in matching_books for r in b["ranges"] if specific_topic(r["topic"], subject)))[:3]
+            topics = []
+            for book in matching_books:
+                coverage = defaultdict(int)
+                for r in book["ranges"]:
+                    if specific_topic(r["topic"], subject):
+                        coverage[r["topic"]] += r["q_to"] - r["q_from"] + 1
+                topics.extend(topic for topic in sorted(coverage, key=lambda t: (-topic_heading_rank(t, subject), -coverage[t], t)) if topic not in topics)
+            topics = topics[:3]
             for topic in topics or ["مرور مباحث"]:
                 topic_scores[(subject, topic)] = weakness
                 source = next((b["book"] for b in matching_books if any(r["topic"] == topic for r in b["ranges"])), None)
@@ -185,6 +216,13 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     for row in progress:
         if row.source_ref and row.status in ("completed", "partially_completed"):
             recovered[row.source_ref] += row.actual_minutes
+    calendar = db.get(StudentCalendar, user_id)
+    manual_refs = set()
+    if calendar:
+        from app.planner.calendar import protected_blocks
+        for iso, saved in decoded(calendar.weeks, {}).items():
+            start = date.fromisoformat(iso)
+            manual_refs.update(f"{start + timedelta(days=b['day'])}:{b['id']}" for b in protected_blocks(saved))
     for row in progress:
         key = (row.subject, row.topic or "مرور مباحث")
         if row.status == "completed":
@@ -193,6 +231,10 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
             last_seen[key] = row.date
         if row.source_ref and row.source_ref.startswith(("backlog-", "session-", "daily-")):
             continue  # The original work owns the remaining balance.
+        if row.status == "planned" and not row.actual_minutes and row.client_ref not in manual_refs and (
+                (row.source_ref or "").startswith(("topic-", "weekly-")) or
+                row.client_ref.split(":", 1)[-1].startswith(("topic-", "weekly-"))):
+            continue  # Untouched generated proposals are not confirmed missed work.
         if row.status in ("missed", "partially_completed") or (row.status == "planned" and row.date < date.today()):
             remaining = max(0, row.planned_minutes - row.actual_minutes - recovered["backlog-" + row.client_ref])
             if remaining:
@@ -201,6 +243,8 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                     "reason": "جبران کار انجام‌نشده؛ فقط زمان باقی‌مانده"})
     for row in db.query(DailyTask).filter(DailyTask.user_id == user_id, DailyTask.completed.is_(False),
             DailyTask.date < week_start).all():
+        if row.status not in ("missed", "partially_completed") and not row.actual_minutes:
+            continue
         candidates.append({"id": f"daily-{row.id}", "subject": row.subject, "topic": "مرور مباحث",
             "task_type": row.task_type, "planned_minutes": max(0, row.duration_minutes - (row.actual_minutes or 0) - recovered[f"daily-{row.id}"]), "overdue": 1,
             "reason": row.description})
@@ -249,6 +293,16 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
              "requires_task":"weekly-mock" if mock_remaining else None, "not_before":mock_day.isoformat(), "overdue":1,
              "reason":"تحلیل پاسخ‌های غلط و ثبت علت اشتباه"},
         ])
+    try:
+        max_block = max(15, min(120, int(float(student.get("maxConsec") or 1.5) * 60)))
+    except (ValueError, TypeError):
+        max_block = 90
+    preferred_blocks = {"پومودورو ۲۵ دقیقه": (25, 5), "تمرکز ۴۵ دقیقه": (45, 10), "بلوکهای ۶۰ دقیقه": (60, 15)}
+    chosen = preferred_blocks.get(student.get("breakStyle"))
+    preferred_block, break_minutes = chosen or (max_block, 15)
+    max_block = min(max_block, preferred_block)
+    minimum = min(MIN_FRAGMENT_MINUTES, max_block) if max_block >= 30 else 0
+    quantum = 30 if max_block >= 30 else 5
     study_ratio = {"بیشتر تمرین": 0.3, "بیشتر مطالعه نظری": 0.65}.get(student.get("studyStyle"), 0.45)
     total = max(0, int(sum(profile_hours.values()) * 60)
                 - sum(t["planned_minutes"] for t in candidates))
@@ -258,14 +312,14 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     # Divide the complete remaining goal across topics, retaining the
     # rounding remainder instead of silently losing time each week.
     ordered_weights = sorted(weights.items(), key=lambda kv: (-kv[1], kv[0]))
-    topic_minutes = {key: int(total * weight / denominator / 15) * 15 for key, weight in ordered_weights}
-    for i in range((total - sum(topic_minutes.values())) // 15):
-        topic_minutes[ordered_weights[i % len(ordered_weights)][0]] += 15
+    topic_minutes = {key: int(total * weight / denominator / quantum) * quantum for key, weight in ordered_weights}
+    for i in range((total - sum(topic_minutes.values())) // quantum):
+        topic_minutes[ordered_weights[i % len(ordered_weights)][0]] += quantum
     packages: dict = {}
     for key, weight in ordered_weights:
         subject, topic = key
         minutes = topic_minutes[key]
-        if minutes < 15:
+        if minutes < quantum:
             continue
         weakness = topic_scores[key]
         days_since = (week_start - last_seen.get(key, week_start - timedelta(days=14))).days
@@ -276,8 +330,8 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
         pkg["weakness"] = max(pkg["weakness"], weakness)
         pkg["days_since"] = max(pkg["days_since"], days_since)
         pkg["topics"].append(topic)
-        study_minutes = 0 if key in studied else max(15, int(minutes * study_ratio / 15) * 15)
-        review_minutes = min(30, max(15, int(minutes * 0.2 / 15) * 15))
+        study_minutes = 0 if key in studied else max(quantum, int(minutes * study_ratio / quantum) * quantum)
+        review_minutes = min(30, max(quantum, int(minutes * 0.2 / quantum) * quantum))
         pkg["study"] += study_minutes
         pkg["test"] += max(0, minutes - study_minutes - review_minutes)
         pkg["review"] += min(review_minutes, max(0, minutes - study_minutes))
@@ -295,18 +349,18 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
         n = hashlib.sha256("\0".join(("pkg", subject, topics_line)).encode()).hexdigest()[:12]
         # Short study/practice cycles unlock practice throughout the week,
         # rather than requiring the entire subject's study package first.
-        remaining = dict(allocations)
+        remaining = {kind: focus_parts(duration, min(max_block, 30) if kind == "review" else max_block, minimum)
+                     for kind, duration in allocations}
         previous = None
         cycle = 0
         if not remaining["study"]:
             studied.add((subject, topics_line))
-        while any(v > 0 for v in remaining.values()):
+        while any(remaining.values()):
             cycle += 1
             for kind in ("study", "test", "review"):
-                duration = min(90 if kind != "review" else 30, remaining[kind])
-                if not duration:
+                if not remaining[kind]:
                     continue
-                remaining[kind] -= duration
+                duration = remaining[kind].pop(0)
                 task_id = f"topic-{n}-{cycle}-{kind}"
                 candidates.append({"id": task_id, "subject": subject,
                 "topic": topics_line, "task_type": kind, "planned_minutes": duration,
@@ -317,22 +371,13 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                 "forgetting_risk": min(1, max(0, pkg["days_since"]) / 14),
                 "reason": topic_reasons.get((subject, _topic), "تکمیل کار ثبت‌شدهٔ شما")})
                 previous = task_id
-    try:
-        # Standard focus block is 1.5h unless the student set their own limit.
-        max_block = max(15, min(120, int(float(student.get("maxConsec") or 1.5) * 60)))
-    except (ValueError, TypeError):
-        max_block = 90
-    preferred_blocks = {"پومودورو ۲۵ دقیقه": (25, 5), "تمرکز ۴۵ دقیقه": (45, 10), "بلوکهای ۶۰ دقیقه": (60, 15)}
-    chosen = preferred_blocks.get(student.get("breakStyle"))
-    preferred_block, break_minutes = chosen or (max_block, 15)
-    max_block = min(max_block, preferred_block)
     # Thin-fragment policy only for the DEFAULT 1.5h standard. A student who
     # explicitly asked for 25-minute pomodoro blocks wants exactly that, so the
     # engine must not merge a leftover into a longer block or drop it.
     result = generate_plan(PlannerInput(profile=profile, tasks=candidates, fixed_events=fixed,
         studied_topics=studied, max_block_minutes=max_block, default_break_minutes=break_minutes,
-        min_block_minutes=0 if chosen else MIN_FRAGMENT_MINUTES,
-        hard_max_block_minutes=0 if chosen else HARD_MAX_BLOCK_MINUTES,
+        min_block_minutes=minimum,
+        hard_max_block_minutes=max_block if chosen or student.get("maxConsec") else HARD_MAX_BLOCK_MINUTES,
         start_date=week_start.isoformat(), balance_subjects=True))
     validation = validate_plan_items(result.items, profile, fixed)
     if not validation["valid"]:
@@ -411,6 +456,8 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     capacity_warnings = [f"{DAYS[d]}: از هدف {requested_minutes[d]} دقیقه، {workload[d] + completed_minutes[d]} دقیقه قابل برنامه‌ریزی یا انجام‌شده است؛ زمان آزاد با استراحت‌ها و فعالیت‌های ثابت کافی نیست."
                          for d in range(7) if requested_minutes[d] - workload[d] - completed_minutes[d] > 30]
     grounding_warnings = []
+    if ignored_legacy_evidence:
+        grounding_warnings.append("آزمون‌های قدیمیِ تأییدنشده مبنای انتخاب مبحث قرار نگرفتند؛ تاریخچهٔ پاسخ‌ها حفظ شده است.")
     if student.get("testExams") and not outline and not mock_topics:
         grounding_warnings.append("برنامهٔ معتبرِ آزمون انتخابی شما برای سه هفتهٔ آینده در منابع نیست؛ این هفته بر اساس نتایج شما و مباحث موجود در کتاب‌ها ساخته شد. برنامهٔ جدید آزمون را بارگذاری یا مباحث آن را ثبت کنید.")
     return {"week_start": week_start.isoformat(), "blocks": protected + blocks, "llm_used": False,
@@ -419,5 +466,5 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
             "mock_source": outline["document"] if outline else None,
             "source_books": source_books, "planner": "adaptive-v3", "evidence": evidence,
             "warnings": result.warnings + resource_warnings + capacity_warnings + grounding_warnings, "unscheduled": result.unscheduled,
-            "note": "برنامه بر اساس زمان آزاد، نتایج آزمون و کارهای ثبت‌شده ساخته شد. " + ("مباحث آزمون پیش‌رو اعمال شد." if mock_topics else "برنامهٔ آزمون پیش‌رو در منابع پیدا نشد؛ انتخاب مبحث از نتایج شما و فهرست کتاب‌های موجود است."),
+            "note": f"هدف روزانه: {round(daily_hours * 60)} دقیقه. برنامه بر اساس زمان آزاد، نتایج معتبر و کارهای ثبت‌شده ساخته شد. " + ("مباحث آزمون پیش‌رو اعمال شد." if mock_topics else "برنامهٔ آزمون پیش‌رو در منابع پیدا نشد؛ انتخاب مبحث از نتایج معتبر و فهرست کتاب‌های موجود است."),
             "exams": [{"title": e.title, "date": e.date.isoformat()} for e in exams]}

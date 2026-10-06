@@ -45,7 +45,7 @@ const HOURS = Array.from({ length: SLOT_COUNT }, (_, i) => {
   return `${h}:${String(m).padStart(2, "0")}`
 })
 
-const SLOT_HEIGHT = 32
+const SLOT_HEIGHT = 40
 const HEADER_HEIGHT = 52
 const MIN_DURATION = 0.5
 const MAX_DURATION = 6
@@ -848,7 +848,13 @@ export default function Schedule({
 
   return (
     <div className="h-full flex flex-col bg-[var(--surface)]">
-      {planMessage && <p role="status" className="p-3 text-sm whitespace-pre-line bg-[var(--card)] text-[var(--text)]">{planMessage}</p>}
+      {planMessage && <div role="status" className="py-3 text-sm border-y border-[var(--border)] text-[var(--text)]">
+        <p>{planMessage.split("\n")[0]}</p>
+        {planMessage.includes("\n") && <details className="mt-2 text-[var(--muted)]">
+          <summary className="cursor-pointer">جزئیات منابع و زمان‌بندی ({faNum(planMessage.split("\n").length - 1)})</summary>
+          <ul className="mt-2 space-y-1 list-disc ps-5">{planMessage.split("\n").slice(1).map((message, index) => <li key={index}>{message}</li>)}</ul>
+        </details>}
+      </div>}
       <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-12 pb-3">
         <div className="flex items-center gap-3">
           <button
@@ -1032,7 +1038,8 @@ export default function Schedule({
                 <div
                   key={b.id}
                   onClick={() => openEditStatic(b)}
-                  className="schedule-block schedule-static pointer-events-auto absolute z-10 overflow-hidden px-1.5 py-1 text-xs cursor-pointer"
+                  title={`${b.title}\n${formatTime(b.startHour)} – ${formatTime(b.startHour + b.duration)}`}
+                  className={`schedule-block schedule-static pointer-events-auto absolute z-10 overflow-hidden px-1.5 cursor-pointer ${b.duration < 0.5 ? "py-0 text-[9px]" : "py-1 text-[11px]"}`}
                   style={
                     {
                       "--block-color": resolveColor(b.color),
@@ -1044,14 +1051,14 @@ export default function Schedule({
                     } as React.CSSProperties
                   }
                 >
-                  <div className="font-bold truncate flex items-center gap-1 pointer-events-none">
+                  <div className={`font-bold truncate flex items-center gap-1 pointer-events-none ${b.duration < 0.5 ? "leading-none" : "leading-snug"}`}>
                     <span className="text-[10px] leading-none">↻</span>
                     <span className="truncate">{b.title}</span>
                   </div>
-                  <div className="text-[10px] opacity-80 pointer-events-none">
-                    {formatTime(b.startHour)} -{" "}
+                  {b.duration >= 0.5 && <div dir="ltr" className="text-[10px] text-right opacity-80 pointer-events-none">
+                    {formatTime(b.startHour)} –{" "}
                     {formatTime(b.startHour + b.duration)}
-                  </div>
+                  </div>}
                 </div>
               ) : (
                 <div
@@ -1059,7 +1066,7 @@ export default function Schedule({
                   onPointerDown={(e) => startInteraction(e, b, "move")}
                   title={`${b.title}${b.description ? `\n${b.description}` : ""}`}
                   onClick={(e) => e.stopPropagation()}
-                  className={`schedule-block pointer-events-auto absolute z-10 overflow-hidden px-1.5 py-1 text-xs ${
+                  className={`schedule-block pointer-events-auto absolute z-10 overflow-hidden px-1.5 ${b.duration < 0.5 ? "py-0 text-[9px]" : "py-1 text-[11px]"} ${
                     draggingId === b.id ? "is-dragging z-30" : ""
                   }`}
                   style={
@@ -1073,13 +1080,14 @@ export default function Schedule({
                     } as React.CSSProperties
                   }
                 >
-                  <div className={`font-bold leading-snug pointer-events-none ${b.duration < 1 ? "truncate" : "line-clamp-3"}`}>
-                    {b.title}
+                  <div className={`font-bold pointer-events-none ${b.duration < 0.5 ? "truncate leading-none" : b.duration < 0.75 ? "truncate leading-snug" : "line-clamp-2 leading-snug"}`}>
+                    {b.question_start && b.question_end ? `تست‌های ${faNum(b.question_start)} تا ${faNum(b.question_end)}` : b.title}
                   </div>
-                  <div className="text-[10px] opacity-80 pointer-events-none">
-                    {formatTime(b.startHour)} -{" "}
+                  {b.question_start && b.resource && b.duration >= 0.75 && <div className="truncate text-[10px] pointer-events-none">{b.resource.replace(/\.pdf$/i, "")}</div>}
+                  {b.duration >= 0.5 && <div dir="ltr" className="text-[10px] text-right opacity-80 pointer-events-none">
+                    {formatTime(b.startHour)} –{" "}
                     {formatTime(b.startHour + b.duration)}
-                  </div>
+                  </div>}
                   <div
                     className="schedule-block-resize-handle"
                     onPointerDown={(e) => startInteraction(e, b, "resize")}

@@ -248,6 +248,19 @@ def generate_plan(inp: PlannerInput) -> PlannerResult:
         return (t.get("task_type", "study") != "test" or not t.get("topic")
                 or key in studied or t["topic"] in studied)
 
+    def fitting_block(task, room):
+        block = min(task["_remaining"], max_block, room)
+        if min_fragment and 0 < task["_remaining"] - block < min_fragment:
+            if task["_remaining"] <= hard_max and task["_remaining"] <= room:
+                block = task["_remaining"]
+            elif min_fragment <= task["_remaining"] - min_fragment <= room:
+                block = task["_remaining"] - min_fragment
+            else:
+                return 0  # 45 in a 30-minute gap would strand a 15-minute tail.
+        if min_fragment and block < min_fragment and task["_total"] >= min_fragment:
+            return 0
+        return max(0, block)
+
     for offset in range(7):
         day = today + timedelta(days=offset)
         date_key = day.strftime("%Y-%m-%d")
@@ -268,32 +281,12 @@ def generate_plan(inp: PlannerInput) -> PlannerResult:
                         0 if t.get("overdue") else 1,
                         subject_minutes.get(t.get("subject", ""), 0) / (0.5 + float(t.get("weakness") or 0)),
                         tasks.index(t)))
-                task = eligible[0] if eligible else None
-                if task is None:
-                    break
                 room = min(capacity - used,
                            int((end - cursor).total_seconds() // 60))
-                block = min(task["_remaining"], max_block, room)
-                # Fold a small leftover into this block instead of leaving a
-                # stub behind (105 -> 105, 120 -> 120, not 90+15 / 90+30).
-                if min_fragment and 0 < task["_remaining"] - block < min_fragment:
-                    if (task["_remaining"] <= hard_max
-                            and task["_remaining"] <= room):
-                        block = task["_remaining"]
-                    elif min_fragment <= task["_remaining"] - min_fragment <= room:
-                        # The whole task does not fit here, but a 90+15 split
-                        # would leave a stub. Cut this block shorter so the
-                        # leftover is a full-size block of its own (105 ->
-                        # 75+30, not 90+15).
-                        block = task["_remaining"] - min_fragment
-                if block <= 0:
+                choice = next(((t, fitting_block(t, room)) for t in eligible if fitting_block(t, room) > 0), None)
+                if choice is None:
                     break
-                if min_fragment and block < min_fragment and block < task["_remaining"]:
-                    # Only a fragment fits in this slot. Emitting it would put
-                    # a 15-20 minute block on the grid (often as the first
-                    # block of the next day); leave the minutes unscheduled and
-                    # try a later slot / day for them instead.
-                    break
+                task, block = choice
                 part = len(task["_items"]) + 1
                 total_count = max(0, int(task.get("target_count") or 0))
                 completed = task["_total"] - task["_remaining"]

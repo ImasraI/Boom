@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
-from app.auth.database import Base, BookCatalog, TaskProgress, User, StudentProfile, Assessment
+from app.auth.database import Base, BookCatalog, TaskProgress, User, StudentProfile, Assessment, GeneratedMock, MockAttempt, WrongAnswer, StudentCalendar
 from app.planner import adaptive, resources
 from app.routers.boom_ai import _chat_plan_update_is_safe
 from app.routers.profile import ProgressIn, save_progress
@@ -310,3 +310,73 @@ def test_indexed_question_text_is_scoped_and_placeholder_chunks_are_excluded(db,
     runs = resources._indexed_ranges(2)["شیمی 3 خیلی سبز"]
     assert [(r["q_from"], r["q_to"]) for r in runs] == [(30, 30)]
     assert resources._matching_runs("تعادل", runs[0])[0][1]["q_from"] == 30
+
+
+def test_legacy_mock_and_untouched_generated_backlog_do_not_poison_planning(db, tmp_path):
+    week = date(2099, 4, 4)
+    bad_topic = "انتگرال معین"
+    old = GeneratedMock(student_id=1, title="old", questions=json.dumps([
+        {"_id": 1, "subject": "ریاضی", "topic": bad_topic, "answer": 1}]))
+    db.add(old); db.flush()
+    db.add(MockAttempt(student_id=1, mock_id=old.id, answers=json.dumps({"1": ""})))
+    db.add(WrongAnswer(student_id=1, subject="ریاضی", topic=bad_topic, source="mock"))
+    db.add(TaskProgress(student_id=1, client_ref="2026-10-04:topic-old#p1", source_ref="topic-old",
+        date=date(2026, 10, 4), subject="ریاضی", topic=bad_topic, task_type="study",
+        planned_minutes=600, actual_minutes=0, status="planned"))
+    db.commit()
+    _write_questions(tmp_path / "ocr/ریاضی 1 خیلی سبز/pages", 18,
+        [_question(n) for n in range(30, 400)], "تابع")
+    result = adaptive.build_week(db, 1, {}, 4, week, [], now=datetime(2099, 4, 3))
+    assert not any(b["topic"] == bad_topic for b in result["blocks"])
+    assert any(b.get("question_start") for b in result["blocks"])
+    assert any("تأییدنشده" in w for w in result["warnings"])
+    assert db.get(GeneratedMock, old.id) and db.query(MockAttempt).count() == 1
+
+
+def test_verified_evidence_and_explicit_partial_work_remain_priorities(db, tmp_path):
+    week = date(2099, 4, 4)
+    mock = GeneratedMock(student_id=1, title="valid", questions=json.dumps([
+        {"_id": 1, "subject": "شیمی", "topic": "تعادل", "answer": 1, "verification_status": "verified"}]))
+    db.add(mock); db.flush()
+    db.add(MockAttempt(student_id=1, mock_id=mock.id, answers=json.dumps({"1": 2})))
+    db.add(TaskProgress(student_id=1, client_ref="2026-10-04:topic-old#p1", source_ref="topic-old",
+        date=date(2026, 10, 4), subject="شیمی", topic="تعادل", task_type="study",
+        planned_minutes=120, actual_minutes=45, status="partially_completed"))
+    db.commit()
+    _write_questions(tmp_path / "ocr/شیمی 3 خیلی سبز/pages", 18,
+        [_question(n) for n in range(30, 300)], "تعادل")
+    result = adaptive.build_week(db, 1, {}, 4, week, [], now=datetime(2099, 4, 3))
+    assert any(e["topic"] == "تعادل" and e["accuracy"] == 0 for e in result["evidence"])
+    assert sum(round(b["duration"] * 60) for b in result["blocks"] if b["source_ref"].startswith("backlog-")) == 75
+
+
+def test_manual_overdue_work_is_not_discarded_as_generated_backlog(db):
+    week = date(2099, 4, 4)
+    manual = {"id": "topic-moved#p1", "day": 1, "startHour": 7, "duration": 1,
+              "title": "کار انتخابی", "type": "study", "origin": "manual"}
+    start = date(2026, 10, 3)
+    ref = f"{start + timedelta(days=1)}:{manual['id']}"
+    db.add(StudentCalendar(student_id=1, weeks=json.dumps({str(start): [manual]}), statics="[]"))
+    db.add(TaskProgress(student_id=1, client_ref=ref, source_ref="topic-moved",
+        date=start + timedelta(days=1), subject="ریاضی", topic="تابع", task_type="study",
+        planned_minutes=60, actual_minutes=0, status="planned"))
+    db.commit()
+    result = adaptive.build_week(db, 1, {}, 4, week, [], now=datetime(2099, 4, 3))
+    assert sum(round(b["duration"] * 60) for b in result["blocks"] if b["source_ref"] == "backlog-" + ref) == 60
+
+
+def test_focus_45_week_does_not_create_fifteen_minute_study_stubs(db):
+    result = adaptive.build_week(db, 1, {"breakStyle": "تمرکز ۴۵ دقیقه"}, 4,
+        date(2099, 4, 4), [], now=datetime(2099, 4, 3))
+    generated = result["blocks"]
+    assert generated and all(30 <= round(b["duration"] * 60) <= 45 for b in generated)
+    assert all(m >= 210 for m in result["daily_minutes"])
+
+
+def test_recognisable_chapter_is_preferred_to_high_volume_ocr_noise(db, tmp_path):
+    directory = tmp_path / "ocr/ریاضی 1 خیلی سبز/pages"
+    _write_questions(directory, 1, [_question(n) for n in range(1, 150)], "هرگزینه‌ای")
+    _write_questions(directory, 2, [_question(n) for n in range(150, 200)], "فصل اول: ریاضی دهم")
+    _write_questions(directory, 3, [_question(n) for n in range(200, 250)], "تابع")
+    result = adaptive.build_week(db, 1, {}, 4, date(2099, 4, 4), [], now=datetime(2099, 4, 3))
+    assert all(b["topic"] == "تابع" for b in result["blocks"] if b["subject"] == "ریاضی")

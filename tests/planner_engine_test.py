@@ -10,6 +10,7 @@ Every test asserts a HARD constraint of the roadmap document:
 import os
 import sys
 from pathlib import Path
+from datetime import date
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "backend"))
@@ -94,6 +95,16 @@ def test_policy_off_keeps_an_explicit_block_length_untouched():
     )
     parts = sorted(i["planned_minutes"] for i in result.items)
     assert 25 in parts and sum(parts) == 60
+
+
+def test_short_slot_uses_a_fitting_task_without_stranding_a_fifteen_minute_tail():
+    result = _policy_plan([
+        {"id": "long", "subject": "ریاضی", "planned_minutes": 45, "weakness": 1},
+        {"id": "short", "subject": "شیمی", "planned_minutes": 30},
+    ], cap=45, hard_max=45, profile={"wake": "06:00", "sleep": "23:00", "daily_hours": {str(date(2099, 1, 6).weekday()): 0.5, "*": 1}})
+    assert all(i["planned_minutes"] >= 30 for i in result.items)
+    assert sum(i["planned_minutes"] for i in result.items if i["id"].startswith("long#")) == 45
+    assert result.items[0]["id"].startswith("short#")
 
 
 def test_determinism_same_input_same_output():

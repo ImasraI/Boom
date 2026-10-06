@@ -49,7 +49,7 @@ export function toSignupData(p: ServerProfile | null, base: SignupData): SignupD
     examYear: p.exam_year ?? base.examYear,
     targetRank: p.target_rank ?? base.targetRank,
     studyHours: p.study_hours ?? base.studyHours,
-    testExams: Array.isArray(p.test_exams) ? p.test_exams : base.testExams,
+    testExams: Array.isArray(p.test_exams) && (p.version > 0 || p.test_exams.length > 0) ? p.test_exams : base.testExams,
     wakeTime: p.availability?.wake ?? base.wakeTime,
     sleepHours: p.availability?.sleep_hours ?? base.sleepHours,
     dailyHours: p.availability?.daily_hours ?? base.dailyHours,
@@ -88,6 +88,20 @@ export async function pullServerProfile(): Promise<ServerProfile | null> {
   } catch {
     return null; // offline: the localStorage cache keeps serving
   }
+}
+
+/** Preserve existing server settings; migrate a complete browser-only signup once. */
+export async function hydrateServerProfile(base: SignupData): Promise<ServerProfile | null> {
+  const token = localStorage.getItem("boom-token");
+  const server = await pullServerProfile();
+  if (!token || localStorage.getItem("boom-token") !== token) return null;
+  const empty = server?.version === 0 && !server.major && !server.grade && !server.study_hours;
+  if (empty && base.major?.trim() && base.grade?.trim() && base.studyHours?.trim()) {
+    const saved = await pushProfile(base);
+    if (localStorage.getItem("boom-token") !== token) return null;
+    return saved.profile ?? server;
+  }
+  return server;
 }
 
 /**

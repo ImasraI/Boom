@@ -30,7 +30,7 @@ Backend dependencies did not change; VM `pip check` passed.
 
 ## Verification
 
-- Full local suite after the planner follow-up: 425 backend tests passed, 3 skipped; 19 frontend tests
+- Full local suite after the history correction: 431 backend tests passed, 3 skipped; 21 frontend tests
   passed. TypeScript, explicit Cloudflare production build, dependency
   consistency, changed-source/bundle secret-pattern scan and diff checks
   passed.
@@ -97,3 +97,32 @@ images alone do not supply missing numbered-question OCR.
 
 Pico was never tracked or pushed, and the VM check found no Pico folder or
 workflow. Both local paths are now explicitly ignored.
+
+## History-dependent planner correction
+
+The first clean-account workflow missed a production-history failure: an old
+unverified booklet supplied unsupported topics, blank answers gave them maximum
+weakness, and untouched generated proposals kept returning as overdue tasks.
+The weekly planner now uses verified, non-quarantined mock evidence and avoids
+double-counting generated mock mistakes. Untouched automatic proposals do not
+become confirmed missed work. Explicitly missed/partially completed tasks and
+manual commitments remain; no account or exam history is deleted.
+
+The scheduler rebalances focus tasks before scheduling and tries another fitting
+task when a short gap would strand a fifteen-minute fragment. This fixes the
+45-minute-focus case around a protected manual activity. Seed chapter ranking
+also favours recognisable headings over generic OCR labels. Calendar cells show
+the printed test range and book separately, keep time ranges in chronological
+order, and use more vertical space. Detailed notices are expandable.
+
+Signup previously cached its preferences only in the browser. Signup, login and
+boot now migrate a complete browser-only profile to an empty server profile,
+using version checks and account-change guards. Existing server preferences win.
+Resetting an account is unnecessary and would lose useful history.
+
+The candidate passed a VM test using a temporary SQLite backup of the actual
+account history and the actual shared corpus, without modifying production
+records. A four-hour goal with 45-minute focus blocks produced 16 numbered book
+practice blocks (11 math, 4 chemistry, 1 physics), no generated fifteen-minute
+fragments and no regenerated integral/Gibbs topics. The protected manual block
+was retained. Remaining physics source exhaustion is a corpus limitation.

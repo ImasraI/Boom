@@ -20,6 +20,19 @@ _SUBJECTS = {
     "زمین شناسی": ("زمین شناسی",),
 }
 
+# Prefer recognisable chapter headings over OCR noise when bootstrapping an
+# account with no trusted results. These are ranking hints, not curriculum.
+_TOPIC_HINTS = {
+    "ریاضی": "مجموعه دنباله الگو مثلث توان ریشه عبارت معادله نامعادله تابع احتمال آمار هندسه ترسیم تالیس برهان دایره حد مشتق",
+    "فیزیک": "اندازه ماده مواد چگالی فشار نیرو انرژی گرما حرکت جریان مدار الکتریسیته مغناطیس موج نوسان",
+    "شیمی": "اتم مول استوکیومتری عنصر پیوند تعادل اسید الکترون واکنش آنتالپی محلول",
+}
+
+
+def topic_heading_rank(topic, subject):
+    value = _norm(topic)
+    return sum(word in value for word in _TOPIC_HINTS.get(subject, "").split())
+
 
 def _norm(value):
     return re.sub(r"\s+", " ", str(value or "").translate(_DIGITS).replace("ي", "ی")
@@ -42,6 +55,13 @@ def specific_topic(topic, subject):
     """OCR labels and subject names are not a chapter-selection signal."""
     value = _norm(topic)
     if value in ("", _norm(subject), "مرور مباحث", "بخش تستی", "تست", "تمرین", "درسنامه", "درس نامه"):
+        return False
+    if any(label in value for label in ("حل تمرین", "نمونه سوال", "نمونه سؤال", "پیش نویس", "پیش فرض", "مسائل ترکیبی و مفهومی")):
+        return False
+    if "گزینه" in value and len(value.split()) <= 3:
+        return False
+    labels = set(_norm(subject).split()) | {"فصل", "درس", "اول", "دوم", "سوم", "چهارم", "دهم", "یازدهم", "دوازدهم", "پایه"}
+    if not any(word not in labels and not word.isdigit() for word in re.findall(r"\w+", value)):
         return False
     return not re.fullmatch(r"(?:تست[هاای ]*|پرسش[هاای ]*|سوال[هاای ]*|سؤال[هاای ]*)(?:چهارگزینه ای|چهار گزینه ای)", value)
 
