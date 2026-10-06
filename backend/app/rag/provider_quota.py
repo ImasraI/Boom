@@ -1,6 +1,6 @@
 """Remember terminal Gemini generation limits across newly-created clients.
 
-This is process-local health, not a quota workaround. A credential/model is
+This is provider health, not a quota workaround. A credential/model is
 only retried after Google's next Pacific midnight or a configuration change.
 No credential or provider response is exposed by the public health snapshot.
 """
@@ -9,10 +9,14 @@ import hashlib
 import math
 import re
 import threading
+import json
+import os
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _LOCK = threading.Lock()
 _BLOCKS: dict[str, tuple[float, str]] = {}
+_LOADED_PATHS: set[str] = set()
 DAILY_QUOTA_MESSAGE = (
     "سهمیه روزانه سرویس ساخت آزمون تمام شده است. آزمون‌های آماده همچنان قابل "
     "استفاده‌اند؛ برای ساخت آزمون جدید باید تا بازنشانی سهمیه صبر کنید یا مدیر "
@@ -26,6 +30,44 @@ def is_daily_quota_error(reason: str) -> bool:
 
 def quota_identity(base_url: str, model: str, key: str) -> str:
     return hashlib.sha256(f"{base_url.rstrip('/')}\0{model}\0{key}".encode()).hexdigest()
+
+
+def _state_file() -> Path | None:
+    from app.config import get_settings
+    value = getattr(get_settings(), "POOL_QUOTA_STATE_PATH", "")
+    return Path(value) if value else None
+
+
+def _load_saved_locked() -> None:
+    path = _state_file()
+    if not path or str(path) in _LOADED_PATHS:
+        return
+    _LOADED_PATHS.add(str(path))
+    try:
+        entries = json.loads(path.read_text(encoding="utf-8"))
+        now = datetime.now(timezone.utc).timestamp()
+        for identity, until in entries.items():
+            if re.fullmatch(r"[0-9a-f]{64}", identity) and isinstance(until, (int, float)) and math.isfinite(until) and until > now:
+                _BLOCKS[identity] = (until, DAILY_QUOTA_MESSAGE)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+
+
+def _save_locked() -> None:
+    path = _state_file()
+    if not path:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(path.name + ".tmp")
+        # Provider response text can contain credentials; store only fingerprints and reset times.
+        saved = {identity: until for identity, (until, _) in _BLOCKS.items()
+                 if until > datetime.now(timezone.utc).timestamp()}
+        temporary.write_text(json.dumps(saved), encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        temporary.replace(path)
+    except OSError:
+        pass  # In-memory protection still works if the configured file is unavailable.
 
 
 def next_gemini_reset(now: datetime) -> datetime:
@@ -42,15 +84,19 @@ def next_gemini_reset(now: datetime) -> datetime:
 def block_daily_quota(identity: str, reason: str) -> None:
     until = next_gemini_reset(datetime.now(timezone.utc)).timestamp()
     with _LOCK:
+        _load_saved_locked()
         _BLOCKS[identity] = (until, reason)
+        _save_locked()
 
 
 def blocked_quota(identity: str) -> tuple[float, str] | None:
     now = datetime.now(timezone.utc).timestamp()
     with _LOCK:
+        _load_saved_locked()
         entry = _BLOCKS.get(identity)
         if entry and entry[0] <= now:
             _BLOCKS.pop(identity, None)
+            _save_locked()
             return None
         return entry
 

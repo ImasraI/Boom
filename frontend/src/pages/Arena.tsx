@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
-import { apiUrl, authHeaders, readApiError } from "../api"
+import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
 
@@ -25,6 +25,7 @@ interface LeaderRow {
 }
 
 interface MatchInfo {
+  generation_error?: string | null
   match_id: number
   status: string
   opponent: string
@@ -272,7 +273,7 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, wanted, onTogg
 
         <button onClick={onJoin} disabled={busy}
           className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50">
-          {busy ? "در حال جستجوی حریف..." : "جستجوی حریف"}
+          {busy ? "در حال دریافت اطلاعات آرنا..." : "جستجوی حریف"}
         </button>
         <button onClick={onScheduled}
           className="w-full py-3.5 rounded-2xl border border-[var(--border-strong)] text-[13px] font-bold text-[var(--text)] flex items-center justify-center gap-2">
@@ -339,6 +340,7 @@ function DuelRunner({ match, onDone, onExit }: {
   const [current, setCurrent] = useState(0)
   const [answers, setAnswers] = useState<Record<string, number | "">>({})
   const [elapsed, setElapsed] = useState(0)
+  const [bookletError, setBookletError] = useState("")
   const totalSec = (match.mock?.duration_minutes ?? 10) * 60
   const submittedRef = useRef(false)
   const answersRef = useRef(answers)
@@ -348,13 +350,17 @@ function DuelRunner({ match, onDone, onExit }: {
   // it can take a couple of minutes; poll until real questions arrive.
   useEffect(() => {
     let alive = true
-    const load = () =>
-      fetch(apiUrl(`/api/mocks/${match.mock_id}`), { headers: authHeaders() })
-        .then(r => (r.ok ? r.json() : null))
-        .then(d => {
-          if (alive && d?.questions?.length) setQuestions(d.questions)
-        })
-        .catch(() => {})
+    let loading = false
+    const load = async () => {
+      if (loading) return
+      loading = true
+      try {
+        const d = await apiJson<{ questions: AQ[] }>(`/api/mocks/${match.mock_id}`)
+        if (alive && d.questions?.length) { setQuestions(d.questions); setBookletError("") }
+      } catch (e) {
+        if (alive) setBookletError(e instanceof Error ? e.message : "دریافت سوال‌ها ناموفق بود.")
+      } finally { loading = false }
+    }
     load()
     const t = setInterval(load, 5000)
     return () => {
@@ -364,9 +370,10 @@ function DuelRunner({ match, onDone, onExit }: {
   }, [match.mock_id])
 
   useEffect(() => {
+    if (!questions.length) return
     const t = setInterval(() => setElapsed(e => e + 1), 1000)
     return () => clearInterval(t)
-  }, [])
+  }, [questions.length])
 
   const submit = useCallback(() => {
     if (submittedRef.current) return
@@ -382,8 +389,11 @@ function DuelRunner({ match, onDone, onExit }: {
 
   if (!questions.length) {
     return (
-      <div className="min-h-screen bg-[var(--surface)] flex items-center justify-center">
+      <div className="min-h-screen bg-[var(--surface)] flex flex-col gap-4 items-center justify-center px-5">
         <div className="w-9 h-9 border-3 border-[var(--accent)] border-t-transparent rounded-full animate-spin" style={{ borderWidth: 3 }} />
+        <p className="text-sm text-[var(--muted)]">در حال دریافت دفترچه مسابقه… زمان آزمون پس از دریافت سوال‌ها شروع می‌شود.</p>
+        {bookletError && <p role="alert" className="text-sm text-red-500">{bookletError}</p>}
+        <button onClick={onExit} className="text-sm text-[var(--accent)]">بازگشت به آرنا</button>
       </div>
     )
   }
@@ -721,6 +731,9 @@ export default function Arena({ nav, userData, initialPhase }: {
   // Duel subject filter: the checkbox list comes from the server, which is
   // also what enforces the ticks when it pairs players.
   const [filters, setFilters] = useState<FilterOptions | null>(null)
+  const [loadingLobby, setLoadingLobby] = useState(true)
+  const [lobbyError, setLobbyError] = useState("")
+  const [lobbyRetry, setLobbyRetry] = useState(0)
   const [wanted, setWanted] = useState<string[]>([])
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // Scheduled-duel lobby state.
@@ -732,10 +745,6 @@ export default function Arena({ nav, userData, initialPhase }: {
   const schedPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
-    fetch(apiUrl("/api/arena/me"), { headers: authHeaders() })
-      .then(r => (r.ok ? r.json() : null))
-      .then(setMe)
-      .catch(() => setMe(null))
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
       if (schedPollRef.current) clearInterval(schedPollRef.current)
@@ -743,12 +752,16 @@ export default function Arena({ nav, userData, initialPhase }: {
   }, [])
 
   useEffect(() => {
+    let alive = true
+    setLoadingLobby(true)
+    setLobbyError("")
     const major = userData?.major ? `?major=${encodeURIComponent(userData.major)}` : ""
-    fetch(apiUrl(`/api/arena/filters${major}`), { headers: authHeaders() })
-      .then(r => (r.ok ? r.json() : null))
-      .then(setFilters)
-      .catch(() => setFilters(null))
-  }, [userData?.major])
+    Promise.all([apiJson<MeInfo>("/api/arena/me"), apiJson<FilterOptions>(`/api/arena/filters${major}`)])
+      .then(([identity, subjects]) => { if (alive) { setMe(identity); setFilters(subjects) } })
+      .catch(e => { if (alive) setLobbyError(e instanceof Error ? e.message : "ارتباط با سرور برقرار نشد.") })
+      .finally(() => { if (alive) setLoadingLobby(false) })
+    return () => { alive = false }
+  }, [userData?.major, lobbyRetry])
 
   function toggleWanted(subject: string) {
     setWanted(w => (w.includes(subject) ? w.filter(s => s !== subject) : [...w, subject]))
@@ -759,19 +772,19 @@ export default function Arena({ nav, userData, initialPhase }: {
   }, [])
 
   const loadMatch = useCallback(async (id: number) => {
-    const res = await fetch(apiUrl(`/api/arena/${id}`), { headers: authHeaders() })
-    if (!res.ok) return null
-    return res.json()
+    return apiJson<MatchInfo>(`/api/arena/${id}`)
   }, [])
 
   const startPolling = useCallback((matchId: number) => {
     stopPoll()
     pollRef.current = setInterval(async () => {
-      const m = await loadMatch(matchId)
+      let m
+      try { m = await loadMatch(matchId) }
+      catch (e) { setError(e instanceof Error ? e.message : "دریافت مسابقه ناموفق بود."); return }
       if (!m) return
       setMatch(m)
       if (m.status === "cancelled") {
-        stopPoll(); setPhase("lobby"); setError("سوال مسابقه گزارش شد؛ مسابقه بدون تغییر رتبه لغو شد."); return;
+        stopPoll(); setPhase("lobby"); setError(m.generation_error || "سوال مسابقه گزارش شد؛ مسابقه بدون تغییر رتبه لغو شد."); return;
       }
       if (m.status === "finished") {
         stopPoll()
@@ -805,8 +818,11 @@ export default function Arena({ nav, userData, initialPhase }: {
       // The server may drop ticks that are not in the player's own subjects.
       if (Array.isArray(data.wanted)) setWanted(data.wanted)
       if (data.match_id) {
-        setMatch(await loadMatch(data.match_id))
+        const m = await loadMatch(data.match_id)
+        if (m.status === "cancelled") throw new Error(m.generation_error || "مسابقه بدون تغییر رتبه لغو شد.")
+        setMatch(m)
         setPhase("playing")
+        startPolling(data.match_id)
         return
       }
     } catch (e) {
@@ -818,18 +834,21 @@ export default function Arena({ nav, userData, initialPhase }: {
       setWaited(w => w + 2)
       try {
         const res = await fetch(apiUrl("/api/arena/status"), { headers: authHeaders() })
-        if (!res.ok) return
+        if (!res.ok) throw new Error(await readApiError(res, "دریافت وضعیت صف ناموفق بود."))
         const s = await res.json()
         if (s.state === "matched" && s.match_id) {
           stopPoll()
           const m = await loadMatch(s.match_id)
+          if (m.status === "cancelled") throw new Error(m.generation_error || "مسابقه بدون تغییر رتبه لغو شد.")
           setMatch(m)
-          if (m?.mock?.duration_minutes) setPhase("playing")
+          if (m?.mock?.duration_minutes) { setPhase("playing"); startPolling(s.match_id) }
         } else if (s.state === "idle") {
           stopPoll()
           setPhase("lobby")
         }
-      } catch { /* keep polling */ }
+      } catch (e) {
+        stopPoll(); setPhase("lobby"); setError(e instanceof Error ? e.message : "دریافت وضعیت صف ناموفق بود.")
+      }
     }, 2000)
   }
 
@@ -974,7 +993,8 @@ export default function Arena({ nav, userData, initialPhase }: {
     onCancel={cancelInvite} onEnterMatch={enterScheduledMatch} onBack={closeScheduled}
     defaultWhen={localInputValue(dayAt(1, 10))} />
 
-  return <Lobby me={me} onJoin={join} onBoard={openBoard} busy={false}
+  return <><Lobby me={me} onJoin={join} onBoard={openBoard} busy={loadingLobby || !!lobbyError}
     filters={filters} wanted={wanted} onToggle={toggleWanted} onClear={() => setWanted([])}
-    error={error} onScheduled={openScheduled} />
+    error={lobbyError || error} onScheduled={openScheduled} />
+    {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت آرنا</button></div>}</>
 }

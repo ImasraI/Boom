@@ -139,6 +139,79 @@ def test_practice_reports_actual_smaller_bank_size_without_fake_questions(db, mo
     assert result["total_questions"] == 1 and result["subjects"][0]["questions"] == 1
 
 
+def test_practice_uses_fresh_verified_stock_when_nothing_has_been_used(db, monkeypatch):
+    make_mock(db, count=2, label="fresh")
+    monkeypatch.setattr(mocks, "require_pool_available", lambda: pytest.fail("Stock must not call provider"))
+    result = mocks._generate_reserved_mock(mocks.MockConfig(mode="practice"), db.get(User, 1), db)
+    assert result["total_questions"] == 2
+    assert result["source"] == "question_bank"
+
+
+def test_mock_generation_prefers_saved_grade_over_stale_browser_profile(db, monkeypatch):
+    from app.auth.database import StudentProfile
+    db.add(StudentProfile(user_id=1, major=MAJORS[0], grade="دهم")); db.commit()
+    make_mock(db, grade="دهم", label="tenth")
+    make_mock(db, grade="دوازدهم", label="twelfth")
+    monkeypatch.setattr(mocks, "require_pool_available", lambda: pytest.fail("Stock must not call provider"))
+    result = mocks._generate_reserved_mock(mocks.MockConfig(mode="practice",
+        student={"major":"علوم تجربی", "grade":"دوازدهم"}), db.get(User, 1), db)
+    exam = db.get(GeneratedMock, result["mock_id"])
+    assert exam.grade == "دهم" and exam.major == MAJORS[0]
+    assert all(q["text"].startswith("tenth") for q in json.loads(exam.questions))
+
+
+@pytest.mark.parametrize("failure", ["empty", "exception", "partial", "daily_quota"])
+def test_failed_ranked_generation_cancels_without_scores_and_preserves_verified_survivors(db, monkeypatch, failure):
+    from sqlalchemy.orm import sessionmaker
+    source = make_mock(db, owner=1, status="claimed", count=1)
+    match = ArenaMatch(student_a_id=1, student_b_id=2, mock_id=source.id, status="pending")
+    db.add(match); db.commit()
+    monkeypatch.setattr(arena, "SessionLocal", sessionmaker(bind=db.get_bind()))
+    def generate(*a, **kw):
+        if failure == "daily_quota": pytest.fail("Must not probe a blocked provider")
+        if failure == "exception": raise RuntimeError("provider unavailable")
+        return json.loads(source.questions) if failure == "partial" else []
+    monkeypatch.setattr(mock_generation, "generate_booklet", generate)
+    monkeypatch.setattr(mock_generation, "verify_and_repair_booklet", lambda qs, *a, **kw: qs)
+    def unavailable():
+        if failure == "daily_quota": raise HTTPException(503, detail="daily quota")
+    monkeypatch.setattr(arena, "require_pool_available", unavailable)
+    monkeypatch.setattr(arena, "pool_quota_status", lambda: {"blocked":failure == "daily_quota"})
+    arena._generate_duel_booklet(match, PLAN)
+    db.expire_all(); stored=db.get(ArenaMatch, match.id)
+    assert stored.status == "cancelled" and stored.generation_error
+    assert stored.score_a is None and stored.score_b is None
+    assert stored.delta_a == stored.delta_b == 0
+    assert db.get(User, 1).rating == db.get(User, 2).rating == 1000
+    if failure == "partial":
+        assert db.get(GeneratedMock, source.id).status == "bank_only"
+        assert len(bank.assemble(db, 1, PLAN, MAJORS, allow_partial=True)) == 1
+
+
+def test_stale_empty_ranked_match_ends_instead_of_waiting_forever(db):
+    from datetime import datetime, timedelta
+    source = make_mock(db, owner=1, status="claimed")
+    source.questions = "[]"
+    match = ArenaMatch(student_a_id=1, student_b_id=2, mock_id=source.id, status="pending",
+        created_at=datetime.utcnow()-timedelta(minutes=16))
+    db.add(match); db.commit()
+    result = arena.get_match(match.id, db.get(User, 1), db)
+    assert result["status"] == "cancelled" and result["generation_error"]
+    assert db.get(User, 1).rating == 1000
+
+
+def test_ranked_does_not_queue_or_charge_when_no_shared_verified_questions_and_provider_blocked(db, monkeypatch):
+    from app.auth.database import ArenaQueueEntry
+    make_mock(db, owner=1, status="claimed")  # Private practice is not ranked stock.
+    monkeypatch.setattr(arena, "pool_quota_status", lambda: {"blocked":True})
+    monkeypatch.setattr(arena, "consume_ai_use", lambda *a: pytest.fail("Do not charge a refused join"))
+    monkeypatch.setattr(arena, "require_pool_available", lambda: (_ for _ in ()).throw(HTTPException(503, detail="quota")))
+    with pytest.raises(HTTPException) as error:
+        arena.join_queue(arena.JoinPayload(), db.get(User, 1), db)
+    assert error.value.status_code==503
+    assert db.query(ArenaQueueEntry).count()==0 and db.query(ArenaMatch).count()==0
+
+
 def test_ranked_prefers_unused_booklets_then_reuses_existing_questions(db, monkeypatch):
     plan = mock_generation.scale_plan(mock_generation.default_plan("riazi"), divisor=3, minimum=3)
     def full(label):
@@ -172,6 +245,17 @@ def test_bank_filters_grade_topics_and_unverified_answers(db):
     q = db.query(BankQuestion).first(); q.verified = False; db.commit()
     selected = bank.assemble(db, 1, PLAN, MAJORS)
     assert len(selected) == 2 and q.id not in {r["bank_id"] for r in selected}
+
+
+def test_admin_stock_and_deficits_do_not_count_unverified_or_reported_booklets(db):
+    make_mock(db, verified=False, label="legacy")
+    good = make_mock(db, label="verified")
+    shelf = next(s for s in pool_core.pool_levels(db) if s['major_key']=='riazi' and s['difficulty']=='konkur')
+    assert shelf['available']==1 and shelf['needs_review']==1
+    assert pool_core.pool_deficit(db, 'riazi', 'konkur', 2)==1
+    bank.record_report(db, good, 1, 1, 'incorrect verified answer')
+    assert pool_core.ready_count(db, difficulty='konkur')==0
+    assert db.get(GeneratedMock, good.id) is not None
 
 
 def test_admin_correction_keeps_original_and_creates_fresh_verified_revision(db):

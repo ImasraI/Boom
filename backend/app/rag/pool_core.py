@@ -250,21 +250,44 @@ def _progress_reporter():
     return report
 
 
+def _ready_stock(db, raw) -> bool:
+    if not verified_booklet(raw):
+        return False
+    ids = [q["bank_id"] for q in json.loads(raw) if type(q.get("bank_id")) is int]
+    if ids:
+        from app.auth.database import BankQuestion
+        if db.scalar(select(BankQuestion.id).where(BankQuestion.id.in_(ids),
+                BankQuestion.status != "active").limit(1)):
+            return False
+    return True
+
+
+def ready_count(db, *, difficulty, major=None) -> int:
+    query = select(GeneratedMock.questions).where(GeneratedMock.status == "pending_use",
+        GeneratedMock.difficulty == difficulty)
+    if major:
+        query = query.where(GeneratedMock.major == major)
+    return sum(_ready_stock(db, raw) for raw in db.execute(query).scalars())
+
+
 def pool_levels(db) -> list:
-    """pending_use count for every (major, difficulty) shelf."""
+    """Count usable verified booklets; retain legacy rows for later review."""
     counts = {}
+    unavailable = {}
     rows = db.execute(
-        select(GeneratedMock.major, GeneratedMock.difficulty)
+        select(GeneratedMock.major, GeneratedMock.difficulty, GeneratedMock.questions)
         .where(GeneratedMock.status == "pending_use")
     ).all()
-    for major_label, difficulty in rows:
-        counts[(major_label, difficulty)] = counts.get((major_label, difficulty), 0) + 1
+    for major_label, difficulty, raw in rows:
+        target = counts if _ready_stock(db, raw) else unavailable
+        target[(major_label, difficulty)] = target.get((major_label, difficulty), 0) + 1
     return [
         {
             "major_key": key,
             "major": CANONICAL_MAJOR[key],
             "difficulty": difficulty,
             "available": counts.get((CANONICAL_MAJOR[key], difficulty), 0),
+            "needs_review": unavailable.get((CANONICAL_MAJOR[key], difficulty), 0),
         }
         for key in POOL_MAJORS
         for difficulty in POOL_DIFFICULTIES
@@ -273,13 +296,7 @@ def pool_levels(db) -> list:
 
 def pool_deficit(db, major_key: str, difficulty: str, target: int) -> int:
     """How many more pending_use rows this combination needs."""
-    available = db.execute(
-        select(GeneratedMock.id)
-        .where(GeneratedMock.status == "pending_use")
-        .where(GeneratedMock.difficulty == difficulty)
-        .where(GeneratedMock.major == CANONICAL_MAJOR[major_key])
-    ).scalars().all()
-    return max(0, target - len(available))
+    return max(0, target - ready_count(db, difficulty=difficulty, major=CANONICAL_MAJOR[major_key]))
 
 
 def _harvest_questions(db, questions, major_key, difficulty, grade=""):
@@ -428,13 +445,7 @@ DUEL_DIFFICULTY = "duel"
 
 def duel_pool_deficit(db, major_key: str, target: int) -> int:
     """How many more pending_use duel rows this major's shelf needs."""
-    available = db.execute(
-        select(GeneratedMock.id)
-        .where(GeneratedMock.status == "pending_use")
-        .where(GeneratedMock.difficulty == DUEL_DIFFICULTY)
-        .where(GeneratedMock.major == CANONICAL_MAJOR[major_key])
-    ).scalars().all()
-    return max(0, target - len(available))
+    return max(0, target - ready_count(db, difficulty=DUEL_DIFFICULTY, major=CANONICAL_MAJOR[major_key]))
 
 
 def generate_one_duel(db, major_key: str, *, grade="") -> bool:
@@ -642,8 +653,7 @@ def verified_booklet(raw):
         questions = json.loads(raw)
         return bool(questions) and isinstance(questions, list) and all(
             isinstance(q, dict) and q.get("verification_status") == "verified"
-            and isinstance(q.get("options"), list) and len(q["options"]) == 4
-            and type(q.get("answer")) is int and 0 <= q["answer"] < 4
+            and question_bank._valid(q)
             for q in questions)
     except (ValueError, TypeError):
         return False

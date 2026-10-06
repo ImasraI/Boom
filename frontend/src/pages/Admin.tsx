@@ -11,7 +11,7 @@ interface UserRow {
   usage: Usage;
 }
 interface UsersPayload { day: string; token_budget: number; limits: Record<string, number>; users: UserRow[] }
-interface Shelf { major_key: string; major: string; difficulty: string; available: number }
+interface Shelf { major_key: string; major: string; difficulty: string; available: number; needs_review?: number }
 interface PoolProgress {
   active: boolean; label: string; planned: number; produced: number;
   current: { major_key: string; major: string; difficulty: string } | null;
@@ -456,6 +456,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
                   <span className={`text-lg font-bold ${full ? "text-emerald-400" : s.available === 0 ? "text-red-400" : "text-[var(--text)]"}`}>
                     {s.available}
                   </span>
+                  {!!s.needs_review && <span className="text-[10px] text-amber-500">{s.needs_review} دفترچه نیازمند بررسی</span>}
                   <span className="text-[10px] text-[var(--muted-2)]">/ {pool.target}</span>
                 </div>
                 <div className="text-[10px] text-[var(--muted)] mt-0.5">

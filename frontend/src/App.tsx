@@ -2,8 +2,9 @@ import { accountStorage, accountId } from "./accountStorage";
 import { pullCalendar, flushCalendar } from "./calendarSync";
 import { Component, lazy, Suspense, useEffect, useState } from "react";
 import { apiUrl, authHeaders } from "./api";
+import { consumeResumePage, isPageDownloadError, recoverPageDownload } from "./pageRecovery";
 import { hydrateServerProfile, toSignupData } from "./profileSync";
-import { Screen, SignupData, normalizeSignupData, emptySignupData } from "./types";
+import { Screen, SignupData, NavFn, normalizeSignupData, emptySignupData } from "./types";
 import { PANELS, panelOf } from "./navConfig";
 import PanelTabs from "./components/PanelTabs";
 import Landing from "./pages/Landing";
@@ -106,11 +107,12 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
   );
 }
 
-class ScreenBoundary extends Component<{ children: React.ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
+class ScreenBoundary extends Component<{ children: React.ReactNode; screen: Screen; nav: NavFn }, { failed: boolean; downloadError: boolean }> {
+  state = { failed: false, downloadError: false };
+  static getDerivedStateFromError(error: unknown) { return { failed: true, downloadError: isPageDownloadError(error) }; }
+  componentDidCatch(error: Error) { recoverPageDownload(this.props.screen, error); }
   render() {
-    if (this.state.failed) return <div role="alert" className="plan-card m-5 p-6 bg-[var(--card)]"><h2>صفحه آماده نشد</h2><p className="text-sm text-[var(--muted)] mt-2">اتصال را بررسی کن و دوباره تلاش کن.</p><button className="mt-4 px-5 py-3 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]" onClick={() => window.location.reload()}>بارگذاری دوباره</button></div>;
+    if (this.state.failed) return <div role="alert" className="plan-card m-5 p-6 bg-[var(--card)]"><h2>صفحه آماده نشد</h2><p className="text-sm text-[var(--muted)] mt-2">{this.state.downloadError ? "فایل‌های این صفحه دریافت نشدند؛ ممکن است سایت به‌روزرسانی شده باشد. اتصال را بررسی کن و صفحه را دوباره بارگذاری کن." : "نمایش این صفحه با خطا روبه‌رو شد. دوباره بارگذاری کن؛ اگر مشکل ادامه داشت به مدیر سایت اطلاع بده."}</p><div className="flex gap-3 mt-4"><button className="px-5 py-3 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]" onClick={() => window.location.reload()}>بارگذاری دوباره</button><button onClick={() => this.props.nav("home")}>خانه</button></div></div>;
     return this.props.children;
   }
 }
@@ -125,7 +127,7 @@ function Shell({ children, screen, nav, isAdmin }: { children: React.ReactNode; 
       <div className={`min-h-screen ${!hideSidebar ? "md:mr-[220px]" : ""}`}>
         <div className={`w-full max-w-[430px] mx-auto md:max-w-none min-h-screen bg-[var(--surface)] md:shadow-none ${!hideSidebar ? "pb-24 md:pb-0" : ""}`}>
           {!hideSidebar && panelKey && <PanelTabs panelKey={panelKey} screen={screen} nav={nav} isAdmin={isAdmin} />}
-          <main key={screen} className={`page-scene page-${screen}`}><ScreenBoundary><Suspense fallback={<div className="page-loading" role="status" aria-label="در حال آماده‌سازی صفحه"><span>در حال آماده‌سازی…</span><i /><i /><i /></div>}>{panelKey ? <div className="panel-body">{children}</div> : children}</Suspense></ScreenBoundary></main>
+          <main key={screen} className={`page-scene page-${screen}`}><ScreenBoundary screen={screen} nav={nav}><Suspense fallback={<div className="page-loading" role="status" aria-label="در حال آماده‌سازی صفحه"><span>در حال آماده‌سازی…</span><i /><i /><i /></div>}>{panelKey ? <div className="panel-body">{children}</div> : children}</Suspense></ScreenBoundary></main>
         </div>
       </div>
     </div>
@@ -229,7 +231,7 @@ export default function App() {
     try {
       const profile = savedUser ? normalizeSignupData(JSON.parse(savedUser)) : emptySignupData();
       setUserData(profile);
-      setScreen("home");
+      setScreen(consumeResumePage() ?? "home");
       // Growth-readiness project 1: refresh the cache from the server so a
       // second device (or a cleared storage) converges on the same state.
       hydrateServerProfile(profile).then(server => {

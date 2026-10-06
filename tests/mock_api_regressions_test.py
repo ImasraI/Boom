@@ -48,5 +48,6 @@ def test_generation_exception_refunds_reserved_quota(monkeypatch):
     monkeypatch.setattr(mocks.mock_generation, "generate_booklet", fail)
     with pytest.raises(RuntimeError):
         mocks.generate_mock(mocks.MockConfig(questions_per_subject=1),
-                            current_user=SimpleNamespace(id=1), db=SimpleNamespace())
+                            current_user=SimpleNamespace(id=1), db=SimpleNamespace(
+                                execute=lambda *a: SimpleNamespace(scalar_one_or_none=lambda: None)))
     assert calls == ["reserve", "refund"]

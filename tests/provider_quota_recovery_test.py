@@ -121,7 +121,8 @@ def test_failed_live_mock_returns_readable_provider_error_and_refunds_quota(monk
         return []
     monkeypatch.setattr(mock_generation, "generate_booklet", refuse)
     with pytest.raises(HTTPException) as error:
-        mocks.generate_mock(mocks.MockConfig(questions_per_subject=1), SimpleNamespace(id=1), None)
+        db = SimpleNamespace(execute=lambda *a: SimpleNamespace(scalar_one_or_none=lambda: None))
+        mocks.generate_mock(mocks.MockConfig(questions_per_subject=1), SimpleNamespace(id=1), db)
     assert error.value.status_code == 503
     assert error.value.detail["code"] == "provider_daily_quota"
     assert accounting == ["reserve", "refund"]
@@ -133,7 +134,8 @@ def test_ready_mock_is_served_even_if_provider_is_blocked(monkeypatch):
     def blocked():
         raise AssertionError("Serving ready stock must not require a provider")
     monkeypatch.setattr(mocks, "require_pool_available", blocked)
-    result = mocks._generate_reserved_mock(mocks.MockConfig(), SimpleNamespace(id=1), None)
+    db = SimpleNamespace(execute=lambda *a: SimpleNamespace(scalar_one_or_none=lambda: None))
+    result = mocks._generate_reserved_mock(mocks.MockConfig(), SimpleNamespace(id=1), db)
     assert result["mock_id"] == 15
     assert "answer" not in result
 
@@ -146,3 +148,26 @@ def test_blocked_restock_does_not_launch_a_thread(monkeypatch):
     with pytest.raises(HTTPException) as error:
         admin.pool_restock(None)
     assert error.value.status_code == 503
+
+
+def test_daily_quota_survives_restart_without_saving_credentials_or_responses(monkeypatch, tmp_path):
+    path = tmp_path / "provider-quota.json"
+    monkeypatch.setattr(quota, "_state_file", lambda: path)
+    quota._LOADED_PATHS.clear()
+    identity = quota.quota_identity("https://provider.example", "test-model", "test-secret")
+    quota.block_daily_quota(identity, "daily quota; sensitive provider response test-secret")
+    saved = path.read_text()
+    assert "test-secret" not in saved and "sensitive" not in saved
+    quota._BLOCKS.clear(); quota._LOADED_PATHS.clear()
+    assert quota.blocked_quota(identity) is not None
+
+
+def test_expired_persisted_quota_and_changed_credentials_are_not_blocked(monkeypatch, tmp_path):
+    import json
+    path = tmp_path / "provider-quota.json"
+    old = quota.quota_identity("https://provider.example", "test-model", "old-secret")
+    new = quota.quota_identity("https://provider.example", "test-model", "new-secret")
+    path.write_text(json.dumps({old: 0}))
+    monkeypatch.setattr(quota, "_state_file", lambda: path)
+    quota._LOADED_PATHS.clear()
+    assert quota.blocked_quota(old) is None and quota.blocked_quota(new) is None

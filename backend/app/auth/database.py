@@ -376,6 +376,7 @@ class ArenaMatch(Base):
     winner_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     finished_at = Column(DateTime, nullable=True)
+    generation_error = Column(Text, nullable=True)
     # ---- AI-rival exhibition matches (is_ai_opponent=True) ----
     # A SEPARATE, non-ranked track: these rows NEVER feed record_match_rating
     # (guarded), the placement K count, user_elo, /me or the public
@@ -573,6 +574,7 @@ def ensure_schema() -> None:
     # Scheduled duels (arena scheduling option): kickoff timestamp + who
     # booked the match. Null on every classic row.
     _ensure_column("arena_matches", "starts_at", "TIMESTAMP")
+    _ensure_column("arena_matches", "generation_error", "TEXT")
     _ensure_column("arena_matches", "booked_by", "INTEGER")
     _ensure_column("arena_matches", "ai_rival", "VARCHAR")
     _ensure_column("arena_matches", "ai_answers", "TEXT")

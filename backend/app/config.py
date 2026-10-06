@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     # needs many. Each fallback uses its own key/model from settings. Empty
     # (default) = no failover: pool generation fails fast with the reason.
     POOL_LLM_FALLBACK_PROVIDERS: str = ""
+    # Optional local state file: keep terminal provider quotas across restarts.
+    POOL_QUOTA_STATE_PATH: str = ""
     VISION_LLM_PROVIDER: str = "gemini"  # Options: "gemini", "groq", "ollama", "mock"
     VISION_LLM_MODEL_NAME: str = "gemini-3.6-flash"
 

@@ -40,3 +40,29 @@ export async function readApiError(res: Response, fallback: string): Promise<str
     return fallback;
   }
 }
+
+/** Bound panel requests so a broken connection cannot leave a spinner forever. */
+export async function apiJson<T>(path: string, init: RequestInit = {}, timeoutMs = 20000): Promise<T> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  const cancel = () => controller.abort();
+  init.signal?.addEventListener("abort", cancel, { once: true });
+  if (init.signal?.aborted) controller.abort();
+  try {
+    const headers = new Headers(authHeaders());
+    new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+    const response = await fetch(apiUrl(path), { ...init, headers, signal: controller.signal });
+    if (!response.ok) {
+      const fallback = response.status === 401 ? "نشست ورود منقضی شده است؛ دوباره وارد حساب شو." : "دریافت اطلاعات ناموفق بود؛ دوباره تلاش کن.";
+      throw new Error(await readApiError(response, fallback));
+    }
+    return await response.json() as T;
+  } catch (error) {
+    if (timedOut) throw new Error("پاسخ سرور دیر رسید؛ اتصال را بررسی کن و دوباره تلاش کن.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    init.signal?.removeEventListener("abort", cancel);
+  }
+}

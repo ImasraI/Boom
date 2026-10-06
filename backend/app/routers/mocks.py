@@ -41,6 +41,7 @@ from app.auth.database import (
     ChallengeInvite,
     GeneratedMock,
     MockAttempt,
+    StudentProfile,
     User,
     WrongAnswer,
 )
@@ -215,6 +216,13 @@ def generate_mock(
 
 
 def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session):
+    profile = db.execute(select(StudentProfile).where(StudentProfile.user_id == current_user.id)).scalar_one_or_none()
+    student = dict(config.student or {})
+    if profile:
+        for field in ("major", "grade"):
+            if getattr(profile, field, None):
+                student[field] = getattr(profile, field)
+    config = config.model_copy(update={"student": student})
     poolable, plan, major = _resolve_plan(config)
     grade = (config.student or {}).get("grade") or ""
     weak = []

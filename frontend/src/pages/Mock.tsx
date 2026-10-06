@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
-import { apiUrl, authHeaders, readApiError } from "../api"
+import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
 
@@ -422,29 +422,32 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
   const [result, setResult] = useState<MockResult | null>(null)
   const [error, setError] = useState("")
 
+  const generationRef = useRef<AbortController | null>(null)
+  useEffect(() => () => generationRef.current?.abort(), [])
+
   async function start(cfg: Record<string, unknown>) {
+    const controller = new AbortController()
+    generationRef.current = controller
     setPhase("loading")
     setError("")
     try {
-      const res = await fetch(apiUrl("/api/mocks/generate"), {
+      const data = await apiJson<MockInfo>("/api/mocks/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(authHeaders() as Record<string, string>) },
         body: JSON.stringify({ ...cfg, student: { major: userData?.major, grade: userData?.grade } }),
-      })
-      if (!res.ok) throw new Error(await readApiError(res, "ساخت آزمون ناموفق بود"))
-      const data: MockInfo = await res.json()
-      const qRes = await fetch(apiUrl(`/api/mocks/${data.mock_id}`), {
-        headers: authHeaders(),
-      })
-      if (!qRes.ok) throw new Error(await readApiError(qRes, "دریافت دفترچه ناموفق بود"))
-      const qData = await qRes.json()
+        signal: controller.signal,
+      }, 300000)
+      const qData = await apiJson<{ questions: MockQuestion[] }>(`/api/mocks/${data.mock_id}`, { signal: controller.signal })
       if (!Array.isArray(qData.questions) || !qData.questions.length) throw new Error("سوال معتبری در این دفترچه باقی نمانده است؛ دفترچه دیگری انتخاب کن.")
       setInfo(data)
       setQuestions(qData.questions)
       setPhase("ready")
     } catch (e) {
+      if (controller.signal.aborted) return
       setError(e instanceof Error ? e.message : "خطای نامشخص")
       setPhase("config")
+    } finally {
+      if (generationRef.current === controller) generationRef.current = null
     }
   }
 
@@ -477,6 +480,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
         <div className="w-10 h-10 border-3 border-[var(--accent)] border-t-transparent rounded-full animate-spin" style={{ borderWidth: 3 }} />
         <p className="text-[13px] font-bold text-[var(--muted)]">در حال ساخت دفترچه از کتاب‌های تو...</p>
         <p className="text-[11px] text-[var(--muted-2)]">ساخت و بررسی پاسخ‌های دفترچه ممکن است چند دقیقه طول بکشد.</p>
+        <button onClick={() => { generationRef.current?.abort(); setPhase("config") }} className="text-sm text-[var(--accent)]">بازگشت به تنظیمات</button>
       </div>
       )}
 

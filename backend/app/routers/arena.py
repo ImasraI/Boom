@@ -31,6 +31,7 @@ from app.auth.database import (
     ArenaMatch,
     ArenaQueueEntry,
     ArenaScheduledInvite,
+    BankQuestion,
     GeneratedMock,
     MockAttempt,
     SessionLocal,
@@ -44,6 +45,7 @@ from app.auth.deps import get_current_user, get_db
 from app.auth.limits import consume_ai_use, feature_quota, release_ai_use
 from app.rag import knowledge_base as kb, mock_generation, pool_core
 from app.rag.konkur_format import major_key
+from app.rag.provider_quota import DAILY_QUOTA_MESSAGE, pool_quota_status, require_pool_available
 from app.routers.mocks import _score
 from app.utils.logger import get_logger
 
@@ -300,6 +302,7 @@ def _reserve_match(db: Session, entry: ArenaQueueEntry, other: ArenaQueueEntry,
         mock = pooled
         logger.info("Arena match served from duel pool (mock %d).", mock.id)
     else:
+        require_pool_available()  # No network call; never reserve an unplayable daily-quota match.
         questions = []
         i = 0
         for s in plan:
@@ -356,8 +359,8 @@ def _generate_duel_booklet(match: ArenaMatch, plan: list,
     """Fill the reserved duel's GeneratedMock with real AI-generated questions.
 
     Must be called OUTSIDE _LOCK (a real LLM call can take minutes). On
-    failure the match survives with the placeholder booklet and the error is
-    logged; submit scoring of an all-blank booklet yields 0 for both.
+    failure the match is cancelled without rating changes. Empty placeholders
+    must never leave either player waiting indefinitely or be scored.
 
     `plan` is the duel's intersection plan (knowledge_base.pair_plan),
     `topics` the players' ticked subjects (they also steer the questions
@@ -372,9 +375,13 @@ def _generate_duel_booklet(match: ArenaMatch, plan: list,
     try:
         mock_db = SessionLocal()
         try:
+            current = mock_db.get(ArenaMatch, match.id)
+            if not current or current.status == "cancelled":
+                return
             mock = mock_db.get(GeneratedMock, match.mock_id)
             if not mock:
-                return
+                raise ValueError("Missing duel booklet")
+            require_pool_available()
             questions = mock_generation.generate_booklet(
                 match.student_b_id, plan, topics=list(topics or []),
                 difficulty="konkur", grade=grade,
@@ -384,13 +391,35 @@ def _generate_duel_booklet(match: ArenaMatch, plan: list,
                     questions, match.student_b_id,
                     difficulty="konkur", max_regens=1, timeout=45.0,
                 )
+                mock_db.refresh(current)
+                if current.status == "cancelled":
+                    return
                 mock.questions = json.dumps(questions, ensure_ascii=False)
                 mock.bank_indexed = False
                 from app.rag import question_bank
                 question_bank.index_mock(mock_db, mock)
+                complete = pool_core.verified_booklet(mock.questions) and all(
+                    sum(q.get("subject") == row["name"] for q in questions) == row["questions"] for row in plan)
+                if not complete:
+                    mock.status = "bank_only"  # Preserve verified survivors for the owner's practice.
+                    raise ValueError("Incomplete verified duel booklet")
                 mock_db.commit()
                 logger.info("Arena match %d: verified booklet ready (%d questions)",
                             match.id, len(questions))
+            else:
+                raise ValueError("No verified duel questions")
+        except Exception:
+            if not mock_db.is_active:
+                mock_db.rollback()
+            current = mock_db.get(ArenaMatch, match.id)
+            if current and current.status in ("pending", "scheduled"):
+                current.status = "cancelled"
+                current.generation_error = (DAILY_QUOTA_MESSAGE if pool_quota_status()["blocked"]
+                    else "ساخت و بررسی سوال‌های مسابقه ناموفق بود؛ مسابقه بدون تغییر رتبه لغو شد.")
+                current.delta_a = current.delta_b = 0
+                current.finished_at = datetime.utcnow()
+                mock_db.commit()
+            logger.warning("Arena match %d: booklet generation cancelled", match.id)
         finally:
             mock_db.close()
     except Exception:
@@ -403,6 +432,18 @@ def join_queue(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    if pool_quota_status()["blocked"]:
+        # Do not queue a player when neither generation nor any verified
+        # shared stock can supply a match. Legacy indexed/not-yet-indexed
+        # booklets remain eligible; private practice questions are not shared.
+        shared = db.scalar(select(BankQuestion.id).where(BankQuestion.owner_id == 0,
+            BankQuestion.verified == True, BankQuestion.status == "active").limit(1))
+        raw_stock = db.execute(select(GeneratedMock.questions).where(
+            (GeneratedMock.bank_scope == "shared") | ((GeneratedMock.student_id == 0)
+                & (GeneratedMock.status == "pending_use")),
+            GeneratedMock.difficulty.in_(("konkur", pool_core.DUEL_DIFFICULTY)))).scalars()
+        if not shared and not any(pool_core.verified_booklet(raw) for raw in raw_stock):
+            require_pool_available()
     # Ranked games burn an AI-generated booklet, so they share the per-user
     # daily quota mechanism (AI_DAILY_ARENA_JOIN, .env-adjustable).
     # Atomic reserve (was check-then-record: concurrent joins blew the cap).
@@ -417,22 +458,27 @@ def join_queue(
     if ignored:
         logger.info("Arena: user %s ticked subjects outside their major %r: %r",
                     current_user.id, major, ignored)
-    with _LOCK:
-        db.execute(delete(ArenaQueueEntry)
-                   .where(ArenaQueueEntry.student_id == current_user.id))
-        db.flush()
-        entry = ArenaQueueEntry(
-            student_id=current_user.id,
-            elo=user_elo(db, current_user.id),
-            major=major,
-            grade=grade,
-            wanted=json.dumps(wanted, ensure_ascii=False),
-        )
-        db.add(entry)
-        db.flush()
-        match = _try_pair(db, entry)
-        found = match is not None
-        db.commit()
+    try:
+        with _LOCK:
+            db.execute(delete(ArenaQueueEntry)
+                       .where(ArenaQueueEntry.student_id == current_user.id))
+            db.flush()
+            entry = ArenaQueueEntry(
+                student_id=current_user.id,
+                elo=user_elo(db, current_user.id),
+                major=major,
+                grade=grade,
+                wanted=json.dumps(wanted, ensure_ascii=False),
+            )
+            db.add(entry)
+            db.flush()
+            match = _try_pair(db, entry)
+            found = match is not None
+            db.commit()
+    except Exception:
+        db.rollback()
+        release_ai_use(current_user.id, "arena_join")
+        raise
     # Counted only after a successful outcome: a real match OR a queue spot.
     # The 429 check above ran outside _LOCK, so a rejected joiner never
     # touched the queue at all.
@@ -1205,6 +1251,18 @@ def get_match(
     # show it instead of one player's major.
     subjects: list = []
     book = db.get(GeneratedMock, match.mock_id) if match.mock_id else None
+    if (match.status == "pending" and book and match.created_at
+            and match.created_at < datetime.utcnow() - timedelta(minutes=15)):
+        try:
+            ready = any((q.get("text") or "").strip() for q in json.loads(book.questions or "[]"))
+        except (ValueError, TypeError):
+            ready = False
+        if not ready:
+            match.status = "cancelled"
+            match.generation_error = "ساخت دفترچه مسابقه کامل نشد؛ مسابقه بدون تغییر رتبه لغو شد."
+            match.delta_a = match.delta_b = 0
+            match.finished_at = datetime.utcnow()
+            db.commit()
     if book is not None:
         try:
             for q in json.loads(book.questions or "[]"):
@@ -1217,6 +1275,7 @@ def get_match(
     return {
         "match_id": match.id,
         "status": match.status,
+        "generation_error": match.generation_error,
         "starts_at": match.starts_at.isoformat() if match.starts_at else None,
         "opponent": opp.username if opp else (_AI_RIVAL_NAME if match.is_ai_opponent else "حریف"),
         "opponent_elo": opp_elo,
