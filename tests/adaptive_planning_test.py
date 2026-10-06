@@ -178,11 +178,24 @@ def test_session_normalizes_timezone_and_has_real_subject_foreign_key(db):
     assert db.get(Subject, row.subject_id).name == "math"
 
 
-def test_saved_exam_is_scoped_and_visible_in_overview(db):
+def test_saved_exam_is_scoped_and_visible_in_overview(db, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.planner import clock
     from app.routers.profile import ExamIn, add_exam
     from app.routers.boom_ai import plan_overview
-    add_exam(ExamIn(title="upcoming", date=date.today(), subjects=["math"]), SimpleNamespace(id=1), db)
-    assert plan_overview(SimpleNamespace(id=1), db)["exams"][0]["title"] == "upcoming"
+    from app.auth.database import Assessment
+    from fastapi import HTTPException
+    # UTC hosts and Tehran students have different dates near midnight.
+    now = datetime(2026, 10, 6, 21, 30, tzinfo=timezone.utc).astimezone(
+        timezone(timedelta(hours=3, minutes=30))).replace(tzinfo=None)
+    monkeypatch.setattr(clock, "planner_now", lambda: now)
+    with pytest.raises(HTTPException) as error:
+        add_exam(ExamIn(title="previous", date=date(2026, 10, 6), subjects=["math"]), SimpleNamespace(id=1), db)
+    assert error.value.status_code == 422
+    db.add(Assessment(student_id=1, title="previous", date=date(2026, 10, 6)))
+    db.commit()
+    add_exam(ExamIn(title="upcoming", date=now.date(), subjects=["math"]), SimpleNamespace(id=1), db)
+    assert [exam["title"] for exam in plan_overview(SimpleNamespace(id=1), db)["exams"]] == ["upcoming"]
     assert not plan_overview(SimpleNamespace(id=2), db)["exams"]
 
 

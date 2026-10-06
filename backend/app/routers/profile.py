@@ -409,8 +409,9 @@ class ExamIn(BaseModel):
 @router.post("/exams")
 def add_exam(payload: ExamIn, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.auth.database import Assessment
+    from app.planner.clock import planner_now
     import json
-    if payload.date < date.today():
+    if payload.date < planner_now().date():
         raise HTTPException(status_code=422, detail="تاریخ آزمون باید امروز یا آینده باشد")
     row = Assessment(student_id=current_user.id, title=payload.title, date=payload.date,
                      source="scheduled_mock", results=json.dumps({"subjects": payload.subjects}, ensure_ascii=False))

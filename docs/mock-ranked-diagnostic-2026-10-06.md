@@ -13,6 +13,7 @@ Changes:
 - Mock generation uses the saved account's major and grade ahead of a stale browser cache. Practice continues to prefer previously used verified questions, with fresh verified stock as fallback when none has been used.
 - Admin stock counts and worker deficits count verified usable booklets; legacy and reported booklets remain stored for review and are not labelled ready.
 - An optional ignored quota-state file stores only credential/model fingerprints and reset timestamps. Enabling it on the VM preserves terminal provider limits across deployments without exposing keys or repeatedly probing exhausted quota.
+- Saved-exam validation uses the same Tehran calendar day as the planner overview. Its regression test freezes the UTC/Tehran midnight boundary so Linux CI and the local laptop agree.
 
 Validation: 455 backend tests passed with 3 skipped; 30 frontend tests passed; TypeScript and the Cloudflare production build passed. Successful generation, taking/scoring, ownership, reporting, private/shared question separation, and ranked fallback are covered with isolated verified stock. Production generation remains unavailable until the provider can verify or generate eligible questions; old questions were not relabelled as verified to make a test pass.
 
