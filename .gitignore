@@ -116,3 +116,7 @@ corpus-exports/
 backups/
 poolstate.txt
 /AGENTS.md
+
+# Unrelated local monitoring project; do not ship with Boom.
+/pico-monitoring/
+/.github/workflows/pico-monitoring.yml

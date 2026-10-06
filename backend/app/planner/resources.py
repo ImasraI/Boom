@@ -38,6 +38,14 @@ def _grade(student):
                  if word in text or str(number) in text), 12)
 
 
+def specific_topic(topic, subject):
+    """OCR labels and subject names are not a chapter-selection signal."""
+    value = _norm(topic)
+    if value in ("", _norm(subject), "مرور مباحث", "بخش تستی", "تست", "تمرین", "درسنامه", "درس نامه"):
+        return False
+    return not re.fullmatch(r"(?:تست[هاای ]*|پرسش[هاای ]*|سوال[هاای ]*|سؤال[هاای ]*)(?:چهارگزینه ای|چهار گزینه ای)", value)
+
+
 def _raw_books(student):
     root = Path(get_settings().RAW_DIR) / "test-books"
     major = _norm(student.get("major"))
@@ -77,7 +85,12 @@ def _read_question_runs(signature):
             for question in data.get("questions") or []:
                 if not isinstance(question, dict):
                     continue
-                if not question.get("text") or len(question.get("options") or []) < 2:
+                options = question.get("options") or []
+                if not question.get("text") or len(options) < 2:
+                    continue
+                # Some failed OCR pages fabricate choice labels without the
+                # actual choices. A printed number alone is not enough.
+                if all(re.fullmatch(r"\(?[a-dA-D]\)?[.)]?", str(option).strip()) for option in options):
                     continue
                 raw_number = _norm(question.get("number", question.get("question_number")))
                 if not raw_number.isdigit():
@@ -85,14 +98,17 @@ def _read_question_runs(signature):
                 number = int(raw_number)
                 if number < 1:
                     continue
+                topic = str(question.get("topic") or lesson)
                 previous = runs[-1] if runs else None
-                if previous and number == previous["q_to"] + 1 and _norm(lesson) == _norm(previous["topic"]):
+                if previous and number == previous["q_to"] + 1 and _norm(topic) == _norm(previous["topic"]):
                     previous["q_to"] = number
                     previous["page_to"] = page
                     previous["question_pages"].append((number, page))
+                    previous["question_texts"].append((number, page, str(question["text"])))
                 else:
-                    runs.append({"q_from": number, "q_to": number, "topic": lesson,
-                                 "page_from": page, "page_to": page, "question_pages": [(number, page)]})
+                    runs.append({"q_from": number, "q_to": number, "topic": topic,
+                                 "page_from": page, "page_to": page, "question_pages": [(number, page)],
+                                 "question_texts": [(number, page, str(question["text"]))]})
         except (OSError, ValueError, TypeError, AttributeError, IndexError):
             continue
     return runs
@@ -102,11 +118,18 @@ def _ocr_ranges(book):
     # Pending OCR has not been promoted and is intentionally not a source.
     stem = Path(book).stem.strip().rstrip(" .")
     root = Path(get_settings().OCR_DIR)
-    directory = root / stem / "pages"
-    if not directory.exists():
-        directory = root / (stem + ".pdf") / "pages"
+    # Both layouts exist after imports. An empty stem directory must not
+    # shadow populated .pdf/pages; never count a duplicated page twice.
+    pages = {}
+    for directory in (root / stem / "pages", root / (stem + ".pdf") / "pages"):
+        for path in directory.glob("page_*.json"):
+            try:
+                if path.name not in pages or path.stat().st_mtime_ns > pages[path.name].stat().st_mtime_ns:
+                    pages[path.name] = path
+            except OSError:
+                continue
     signature = []
-    for path in sorted(directory.glob("page_*.json")):
+    for path in sorted(pages.values(), key=lambda p: (int(p.stem.split("_")[-1]) if p.stem.split("_")[-1].isdigit() else 10**12, p.name)):
         try:
             stat = path.stat()
             signature.append((str(path.resolve()), stat.st_mtime_ns, stat.st_size))
@@ -155,10 +178,31 @@ def _topic_score(topic, source_topic):
     topic = _norm(topic)
     if not topic or topic == "مرور مباحث":
         return 1
-    words = {word for word in topic.replace("،", " ").split()
-             if len(word) > 2 and word not in ("مرور", "مباحث", "فصل", "بخش")}
+    words = {word for word in re.findall(r"[\w]+", topic)
+             if len(word) > 2 and word not in ("مرور", "مباحث", "فصل", "بخش", "درس", "تست", "پرسش", "سوال", "سؤال", "های", "چهارگزینه", "تمرین", "کتاب")}
     source = _norm(source_topic)
     return sum(word in source for word in words)
+
+
+def _matching_runs(topic, item):
+    """Missing headings can match actual question text, never neighbouring questions."""
+    relevance = _topic_score(topic, item["topic"])
+    if relevance:
+        return [(relevance, item)]
+    matches = []
+    for number, page, text in item.get("question_texts", []):
+        score = _topic_score(topic, text)
+        if not score:
+            continue
+        if matches and number == matches[-1][1]["q_to"] + 1:
+            previous = matches[-1][1]
+            previous["q_to"] = number
+            previous["page_to"] = page
+            previous["question_pages"].append((number, page))
+        else:
+            matches.append((score, {"q_from": number, "q_to": number, "topic": topic,
+                "page_from": page, "page_to": page, "question_pages": [(number, page)]}))
+    return matches
 
 
 def _indexed_ranges(user_id):
@@ -178,13 +222,19 @@ def _indexed_ranges(user_id):
         where = {"$and": [{"user_id": {"$in": list({user_id, shared})}}, {"kind": "question"}]}
         records = []
         for offset in range(0, collection.count(), 1000):
-            batch = collection.get(where=where, limit=1000, offset=offset, include=["metadatas"])
+            batch = collection.get(where=where, limit=1000, offset=offset, include=["metadatas", "documents"])
             metas = batch.get("metadatas") or []
-            records.extend(metas)
+            records.extend(zip(metas, batch.get("documents") or []))
             if len(metas) < 1000:
                 break
         groups = {}
-        for meta in records:
+        for meta, document in records:
+            if not isinstance(meta, dict) or not isinstance(document, str):
+                continue
+            choices = re.search(r"گزینه‌ها:\s*([^\n]+)", document)
+            options = [value.strip() for value in choices[1].split("|")] if choices else []
+            if len(options) < 2 or all(re.fullmatch(r"\(?[a-dA-D]\)?[.)]?", value) for value in options):
+                continue
             number = _norm(meta.get("question_number"))
             page = meta.get("page")
             if not number.isdigit() or int(number) < 1 or not isinstance(page, int) or page < 1:
@@ -192,19 +242,20 @@ def _indexed_ranges(user_id):
             book, topic = str(meta.get("book") or meta.get("document_name") or ""), str(meta.get("lesson_title") or "")
             if not book or "پاسخ" in _norm(topic):
                 continue
-            groups.setdefault((book, topic), set()).add((page, int(number)))
+            groups.setdefault((book, topic), {})[(page, int(number))] = "\n".join(document.splitlines()[1:])
         result = {}
         for (book, topic), questions in groups.items():
             runs = result.setdefault(Path(book).stem.strip(), [])
             previous = None
-            for page, number in sorted(questions):
+            for (page, number), text in sorted(questions.items()):
                 if previous and previous["q_to"] + 1 == number:
                     previous["q_to"] = number
                     previous["page_to"] = page
                     previous["question_pages"].append((number, page))
+                    previous["question_texts"].append((number, page, text))
                 else:
                     previous = {"q_from": number, "q_to": number, "page_from": page, "page_to": page,
-                                "topic": topic, "question_pages": [(number, page)]}
+                                "topic": topic, "question_pages": [(number, page)], "question_texts": [(number, page, text)]}
                     runs.append(previous)
         return result
     except Exception:
@@ -273,12 +324,11 @@ def assign_test_resources(db, student, blocks, progress, *, books=None, reserved
             warnings.add(f"کتاب تست برای {block['subject']} در منابع ثبت نشده است.")
             continue
         choices = []
+        matched_ranges = []
         wanted = max(1, int(block.get("count") or 20))
         for entry in options:
-            for item in entry["ranges"]:
-                relevance = _topic_score(block["topic"], item["topic"])
-                if not relevance:
-                    continue
+            for relevance, item in [match for source in entry["ranges"] for match in _matching_runs(block["topic"], source)]:
+                matched_ranges.append(item)
                 start = item["q_from"]
                 occupied = sorted(used.get(entry["book"], []))
                 # Completed questions and earlier blocks reserve their ranges.
@@ -319,7 +369,12 @@ def assign_test_resources(db, student, blocks, progress, *, books=None, reserved
             entry = max(options, key=lambda row: (bool(row["ranges"]), row["grade"] == _grade(student), row["grade"] == 33))
             block["resource"] = entry["book"]
             block["title"] = f"{wanted} تست {block['subject']} از کتاب {Path(entry['book']).stem.strip()}: {block['topic']}".translate(_FA)
-            message = f"شماره تست‌های {block['subject']} برای این مبحث در منابع ثبت نشده یا قبلاً تخصیص داده شده است."
+            if matched_ranges:
+                message = f"تست‌های ثبت‌شدهٔ {block['subject']} برای «{block['topic']}» قبلاً حل یا در این برنامه تخصیص داده شده‌اند؛ تست جدید باقی نمانده است."
+            elif any(entry["ranges"] for entry in options):
+                message = f"برای «{block['topic']}» در {block['subject']}، متن یا عنوان مبحثِ تست‌های شماره‌دار در دادهٔ OCR پیدا نشد؛ اسکن یا فهرست همین فصل را تکمیل کنید."
+            else:
+                message = f"در منابع {block['subject']} هنوز تست شماره‌دارِ قابل استفاده ثبت نشده است؛ OCR یا فهرست بازهٔ تست‌ها را بارگذاری کنید."
             warnings.add(message)
             block["description"] += "؛ " + message
         sources.add(block["resource"])

@@ -1,7 +1,7 @@
 """The displayed weekly plan must retain valid times and concrete practice sources."""
 import json
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
-from app.auth.database import Base, BookCatalog, TaskProgress, User
+from app.auth.database import Base, BookCatalog, TaskProgress, User, StudentProfile, Assessment
 from app.planner import adaptive, resources
 from app.routers.boom_ai import _chat_plan_update_is_safe
 from app.routers.profile import ProgressIn, save_progress
@@ -202,3 +202,111 @@ def test_chat_updates_cannot_overlap_retained_plan_or_classes():
     assert not _chat_plan_update_is_safe({"blocks": [proposed]}, {"blocks": [block]}, {})
     assert _chat_plan_update_is_safe({"removed": [block], "blocks": [proposed]}, {"blocks": [block]}, {})
     assert not _chat_plan_update_is_safe({"blocks": [proposed]}, {"statics": [block]}, {})
+
+
+def _write_questions(directory, page, questions, topic=""):
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"page_{page:04d}.json").write_text(json.dumps({"page": page,
+        "data": {"lesson_title": topic, "questions": questions}}), encoding="utf-8")
+
+
+def _question(number, text="سوال معتبر"):
+    return {"number": number, "text": text, "options": ["گزینه اول", "گزینه دوم", "گزینه سوم", "گزینه چهارم"]}
+
+
+def test_empty_legacy_directory_does_not_hide_populated_pdf_ocr(db, tmp_path):
+    (tmp_path / "ocr/شیمی 3 خیلی سبز/pages").mkdir(parents=True)
+    _write_questions(tmp_path / "ocr/شیمی 3 خیلی سبز.pdf/pages", 18, [_question(30), _question(31)], "تعادل")
+    blocks = [_test_block(topic="تعادل")]
+    _, warnings = resources.assign_test_resources(db, {"grade": "دوازدهم"}, blocks, [])
+    assert not warnings
+    assert (blocks[0]["question_start"], blocks[0]["question_end"]) == (30, 31)
+
+
+def test_duplicate_ocr_layouts_do_not_repeat_a_printed_page(db, tmp_path):
+    for directory in ("شیمی 3 خیلی سبز", "شیمی 3 خیلی سبز.pdf"):
+        _write_questions(tmp_path / "ocr" / directory / "pages", 18, [_question(30), _question(31)], "تعادل")
+    assert len(resources.available_books(db, {})[0]["ranges"]) == 1
+
+
+def test_missing_lesson_heading_matches_only_actual_question_text(db, tmp_path):
+    _write_questions(tmp_path / "ocr/شیمی 3 خیلی سبز/pages", 18,
+        [_question(30, "تعادل شیمیایی را مشخص کنید"), _question(31, "ساختار اتم را مشخص کنید"),
+         _question(32, "ثابت تعادل را محاسبه کنید"), _question(33, "تعادل واکنش چیست؟")])
+    blocks = [_test_block(topic="تعادل") for _ in range(2)]
+    _, warnings = resources.assign_test_resources(db, {}, blocks, [])
+    assert not warnings
+    assert [(b["question_start"], b["question_end"]) for b in blocks] == [(32, 33), (30, 30)]
+
+
+def test_placeholder_choice_labels_are_not_usable_book_questions(db, tmp_path):
+    invalid = {"number": 30, "text": "کلاس آنلاین", "options": ["(A)", "(B)", "(C)", "(D)"]}
+    _write_questions(tmp_path / "ocr/شیمی 3 خیلی سبز/pages", 18, [invalid, _question(31)], "تعادل")
+    blocks = [_test_block(topic="تعادل")]
+    resources.assign_test_resources(db, {}, blocks, [])
+    assert (blocks[0]["question_start"], blocks[0]["question_end"]) == (31, 31)
+
+
+def test_generic_ocr_subject_heading_does_not_displace_real_chapter(db, tmp_path):
+    directory = tmp_path / "ocr/ریاضی 1 خیلی سبز/pages"
+    _write_questions(directory, 1, [_question(1)], "ریاضی")
+    _write_questions(directory, 18, [_question(n) for n in range(30, 200)], "تابع")
+    result = adaptive.build_week(db, 1, {}, 4, date(2099, 4, 4), [], now=datetime(2099, 4, 3))
+    math = [b for b in result["blocks"] if b["subject"] == "ریاضی"]
+    assert math and all(b["topic"] == "تابع" for b in math)
+    assert any(b.get("question_start") for b in math)
+    assert all("ریاضی 1 خیلی سبز" in b["description"] for b in math)
+
+
+def test_saved_exam_selection_is_loaded_and_empty_provisioned_row_keeps_request(db):
+    db.add(StudentProfile(user_id=1, version=1, test_exams=json.dumps(["ماز"]), exam_year="۱۴۰۵"))
+    db.add(StudentProfile(user_id=2, version=0))
+    db.commit()
+    assert adaptive.student_state(db, 1, {"testExams": ["سنجش"]})["testExams"] == ["ماز"]
+    assert adaptive.student_state(db, 1)["examYear"] == "۱۴۰۵"
+    assert adaptive.student_state(db, 2, {"testExams": ["سنجش"]})["testExams"] == ["سنجش"]
+
+
+def test_registered_mock_topic_can_find_questions_without_a_heading(db, tmp_path):
+    week = date(2099, 4, 4)
+    db.add(Assessment(student_id=1, title="آزمون بعدی", date=week + timedelta(days=6),
+        results=json.dumps({"subjects": [{"name": "شیمی", "topics": ["تعادل"]}]})))
+    db.commit()
+    _write_questions(tmp_path / "ocr/شیمی 3 خیلی سبز/pages", 18,
+        [_question(n, "تعادل واکنش را مشخص کنید") for n in range(30, 300)])
+    result = adaptive.build_week(db, 1, {}, 4, week, [], now=datetime(2099, 4, 3))
+    practice = [b for b in result["blocks"] if b.get("question_start")]
+    assert practice and all(b["topic"] == "تعادل" for b in practice)
+    assert all("آزمون ثبت‌شده" in b["description"] for b in practice)
+
+
+def test_missing_topic_and_exhausted_ranges_have_different_warnings(db):
+    db.add(BookCatalog(book_id="شیمی خیلی سبز", subject="شیمی", chapter="تعادل",
+        question_range_start=30, question_range_end=31))
+    db.commit()
+    blocks = [_test_block(topic="تعادل"), _test_block(topic="تعادل"), _test_block(topic="ساختار اتم")]
+    _, warnings = resources.assign_test_resources(db, {}, blocks, [])
+    assert any("تست جدید باقی نمانده" in w for w in warnings)
+    assert any("در دادهٔ OCR پیدا نشد" in w for w in warnings)
+
+
+def test_indexed_question_text_is_scoped_and_placeholder_chunks_are_excluded(db, tmp_path, monkeypatch):
+    from app.rag import vector_store
+    from app.rag.question_chunks import build_chunks_for_page
+    chroma = tmp_path / "chroma"
+    chroma.mkdir()
+    monkeypatch.setattr(resources, "get_settings", lambda: SimpleNamespace(
+        CHROMA_DIR=str(chroma), DEMO_USER_ID=1))
+    records = build_chunks_for_page("شیمی 3 خیلی سبز", 18, {"questions": [
+        _question(30, "تعادل واکنش چیست؟"),
+        {"number": 31, "text": "متن خراب", "options": ["(A)", "(B)", "(C)", "(D)"]}]})
+    class Collection:
+        def count(self): return len(records)
+        def get(self, **kwargs):
+            assert kwargs["where"]["$and"][0]["user_id"]["$in"] == [1, 2]
+            assert "documents" in kwargs["include"]
+            return {"metadatas": [r["metadata"] for r in records], "documents": [r["text"] for r in records]}
+    monkeypatch.setattr(vector_store, "get_question_vector_store", lambda: SimpleNamespace(collection=Collection()))
+    runs = resources._indexed_ranges(2)["شیمی 3 خیلی سبز"]
+    assert [(r["q_from"], r["q_to"]) for r in runs] == [(30, 30)]
+    assert resources._matching_runs("تعادل", runs[0])[0][1]["q_from"] == 30

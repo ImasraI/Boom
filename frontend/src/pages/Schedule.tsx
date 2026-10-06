@@ -518,8 +518,12 @@ export default function Schedule({
       const data: any = await resp.json()
       if (localStorage.getItem("boom-token") !== requestToken) return
       const notices = (data.warnings ?? []).filter((message: string) => !/heavy study load/.test(message));
-      if (data.unscheduled?.length) notices.unshift(`${data.unscheduled.length} فعالیت در زمان آزاد جا نشد. زمان آزاد یا تعهدات ثابت را بازبینی کنید.`)
-      setPlanMessage(notices.join(" "))
+      const capacityMisses = (data.unscheduled ?? []).filter((item: any) => item.reason === "no_capacity_this_week");
+      const dependentMisses = (data.unscheduled ?? []).filter((item: any) => ["dependency_not_scheduled", "test_before_study"].includes(item.reason));
+      if (capacityMisses.length) notices.unshift(`${capacityMisses.length} فعالیت در زمان آزاد جا نشد. زمان آزاد یا تعهدات ثابت را بازبینی کنید.`)
+      if (dependentMisses.length) notices.push(`${dependentMisses.length} تمرین یا مرور منتظر تکمیل مطالعهٔ پیش‌نیاز است.`)
+      if (data.note) notices.unshift(String(data.note));
+      setPlanMessage([...new Set(notices)].join("\n"))
       const list: ScheduleBlock[] = Array.isArray(data.blocks)
         ? data.blocks.map(
             (b: any): ScheduleBlock => ({
@@ -844,7 +848,7 @@ export default function Schedule({
 
   return (
     <div className="h-full flex flex-col bg-[var(--surface)]">
-      {planMessage && <p role="status" className="p-3 text-sm bg-[var(--card)] text-[var(--text)]">{planMessage}</p>}
+      {planMessage && <p role="status" className="p-3 text-sm whitespace-pre-line bg-[var(--card)] text-[var(--text)]">{planMessage}</p>}
       <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-12 pb-3">
         <div className="flex items-center gap-3">
           <button

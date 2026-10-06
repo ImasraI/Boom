@@ -1,5 +1,9 @@
 # Production reports: question bank, mock reuse, planning and chat formatting
 
+Deployment completed on October 6. See the
+[verified deployment report](deployment-2026-10-06.md). The restriction and
+resume notes below describe the earlier blocked session, now resolved.
+
 ## Local changes ready for review
 
 - The detailed Persian shield is installed on the landing page, login,

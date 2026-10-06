@@ -4,7 +4,7 @@ import re
 from datetime import timedelta
 from pathlib import Path
 from app.config import get_settings
-from app.planner.resources import _norm, _subject
+from app.planner.resources import _norm, _subject, _grade
 
 
 def next_mock_outline(student, week_start):
@@ -15,10 +15,16 @@ def next_mock_outline(student, week_start):
     except (OSError, ValueError):
         return None
     candidates = []
+    selected = [_norm(value) for value in student.get("testExams", []) if isinstance(value, str)]
+    aliases = {"ماز": ("ماز", "maz"), "قلم چی": ("قلم چی", "قلمچی", "kanoon"),
+               "گزینه دو": ("گزینه دو", "gozine"), "سنجش": ("سنجش", "sanjesh")}
     for key, text in cache.items():
         if not key.startswith("norm2|") or not isinstance(text, str):
             continue
         norm = _norm(text)
+        identity = _norm(key + " " + text[:150])
+        if selected and not any(any(alias in identity for alias in aliases.get(provider, (provider,))) for provider in selected):
+            continue
         major = _norm(student.get("major", "ریاضی"))
         if any(track in norm and track not in major for track in ("ریاضی", "تجربی", "انسانی") if track in norm[:150]):
             continue
@@ -27,6 +33,10 @@ def next_mock_outline(student, week_start):
         explicit_years = re.findall(r"(?<!\d)(14\d{2})(?!\d)", norm + " " + key)
         if not explicit_years or str(year) not in explicit_years:
             continue
+        header = norm[:150]
+        if any(word in header for word in ("دهم", "یازدهم", "دوازدهم")) and _grade({"grade": header}) != _grade(student):
+            continue
+        pattern = r"(?<!\d)(\d{1,2})\s+(" + "|".join(_J_MONTHS) + ")"
         hits = set(re.findall(r"(?<!\d)(\d{1,2})\s+(" + "|".join(_J_MONTHS) + ")", norm))
         dates = []
         for offset in range(21):
@@ -36,11 +46,20 @@ def next_mock_outline(student, week_start):
                 dates.append(actual)
         if not dates:
             continue
-        topics, subject, optional = {}, None, False
+        # Topics belong to a dated section, or an explicitly common booklet.
+        # Never attach every chapter of a multi-exam document to its first date.
+        topics_by_date = {actual: {} for actual in dates}
+        scope = dates if len(hits) == 1 else []
+        subject, optional = None, False
         for line in text.splitlines():
             if line.lstrip().startswith("###"):
                 optional = "اختیاری" in line
                 subject = None
+                section_dates = set(re.findall(pattern, _norm(line)))
+                if section_dates:
+                    scope = [actual for actual in dates if (str(_jalali(actual.year, actual.month, actual.day)[2]), _J_MONTHS[_jalali(actual.year, actual.month, actual.day)[1] - 1]) in section_dates]
+                elif "هر تاریخ" in _norm(line):
+                    scope = dates
             if optional:
                 continue
             heading = re.match(r"\s*-\s*\*\*([^*]+)\*\*", line)
@@ -51,8 +70,10 @@ def next_mock_outline(student, week_start):
                 if any(word in value for word in ("نامشخص", "همان مباحث", "مشابه دفترچه")):
                     continue
                 rows = [v.strip() for v in re.split("[،,]", value) if v.strip()]
-                topics.setdefault(subject, []).extend(rows)
-        if topics:
-            candidates.append({"date": min(dates), "document": key.split("|", 1)[1],
-                               "topics": {s: list(dict.fromkeys(t)) for s, t in topics.items()}})
+                for actual in scope:
+                    topics_by_date[actual].setdefault(subject, []).extend(rows)
+        for actual, topics in topics_by_date.items():
+            if topics:
+                candidates.append({"date": actual, "document": key.split("|", 1)[1],
+                                   "topics": {s: list(dict.fromkeys(t)) for s, t in topics.items()}})
     return min(candidates, key=lambda c: c["date"]) if candidates else None

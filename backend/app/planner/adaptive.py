@@ -35,6 +35,10 @@ def student_state(db, user_id, supplied=None):
             if getattr(row, source):
                 student[target] = getattr(row, source)
         availability = decoded(row.availability, {})
+        if row.test_exams is not None and (row.version or decoded(row.test_exams, [])):
+            student["testExams"] = decoded(row.test_exams, [])
+        if row.exam_year:
+            student["examYear"] = row.exam_year
         student.update(availability.get("preferences") or {})
         for key, target in (("wake", "wakeTime"), ("sleep_hours", "sleepHours"), ("daily_hours", "dailyHours")):
             if key in availability:
@@ -92,13 +96,19 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     subjects = next((v for k, v in SUBJECTS.items() if k in major), SUBJECTS["ریاضی"])
     confidence = student.get("confidence") or {}
     completion = student.get("completion") or {}
-    from app.planner.resources import available_books, _topic_score, _subject, _grade
+    from app.planner.resources import available_books, _topic_score, _subject, _grade, specific_topic
+    subjects = [_subject(s) for s in subjects]
     books = available_books(db, student, user_id)
-    topic_scores = {(e["subject"], e["topic"]): 1 - e["accuracy"] for e in evidence}
+    topic_scores = {(_subject(e["subject"]), e["topic"]): 1 - e["accuracy"] for e in evidence if _subject(e["subject"]) in subjects}
+    topic_reasons = {(_subject(e["subject"]), e["topic"]): f"بر اساس {e['attempted']} پاسخ آزمون شما؛ دقت {round(e['accuracy'] * 100)}٪" for e in evidence if _subject(e["subject"]) in subjects}
     # Manual mistakes identify topics but do not invent an accuracy denominator.
     for row in db.query(WrongAnswer).filter(WrongAnswer.student_id == user_id,
             WrongAnswer.created_at >= datetime.utcnow() - timedelta(days=90)).all():
-        topic_scores.setdefault((row.subject, row.topic or "مرور مباحث"), 0.65)
+        subject = _subject(row.subject)
+        if subject in subjects:
+            key = (subject, row.topic or "مرور مباحث")
+            topic_scores.setdefault(key, 0.65)
+            topic_reasons.setdefault(key, "مبحث پاسخ غلط ثبت‌شدهٔ شما")
     for subject in subjects:
         if not any(s == subject for s, _ in topic_scores):
             rating = confidence.get(subject, completion.get(subject, 50))
@@ -108,9 +118,13 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                 weakness = 0.5
             matching_books = [b for b in books if b["subject"] == subject]
             matching_books.sort(key=lambda b: (b["grade"] == _grade(student), b["grade"] == 33), reverse=True)
-            topics = list(dict.fromkeys(r["topic"] for b in matching_books for r in b["ranges"] if r["topic"]))[:3]
+            topics = list(dict.fromkeys(r["topic"] for b in matching_books for r in b["ranges"] if specific_topic(r["topic"], subject)))[:3]
             for topic in topics or ["مرور مباحث"]:
                 topic_scores[(subject, topic)] = weakness
+                source = next((b["book"] for b in matching_books if any(r["topic"] == topic for r in b["ranges"])), None)
+                topic_reasons[(subject, topic)] = (f"مبحث ثبت‌شده در کتاب {source}" if source else "مرور کلی درس؛ مبحث دقیق یا نتیجهٔ آزمون هنوز ثبت نشده")
+                if subject in confidence or subject in completion:
+                    topic_reasons[(subject, topic)] += "؛ اولویت بر اساس خودارزیابی شما"
 
     profile_hours, windows, fixed, requested_minutes = {}, [], [], []
     for day in range(7):
@@ -198,7 +212,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     for exam in exams:
         data = decoded(exam.results, {})
         for entry in data.get("subjects", []):
-            subject = entry if isinstance(entry, str) else entry.get("name", "")
+            subject = _subject(entry if isinstance(entry, str) else entry.get("name", ""))
             deadlines[subject] = min(deadlines.get(subject, exam.date), exam.date)
             if isinstance(entry, dict):
                 mock_topics[_subject(subject)].extend(entry.get("topics") or [])
@@ -217,6 +231,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
         topic_scores = {key: value for key, value in topic_scores.items() if key[0] != subject}
         for topic in dict.fromkeys(topics):
             topic_scores[(subject, topic)] = max((score for t, score in existing.items() if _topic_score(topic, t)), default=0.5)
+            topic_reasons[(subject, topic)] = "مبحث آزمون پیش‌رو" + (f"؛ منبع: {outline['document']}" if outline and topic in outline["topics"].get(subject, []) else "؛ آزمون ثبت‌شدهٔ شما")
     # Reserve one timed mock and a correction session in a normal study week.
     exam_in_week = next((e for e in exams if e.date <= week_start + timedelta(days=6)), None)
     available_dates = [week_start + timedelta(days=d) for d in range(7)
@@ -300,7 +315,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                 "deadline": pkg["deadline"].isoformat() if pkg["deadline"] else None,
                 "requires_task": previous,
                 "forgetting_risk": min(1, max(0, pkg["days_since"]) / 14),
-                "reason": f"نیاز به تمرین {round(pkg['weakness'] * 100)}٪؛ مرور برای حفظ یادگیری"})
+                "reason": topic_reasons.get((subject, _topic), "تکمیل کار ثبت‌شدهٔ شما")})
                 previous = task_id
     try:
         # Standard focus block is 1.5h unless the student set their own limit.
@@ -395,11 +410,14 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                          if b["day"] == d and b.get("type") in ("study", "test"))) for d in range(7)]
     capacity_warnings = [f"{DAYS[d]}: از هدف {requested_minutes[d]} دقیقه، {workload[d] + completed_minutes[d]} دقیقه قابل برنامه‌ریزی یا انجام‌شده است؛ زمان آزاد با استراحت‌ها و فعالیت‌های ثابت کافی نیست."
                          for d in range(7) if requested_minutes[d] - workload[d] - completed_minutes[d] > 30]
+    grounding_warnings = []
+    if student.get("testExams") and not outline and not mock_topics:
+        grounding_warnings.append("برنامهٔ معتبرِ آزمون انتخابی شما برای سه هفتهٔ آینده در منابع نیست؛ این هفته بر اساس نتایج شما و مباحث موجود در کتاب‌ها ساخته شد. برنامهٔ جدید آزمون را بارگذاری یا مباحث آن را ثبت کنید.")
     return {"week_start": week_start.isoformat(), "blocks": protected + blocks, "llm_used": False,
             "daily_minutes": workload, "target_daily_minutes": round(daily_hours * 60),
             "completed_minutes": [completed_minutes[d] for d in range(7)], "daily_targets": requested_minutes,
             "mock_source": outline["document"] if outline else None,
             "source_books": source_books, "planner": "adaptive-v3", "evidence": evidence,
-            "warnings": result.warnings + resource_warnings + capacity_warnings, "unscheduled": result.unscheduled,
-            "note": "برنامه بر اساس زمان آزاد، نتایج آزمون و کارهای ثبت‌شده ساخته شد.",
+            "warnings": result.warnings + resource_warnings + capacity_warnings + grounding_warnings, "unscheduled": result.unscheduled,
+            "note": "برنامه بر اساس زمان آزاد، نتایج آزمون و کارهای ثبت‌شده ساخته شد. " + ("مباحث آزمون پیش‌رو اعمال شد." if mock_topics else "برنامهٔ آزمون پیش‌رو در منابع پیدا نشد؛ انتخاب مبحث از نتایج شما و فهرست کتاب‌های موجود است."),
             "exams": [{"title": e.title, "date": e.date.isoformat()} for e in exams]}
