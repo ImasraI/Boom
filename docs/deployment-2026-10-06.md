@@ -30,7 +30,7 @@ Backend dependencies did not change; VM `pip check` passed.
 
 ## Verification
 
-- Full local suite after the history correction: 431 backend tests passed, 3 skipped; 21 frontend tests
+- Full local suite after the history correction: 431 backend tests passed, 3 skipped; 22 frontend tests
   passed. TypeScript, explicit Cloudflare production build, dependency
   consistency, changed-source/bundle secret-pattern scan and diff checks
   passed.
@@ -119,6 +119,11 @@ Signup previously cached its preferences only in the browser. Signup, login and
 boot now migrate a complete browser-only profile to an empty server profile,
 using version checks and account-change guards. Existing server preferences win.
 Resetting an account is unnecessary and would lose useful history.
+
+The profile editor also uses the signup study goal for unset weekday sliders,
+instead of silently proposing three hours on every day. Explicit daily overrides
+and rest days remain intact. Saving a legacy profile without a global goal
+stores its chosen daily-hours average as well as the individual day settings.
 
 The candidate passed a VM test using a temporary SQLite backup of the actual
 account history and the actual shared corpus, without modifying production

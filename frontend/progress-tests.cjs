@@ -68,6 +68,17 @@ test('existing server preferences win and switching accounts prevents migration'
   assert.equal(writes, 0);
 });
 
+test('profile defaults retain the signup goal and explicit rest days', () => {
+  const sync = harness().load('./profileSync');
+  const days = ['شنبه', 'یکشنبه', 'دوشنبه', 'سهشنبه', 'چهارشنبه', 'پنجشنبه', 'جمعه'];
+  assert.equal(sync.initialDailyHours({studyHours:'۸ ساعت'}, days)['شنبه'], 8);
+  const resolved = sync.initialDailyHours({studyHours:'8', dailyHours:{'جمعه':0,'0':6,'سه شنبه':5}}, days);
+  assert.equal(resolved['جمعه'], 0);
+  assert.equal(resolved['دوشنبه'], 6);
+  assert.equal(resolved['سهشنبه'], 5);
+  assert.equal(resolved['شنبه'], 8);
+});
+
 test('account caches isolate two students and late writes stay with original account', () => {
   const h = harness(); h.login('one');
   const storage = h.load('./accountStorage');

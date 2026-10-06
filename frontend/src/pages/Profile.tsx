@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { NavFn, SignupData } from "../types";
-import { pullServerProfile, pushProfile, toSignupData as toSignupPatch } from "../profileSync";
+import { pullServerProfile, pushProfile, toSignupData as toSignupPatch, initialDailyHours } from "../profileSync";
 import { SUBJECTS_BY_MAJOR } from "../data";
 import { PREFERENCES_CHANGED_EVENT, readPreferences, playFeedback, updatePreferences, SoundIcon } from "../components/Experience";
 import { apiUrl, authHeaders } from "../api";
@@ -62,7 +62,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
 
   // Lifestyle
   const [wakeTime, setWakeTime] = useState(userData?.wakeTime ?? "");
-  const [dailyHours, setDailyHours] = useState<Record<string, number>>(() => userData?.dailyHours ?? Object.fromEntries(DAYS_FA.map(d => [d, 3])));
+  const [dailyHours, setDailyHours] = useState<Record<string, number>>(() => initialDailyHours(userData, DAYS_FA));
   const [maxConsec, setMaxConsec] = useState(userData?.maxConsec ?? 2);
   const [breakStyle, setBreakStyle] = useState(userData?.breakStyle ?? "");
   const [sleepHours, setSleepHours] = useState(userData?.sleepHours ?? 7);
@@ -142,6 +142,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
       school,
       wakeTime,
       dailyHours,
+      studyHours: userData?.studyHours || String(Math.round(Object.values(dailyHours).reduce((sum, hours) => sum + hours, 0) / 7 * 10) / 10),
       maxConsec,
       breakStyle,
       sleepHours,

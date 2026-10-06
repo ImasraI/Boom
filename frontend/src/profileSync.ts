@@ -12,6 +12,15 @@ import type { SignupData } from "./types";
 
 const VERSION_KEY = "boom-profile-version";
 
+export function initialDailyHours(data: Partial<SignupData> | null, days: readonly string[]): Record<string, number> {
+  const raw = String(data?.studyHours || "4").replace(/[۰-۹٠-٩]/g, digit =>
+    String("۰۱۲۳۴۵۶۷۸۹".includes(digit) ? "۰۱۲۳۴۵۶۷۸۹".indexOf(digit) : "٠١٢٣٤٥٦٧٨٩".indexOf(digit)));
+  const goal = Math.max(0.5, Math.min(16, Number(raw.match(/[0-9]+(?:\.[0-9]+)?/)?.[0] || 4)));
+  const saved = data?.dailyHours ?? {};
+  return Object.fromEntries(days.map((day, index) => [day,
+    saved[day] ?? (index === 3 ? saved["سه شنبه"] ?? saved["سه‌شنبه"] : undefined) ?? saved[String((index + 5) % 7)] ?? saved["*"] ?? goal]));
+}
+
 export interface ServerProfile {
   name?: string | null;
   major?: string | null;
