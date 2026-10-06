@@ -193,7 +193,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     completed_minutes = defaultdict(int)
     for row in progress:
         if week_start <= row.date and row.actual_minutes > 0:
-            key = (row.subject, row.topic or "مرور مباحث", row.task_type)
+            key = (_subject(row.subject), row.topic or "مرور مباحث", row.task_type)
             weekly_actual[key] += row.actual_minutes
             day_key = str(row.date.weekday())
             if not any(row.client_ref.endswith(":" + b["id"]) for b in protected):
@@ -201,7 +201,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                 profile_hours[day_key] = max(0, profile_hours[day_key] - row.actual_minutes / 60)
     last_seen = {}
     for row in sessions:
-        key = (row.subject_name or "", row.topic_name or "مرور مباحث")
+        key = (_subject(row.subject_name), row.topic_name or "مرور مباحث")
         if row.completion_status == "completed" and (row.actual_minutes or row.duration_minutes or 0) > 0:
             studied.add(key)
             last_seen[key] = row.started_at.date()
@@ -218,13 +218,17 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
             recovered[row.source_ref] += row.actual_minutes
     calendar = db.get(StudentCalendar, user_id)
     manual_refs = set()
+    other_week_reservations = []
     if calendar:
         from app.planner.calendar import protected_blocks
         for iso, saved in decoded(calendar.weeks, {}).items():
             start = date.fromisoformat(iso)
             manual_refs.update(f"{start + timedelta(days=b['day'])}:{b['id']}" for b in protected_blocks(saved))
+            if start != week_start:
+                other_week_reservations.extend(b for b in saved
+                    if start + timedelta(days=b['day']) >= now.date())
     for row in progress:
-        key = (row.subject, row.topic or "مرور مباحث")
+        key = (_subject(row.subject), row.topic or "مرور مباحث")
         if row.status == "completed":
             if row.task_type == "study":
                 studied.add(key)
@@ -250,37 +254,56 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
             "reason": row.description})
 
     exams = db.query(Assessment).filter(Assessment.student_id == user_id,
-        Assessment.date >= week_start, Assessment.date < week_start + timedelta(days=21)).all()
+        Assessment.date >= max(week_start, now.date()),
+        Assessment.date < week_start + timedelta(days=21)).order_by(Assessment.date, Assessment.id).all()
     deadlines = {}
     mock_topics = defaultdict(list)
+    mock_sources = {}
+
+    def add_exam_topics(subject, topics, exam_date, source):
+        if not isinstance(topics, list):
+            return
+        topics = [topic.strip() for topic in topics if isinstance(topic, str) and topic.strip()]
+        # A later exam must not add its chapters to the nearest exam's deadline.
+        previous_date = deadlines.get(subject)
+        if previous_date and previous_date < exam_date:
+            return
+        if previous_date is None or exam_date < previous_date:
+            mock_topics[subject] = []
+            mock_sources[subject] = {}
+        deadlines[subject] = exam_date
+        mock_topics[subject].extend(topics)
+        mock_sources.setdefault(subject, {}).update({topic: source for topic in topics})
+
     for exam in exams:
         data = decoded(exam.results, {})
         for entry in data.get("subjects", []):
-            subject = _subject(entry if isinstance(entry, str) else entry.get("name", ""))
-            deadlines[subject] = min(deadlines.get(subject, exam.date), exam.date)
-            if isinstance(entry, dict):
-                mock_topics[_subject(subject)].extend(entry.get("topics") or [])
+            if isinstance(entry, (dict, str)):
+                subject = _subject(entry if isinstance(entry, str) else entry.get("name", ""))
+                topics = (entry.get("topics") or []) if isinstance(entry, dict) else []
+                add_exam_topics(subject, topics,
+                                exam.date, "آزمون ثبت‌شدهٔ شما")
     # Already-read mock documents can carry a structured topic outline. Use
     # their cached extraction without asking a model to invent assignments.
     from app.planner.mock_outline import next_mock_outline
-    outline = next_mock_outline(student, week_start)
+    outline = next_mock_outline(student, max(week_start, now.date()))
     if outline:
         for subject, topics in outline["topics"].items():
-            mock_topics[subject].extend(topics)
-            deadlines[subject] = min(deadlines.get(subject, outline["date"]), outline["date"])
+            add_exam_topics(subject, topics, outline["date"], f"منبع: {outline['document']}")
     for subject, topics in mock_topics.items():
-        if subject not in subjects:
+        if subject not in subjects or not topics:
             continue
         existing = {t: score for (s, t), score in topic_scores.items() if s == subject}
         topic_scores = {key: value for key, value in topic_scores.items() if key[0] != subject}
         for topic in dict.fromkeys(topics):
             topic_scores[(subject, topic)] = max((score for t, score in existing.items() if _topic_score(topic, t)), default=0.5)
-            topic_reasons[(subject, topic)] = "مبحث آزمون پیش‌رو" + (f"؛ منبع: {outline['document']}" if outline and topic in outline["topics"].get(subject, []) else "؛ آزمون ثبت‌شدهٔ شما")
+            topic_reasons[(subject, topic)] = "مبحث آزمون پیش‌رو؛ " + mock_sources[subject][topic]
+    mock_topics = {subject: topics for subject, topics in mock_topics.items() if subject in subjects and topics}
     # Reserve one timed mock and a correction session in a normal study week.
     exam_in_week = next((e for e in exams if e.date <= week_start + timedelta(days=6)), None)
     available_dates = [week_start + timedelta(days=d) for d in range(7)
                        if profile_hours[str((week_start + timedelta(days=d)).weekday())] >= 1.5
-                       and week_start + timedelta(days=d) >= date.today()]
+                       and week_start + timedelta(days=d) >= now.date()]
     mock_day = exam_in_week.date if exam_in_week else (outline["date"] if outline and outline["date"] <= week_start + timedelta(days=6)
                                                      else (available_dates[-1] if available_dates else None))
     if mock_day:
@@ -301,8 +324,10 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     chosen = preferred_blocks.get(student.get("breakStyle"))
     preferred_block, break_minutes = chosen or (max_block, 15)
     max_block = min(max_block, preferred_block)
-    minimum = min(MIN_FRAGMENT_MINUTES, max_block) if max_block >= 30 else 0
-    quantum = 30 if max_block >= 30 else 5
+    # Short focus preferences retain their cap and break length, but a review
+    # must not become 25+5 minutes. Rebalance useful 15–25 minute parts instead.
+    minimum = MIN_FRAGMENT_MINUTES if max_block >= 30 else 15
+    quantum = 30 if max_block >= 30 else 15
     study_ratio = {"بیشتر تمرین": 0.3, "بیشتر مطالعه نظری": 0.65}.get(student.get("studyStyle"), 0.45)
     total = max(0, int(sum(profile_hours.values()) * 60)
                 - sum(t["planned_minutes"] for t in candidates))
@@ -371,9 +396,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                 "forgetting_risk": min(1, max(0, pkg["days_since"]) / 14),
                 "reason": topic_reasons.get((subject, _topic), "تکمیل کار ثبت‌شدهٔ شما")})
                 previous = task_id
-    # Thin-fragment policy only for the DEFAULT 1.5h standard. A student who
-    # explicitly asked for 25-minute pomodoro blocks wants exactly that, so the
-    # engine must not merge a leftover into a longer block or drop it.
+    # The hard cap still honours explicitly chosen short focus blocks.
     result = generate_plan(PlannerInput(profile=profile, tasks=candidates, fixed_events=fixed,
         studied_topics=studied, max_block_minutes=max_block, default_break_minutes=break_minutes,
         min_block_minutes=minimum,
@@ -411,7 +434,8 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
         elif blocks[-1]["source_ref"] == "weekly-correction":
             blocks[-1]["title"] = "تحلیل آزمون و مرور پاسخ‌های غلط"
     from app.planner.resources import assign_test_resources
-    source_books, resource_warnings = assign_test_resources(db, student, blocks, progress, books=books, reserved=protected + statics)
+    source_books, resource_warnings = assign_test_resources(db, student, blocks, progress, books=books,
+        reserved=protected + statics + other_week_reservations)
     for block in blocks:
         if block["task_type"] != "test" or block["subject"] == "آزمون":
             continue

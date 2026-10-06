@@ -380,3 +380,108 @@ def test_recognisable_chapter_is_preferred_to_high_volume_ocr_noise(db, tmp_path
     _write_questions(directory, 3, [_question(n) for n in range(200, 250)], "تابع")
     result = adaptive.build_week(db, 1, {}, 4, date(2099, 4, 4), [], now=datetime(2099, 4, 3))
     assert all(b["topic"] == "تابع" for b in result["blocks"] if b["subject"] == "ریاضی")
+
+
+def test_indexed_only_books_keep_grade_and_track_filters(db, monkeypatch):
+    run = {"q_from": 1, "q_to": 300, "page_from": 1, "page_to": 30, "topic": "تابع"}
+    monkeypatch.setattr(resources, "_indexed_ranges", lambda user_id: {
+        "شیمی ۳ مبتکران": [dict(run)], "شیمی ۳ جامع مبتکران": [dict(run)], "ریاضی ۱ تجربی": [dict(run)],
+        "فیزیک ۱ ریاضی خیلی سبز": [dict(run)], "شیمی ۱ خیلی سبز": [dict(run)]})
+    books = resources.available_books(db, {"grade": "دهم", "major": "تجربی"}, 1)
+    assert {b["book"] for b in books} == {"ریاضی ۱ تجربی", "شیمی ۱ خیلی سبز"}
+    assert all(b["grade"] == 10 for b in books)
+
+
+def test_catalog_only_book_keeps_explicit_grade_without_raw_pdf(db):
+    db.add(BookCatalog(book_id="شیمی ۳ مبتکران", subject="شیمی", chapter="تعادل",
+                       question_range_start=1, question_range_end=100))
+    db.commit()
+    assert resources.available_books(db, {"grade": "دهم"}, 1) == []
+
+
+def test_nearest_registered_exam_does_not_include_later_exam_topics(db):
+    week = date(2099, 4, 4)
+    # Insert the later exam first to exercise ordering, not insertion order.
+    db.add_all([
+        Assessment(student_id=1, title="آزمون بعدتر", date=week + timedelta(days=12),
+                   results=json.dumps({"subjects": [{"name": "ریاضی", "topics": ["مشتق"]}]})),
+        Assessment(student_id=1, title="آزمون نزدیک", date=week + timedelta(days=6),
+                   results=json.dumps({"subjects": [{"name": "ریاضی", "topics": ["تابع"]}]})),
+        BookCatalog(book_id="ریاضی خیلی سبز", subject="ریاضی", chapter="تابع", question_range_start=1, question_range_end=300),
+        BookCatalog(book_id="حسابان خیلی سبز", subject="ریاضی", chapter="مشتق", question_range_start=301, question_range_end=600),
+    ])
+    db.commit()
+    result = adaptive.build_week(db, 1, {}, 4, week, [], now=datetime(2099, 4, 3))
+    math = [b for b in result["blocks"] if b["subject"] == "ریاضی"]
+    assert math and all(b["topic"] == "تابع" for b in math)
+
+
+def test_pomodoro_week_keeps_useful_remainders_and_twenty_five_minute_cap(db):
+    result = adaptive.build_week(db, 1, {"breakStyle": "پومودورو ۲۵ دقیقه"}, 4,
+                                 date(2099, 4, 4), [], now=datetime(2099, 4, 3))
+    assert all(15 <= round(b["duration"] * 60) <= 25 for b in result["blocks"])
+    assert all(210 <= minutes <= 240 for minutes in result["daily_minutes"])
+
+
+def test_other_saved_week_reserves_questions_but_rebuilding_current_week_does_not(db):
+    week = date(2099, 4, 4)
+    db.add(BookCatalog(book_id="شیمی خیلی سبز", subject="شیمی", chapter="تعادل",
+                       question_range_start=1, question_range_end=1000))
+    reserved = {"id": "other-week", "day": 1, "startHour": 8, "duration": 1, "type": "test", "origin": "generated",
+                "title": "تست‌های هفته دیگر", "resource": "شیمی خیلی سبز", "question_start": 1, "question_end": 20}
+    current = {**reserved, "id": "replace-this-week", "question_start": 21, "question_end": 40}
+    db.add(StudentCalendar(student_id=1, weeks=json.dumps({str(week): [current], str(week + timedelta(days=7)): [reserved]}), statics="[]"))
+    db.commit()
+    result = adaptive.build_week(db, 1, {}, 4, week, [], now=datetime(2099, 4, 3))
+    practice = [b for b in result["blocks"] if b.get("question_start")]
+    assert practice and min(b["question_start"] for b in practice) == 21
+
+
+@pytest.mark.parametrize("source", ["progress", "session"])
+def test_completed_study_subject_alias_unlocks_book_practice(db, source):
+    week = date(2099, 4, 4)
+    db.add(BookCatalog(book_id="ریاضی خیلی سبز", subject="ریاضی", chapter="تابع",
+                       question_range_start=1, question_range_end=1000))
+    if source == "progress":
+        db.add(TaskProgress(student_id=1, client_ref="learned-function", date=date(2026, 10, 5),
+            subject="math", topic="تابع", task_type="study", planned_minutes=60, actual_minutes=60, status="completed"))
+    else:
+        from app.routers.profile import SessionIn, create_session
+        create_session(SessionIn(subject="math", topic="تابع", started_at="2026-10-05T10:00:00",
+                                 ended_at="2026-10-05T11:00:00", completion_status="completed"), SimpleNamespace(id=1), db)
+    db.commit()
+    result = adaptive.build_week(db, 1, {}, 4, week, [], now=datetime(2099, 4, 3))
+    math = [b for b in result["blocks"] if b["subject"] == "ریاضی"]
+    assert math and any(b.get("question_start") for b in math)
+    assert not any(b["task_type"] == "study" for b in math)
+
+
+@pytest.mark.parametrize("cached_offset", [2, 9])
+def test_registered_and_cached_mock_outlines_keep_nearest_date_topics(db, monkeypatch, cached_offset):
+    from app.planner import mock_outline
+    week = date(2099, 4, 4)
+    monkeypatch.setattr(mock_outline, "next_mock_outline", lambda student, start: {
+        "date": week + timedelta(days=cached_offset), "document": "برنامه آزمون", "topics": {"ریاضی": ["مشتق"]}})
+    db.add(Assessment(student_id=1, title="آزمون شخصی", date=week + timedelta(days=6),
+        results=json.dumps({"subjects": [{"name": "ریاضی", "topics": ["تابع"]}]})))
+    db.commit()
+    result = adaptive.build_week(db, 1, {}, 4, week, [], now=datetime(2099, 4, 3))
+    math = [b for b in result["blocks"] if b["subject"] == "ریاضی"]
+    assert math and all(b["topic"] == ("مشتق" if cached_offset < 6 else "تابع") for b in math)
+    assert all(("منبع: برنامه آزمون" if cached_offset < 6 else "آزمون ثبت‌شده") in b["description"] for b in math)
+
+
+def test_verified_weakness_gets_more_time_and_numbered_practice_than_strength(db):
+    mock = GeneratedMock(student_id=1, title="آزمون معتبر", questions=json.dumps([
+        {"_id": 1, "subject": "ریاضی", "topic": "تابع", "answer": 1, "verification_status": "verified"},
+        {"_id": 2, "subject": "فیزیک", "topic": "حرکت", "answer": 1, "verification_status": "verified"}]))
+    db.add(mock); db.flush()
+    db.add(MockAttempt(student_id=1, mock_id=mock.id, answers=json.dumps({"1": 1, "2": 2})))
+    db.add_all([BookCatalog(book_id=subject + " خیلی سبز", subject=subject, chapter=topic,
+        question_range_start=1, question_range_end=1000) for subject, topic in (("ریاضی", "تابع"), ("فیزیک", "حرکت"), ("شیمی", "تعادل"))])
+    db.commit()
+    result = adaptive.build_week(db, 1, {}, 4, date(2099, 4, 4), [], now=datetime(2099, 4, 3))
+    minutes = lambda subject: sum(round(b["duration"] * 60) for b in result["blocks"] if b["subject"] == subject)
+    questions = lambda subject: sum(b["count"] for b in result["blocks"] if b["subject"] == subject and b.get("question_start"))
+    assert minutes("فیزیک") > minutes("ریاضی")
+    assert questions("فیزیک") > questions("ریاضی")

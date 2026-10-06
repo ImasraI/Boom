@@ -51,6 +51,29 @@ def _grade(student):
                  if word in text or str(number) in text), 12)
 
 
+def _named_book_grade(name):
+    """Keep explicit grade information when only OCR/index/catalogue exists."""
+    text = _norm(name)
+    named_grades = set(re.findall(r"(?<!\w)(دهم|یازدهم|دوازدهم)(?!\w)", text))
+    if "سه پایه" in text or len(named_grades) == 3:
+        return 33
+    for grade, word in ((12, "دوازدهم"), (11, "یازدهم"), (10, "دهم")):
+        if word in text or re.search(r"(?<!\d)" + str(grade) + r"(?!\d)", text):
+            return grade
+    match = re.search(r"(?:شیمی|فیزیک|زیست|ریاضی|حسابان|هندسه)\s*([123])(?=\D|$)", text)
+    return {1: 10, 2: 11, 3: 12}[int(match[1])] if match else 33
+
+
+def _named_book_allowed(name, student):
+    text, major = _norm(name), _norm(student.get("major") or "ریاضی")
+    if any(track in text and track not in major for track in ("تجربی", "انسانی")):
+        return False
+    if "فیزیک" in text and "ریاضی" in text and "ریاضی" not in major:
+        return False
+    grade = _named_book_grade(name)
+    return grade == 33 or grade <= _grade(student)
+
+
 def specific_topic(topic, subject):
     """OCR labels and subject names are not a chapter-selection signal."""
     value = _norm(topic)
@@ -165,8 +188,6 @@ def _processed_books(student):
     Plain OCR prose alone is not evidence of printed question numbers.
     """
     root = Path(get_settings().OCR_DIR)
-    major = _norm(student.get("major"))
-    branch = "tajrobi" if "تجربی" in major else "ensani" if "انسانی" in major else "riazi"
     books, seen = [], set()
     for directory in sorted(root.iterdir()) if root.exists() else []:
         if not directory.is_dir():
@@ -178,14 +199,9 @@ def _processed_books(student):
         subject = _subject(name)
         if subject not in _SUBJECTS:
             continue
-        if "تجربی" in normalized and branch != "tajrobi":
+        if not _named_book_allowed(name, student):
             continue
-        if "فیزیک" in normalized and "ریاضی" in normalized and branch != "riazi":
-            continue
-        match = re.search(r"(?:شیمی|فیزیک|زیست|ریاضی|حسابان|هندسه)\s*([123])(?=\D|$)", normalized)
-        grade = {1: 10, 2: 11, 3: 12}[int(match[1])] if match else 33
-        if grade != 33 and grade > _grade(student):
-            continue
+        grade = _named_book_grade(name)
         ranges = _ocr_ranges(name)
         if not ranges:
             continue
@@ -292,9 +308,11 @@ def available_books(db, student, user_id=None):
     for row in db.query(BookCatalog).order_by(BookCatalog.book_id).all():
         entry = by_name.get(row.book_id)
         if entry is None:
-            if row.book_id in known_pdfs:
+            if row.book_id in known_pdfs or Path(row.book_id).stem.strip() in known_stems:
                 continue  # Known but ineligible branch/grade; do not re-add it.
-            entry = {"book": row.book_id, "subject": _subject(row.subject), "grade": 33, "ranges": []}
+            if not _named_book_allowed(row.book_id, student):
+                continue
+            entry = {"book": row.book_id, "subject": _subject(row.subject), "grade": _named_book_grade(row.book_id), "ranges": []}
             books.append(entry)
             by_name[row.book_id] = entry
         start, end = row.question_range_start, row.question_range_end
@@ -319,8 +337,8 @@ def available_books(db, student, user_id=None):
         # Never reintroduce a shared PDF excluded for its track/grade above.
         if name not in known_stems and name not in by_name:
             subject = _subject(name)
-            if subject in _SUBJECTS:
-                books.append({"book": name, "subject": subject, "grade": 33, "ranges": ranges})
+            if subject in _SUBJECTS and _named_book_allowed(name, student):
+                books.append({"book": name, "subject": subject, "grade": _named_book_grade(name), "ranges": ranges})
     return books
 
 
