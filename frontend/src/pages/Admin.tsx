@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiUrl, authHeaders, readApiError } from "../api";
+import { apiUrl, apiJson, authHeaders, readApiError } from "../api";
 import type { NavFn } from "../types";
 import CorruptQuestions from "../components/CorruptQuestions";
 
@@ -56,6 +56,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [entries, setEntries] = useState<AllowEntry[]>([]);
   const [payload, setPayload] = useState<UsersPayload | null>(null);
   const [pool, setPool] = useState<PoolPayload | null>(null);
+  const [poolPollError, setPoolPollError] = useState("");
   const [sms, setSms] = useState<SmsCredit | null>(null);
   const [messageId, setMessageId] = useState("");
   const [delivery, setDelivery] = useState<SmsDelivery | null>(null);
@@ -111,12 +112,16 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const generating = restocking || Boolean(pool?.running);
   useEffect(() => {
     if (!generating) return;
+    let polling = false;
+    let alive = true;
     poolTimer.current = window.setInterval(async () => {
+      if (polling) return;
+      polling = true;
       try {
-        const res = await fetch(apiUrl("/api/admin/pool"), { headers: { ...authHeaders() } });
-        if (res.ok) {
-          const data: PoolPayload = await res.json();
+        const data = await apiJson<PoolPayload>("/api/admin/pool");
+        if (alive) {
           setPool(data);
+          setPoolPollError("");
           if (data.running === false) {
             setRestocking(false);
             setCancelRequested(false);
@@ -124,9 +129,11 @@ export default function Admin({ nav }: { nav: NavFn }) {
             setCancelRequested(Boolean(data.cancel_requested));
           }
         }
-      } catch { /* keep polling */ }
+      } catch (error) {
+        if (alive) setPoolPollError(error instanceof Error ? error.message : "وضعیت تولید دریافت نشد.");
+      } finally { polling = false; }
     }, 3000);
-    return () => { if (poolTimer.current) window.clearInterval(poolTimer.current); };
+    return () => { alive = false; if (poolTimer.current) window.clearInterval(poolTimer.current); };
   }, [generating]);
 
   async function add() {
@@ -389,6 +396,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
           <label>تعداد دفترچه؛ صفر = پیوسته<input aria-label="تعداد دفترچه" type="number" min={0} step={1} value={poolCount} onChange={e => setPoolCount(Math.max(0, Math.floor(Number(e.target.value))))} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]" /></label>
         </div>
         <p className="text-xs text-[var(--muted)] mb-4">فقط انتخاب‌های بالا تولید می‌شوند. حالت پیوسته تا لغو یا توقف سرویس ادامه دارد. بانک سوال: {(pool?.question_bank?.active ?? 0).toLocaleString("fa-IR")} فعال · {(pool?.question_bank?.corrupt ?? 0).toLocaleString("fa-IR")} گزارش‌شده</p>
+        {poolPollError && <p role="alert" className="text-xs text-red-400 mb-4">{poolPollError}</p>}
         {/* Aggregate fill across every shelf. While a sweep is producing, the
             bar shimmers and the live run state (booklets done, shelf in
             flight, elapsed) sits right underneath it. */}
