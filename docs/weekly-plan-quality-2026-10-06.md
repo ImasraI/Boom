@@ -8,7 +8,7 @@ block is a high-quality, exam-specific assignment.
 
 ## Method
 
-Nine scenarios ran on the VM using a temporary SQLite backup of the actual
+Ten scenarios ran on the VM using a temporary SQLite backup of the actual
 account history and the actual shared OCR/question index. Goal and preference
 changes applied only to that copy. The live profile, saved calendar, accounts,
 history and manual activity were not rewritten. The generated block titles,
@@ -31,6 +31,7 @@ the real API correctly rejects conflicting fixed activities.
 | Eight-hour goal, five school days | 450 on school days, 480 otherwise | 18 | 172 |
 | Grade 10 | 240 every day | 9 | 97 |
 | Humanities without question sources | 240 every day | 0 | 0 |
+| Eight-hour goal, registered midweek math exam | 480 every day | 17 | 67 |
 
 The question totals exclude the timed weekly mock, whose count is a target
 rather than a claim that a source booklet was retrieved. No overlaps, duplicate
@@ -38,6 +39,15 @@ in-week question ranges or inaccurate printed-range counts remained in these
 scenarios. Explicit preferences changed the study/practice mix as intended.
 Pomodoro blocks remained between 15 and 25 minutes, with the selected five-minute
 breaks; no generated five-minute fragments remained.
+
+A separate midweek-exam regression with ample questions exposed a false shortage: with eight available
+hours per day and sufficient book questions, the old plan ended with 330 minutes
+on Thursday and none on Friday. The corrected case retains 450–480 minutes every
+day. Dated timed mocks retain their hard date; ordinary chapter preparation uses
+the exam date for priority, and any work placed later is explicitly described as
+post-exam consolidation rather than preparation for an upcoming exam. The
+corresponding real-corpus scenario also reaches eight hours, but only 67 numbered
+questions match its selected chapters; this exposes the chapter coverage limit.
 
 ## Bugs corrected
 
@@ -56,6 +66,14 @@ breaks; no generated five-minute fragments remained.
 5. Completed work recorded as `math` did not unlock the same topic in `ریاضی`.
    Session and task-progress subject aliases now use the same normalization as
    book selection, avoiding unnecessary restudy before numbered practice.
+6. An early exam imposed a hard cutoff on an entire week's chapter workload,
+   leaving later days empty and issuing a misleading free-time warning. Chapter
+   preparation now uses a preferred deadline, while dated timed events retain
+   their hard constraints. Later consolidation is labeled and disclosed.
+7. The VM uses UTC, but student calendar times are Tehran-local. Regeneration
+   could schedule work 3.5 hours in the past, or choose the wrong default week at
+   the Saturday boundary. The planner and its overview now use a Tehran clock;
+   authentication and persisted UTC timestamps are unchanged.
 
 Regression cases also verify that a weak subject with verified wrong answers
 receives more time and numbered questions than a corresponding strong subject,
@@ -79,6 +97,6 @@ remain protected.
   numbered-question plan. Complete grade-specific OCR/catalogue data and current
   exam outlines are needed before claiming comparable quality for that track.
 
-Backend validation passed: 440 tests in the full suite plus the separately
-added weakness regression (441 tests total); three unrelated tests were skipped.
+Backend validation covers the full suite, the weakness regression and the
+midweek-exam and UTC-server regressions: **444 passed, 3 skipped**.
 Frontend code did not change in this review. No visual browser check is claimed.

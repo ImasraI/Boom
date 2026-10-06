@@ -9,6 +9,7 @@ from sqlalchemy import select
 from app.auth.database import (StudentProfile, StudySession, TaskProgress, MockAttempt,
                                GeneratedMock, WrongAnswer, Assessment, DailyTask, BankQuestion, StudentCalendar)
 from app.planner.engine import PlannerInput, generate_plan, validate_plan_items
+from app.planner.clock import planner_now
 
 DAYS = ["شنبه", "یکشنبه", "دوشنبه", "سهشنبه", "چهارشنبه", "پنجشنبه", "جمعه"]
 SUBJECTS = {
@@ -103,7 +104,7 @@ def focus_parts(minutes, cap, minimum):
 def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=None, protected=None, commit=True):
     from app.routers.boom_ai import _day_constraints, _occupied_slots
     student = student_state(db, user_id, supplied)
-    now = now or datetime.now()
+    now = now or planner_now()
     protected = protected or []
     # The persisted onboarding goal wins over a stale browser default.
     try:
@@ -239,7 +240,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                 (row.source_ref or "").startswith(("topic-", "weekly-")) or
                 row.client_ref.split(":", 1)[-1].startswith(("topic-", "weekly-"))):
             continue  # Untouched generated proposals are not confirmed missed work.
-        if row.status in ("missed", "partially_completed") or (row.status == "planned" and row.date < date.today()):
+        if row.status in ("missed", "partially_completed") or (row.status == "planned" and row.date < now.date()):
             remaining = max(0, row.planned_minutes - row.actual_minutes - recovered["backlog-" + row.client_ref])
             if remaining:
                 candidates.append({"id": f"backlog-{row.client_ref}", "subject": key[0], "topic": key[1],
@@ -391,7 +392,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
                 "topic": topics_line, "task_type": kind, "planned_minutes": duration,
                 "weakness": pkg["weakness"],
                 "target_count": duration // 3 if kind == "test" else 0,
-                "deadline": pkg["deadline"].isoformat() if pkg["deadline"] else None,
+                "preferred_deadline": pkg["deadline"].isoformat() if pkg["deadline"] else None,
                 "requires_task": previous,
                 "forgetting_risk": min(1, max(0, pkg["days_since"]) / 14),
                 "reason": topic_reasons.get((subject, _topic), "تکمیل کار ثبت‌شدهٔ شما")})
@@ -408,12 +409,18 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     labels = {"study": "مطالعه", "test": "تست", "review": "مرور", "practice": "تمرین"}
     fa = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
     blocks = []
+    post_exam_consolidation = False
     generation_id = uuid4().hex[:12]
     for item in result.items:
         h, m = map(int, item["start"].split(":"))
         # Keep the validated minute exactly. Moving starts after validation
         # can collide with the next activity or a fixed class.
         title = f'{labels.get(item["task_type"], "مطالعه")} {item["subject"]}: {item["topic"]}'
+        reason = item["reason"]
+        if item.get("preferred_deadline") and item["date"] > item["preferred_deadline"]:
+            post_exam_consolidation = True
+            reason = reason.replace("مبحث آزمون پیش‌رو", "تثبیت مبحث پس از آزمون")
+            reason += "؛ این فعالیت پس از تاریخ آزمون برای تثبیت یادگیری است."
         if item.get("parts", 1) > 1:
             title += f' (بخش {item["part"]}/{item["parts"]})'.translate(fa)
         blocks.append({"id": item["id"] + "@" + generation_id, "day": (date.fromisoformat(item["date"]) - week_start).days,
@@ -423,7 +430,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
             "source_ref": item["id"].rsplit("#p", 1)[0],
             "subject": item["subject"], "topic": item["topic"], "task_type": item["task_type"],
             "type": "test" if item["task_type"] == "test" else "study",
-            "count": item["target_count"], "description": item["reason"],
+            "count": item["target_count"], "description": reason,
             "color": "#9B7AAD" if item["task_type"] == "test" else "#e2c983"})
         if blocks[-1]["source_ref"] == "weekly-mock":
             blocks[-1]["title"] = exam_in_week.title if exam_in_week else "آزمون زمان‌دار مباحث هفته"
@@ -458,7 +465,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     for old in progress:
         if any(old.client_ref.endswith(":" + b["id"]) for b in protected):
             continue
-        if old.status == "planned" and week_start <= old.date <= week_start + timedelta(days=6) and old.date >= date.today():
+        if old.status == "planned" and week_start <= old.date <= week_start + timedelta(days=6) and old.date >= now.date():
             old.status = "rescheduled"
     db.flush()
     for block in blocks:
@@ -480,6 +487,8 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     capacity_warnings = [f"{DAYS[d]}: از هدف {requested_minutes[d]} دقیقه، {workload[d] + completed_minutes[d]} دقیقه قابل برنامه‌ریزی یا انجام‌شده است؛ زمان آزاد با استراحت‌ها و فعالیت‌های ثابت کافی نیست."
                          for d in range(7) if requested_minutes[d] - workload[d] - completed_minutes[d] > 30]
     grounding_warnings = []
+    if post_exam_consolidation:
+        grounding_warnings.append("بخشی از کارها برای تثبیت مباحث، پس از تاریخ آزمون قرار گرفت؛ فعالیت‌های پیش از آزمون را در اولویت انجام دهید.")
     if ignored_legacy_evidence:
         grounding_warnings.append("آزمون‌های قدیمیِ تأییدنشده مبنای انتخاب مبحث قرار نگرفتند؛ تاریخچهٔ پاسخ‌ها حفظ شده است.")
     if student.get("testExams") and not outline and not mock_topics:

@@ -485,3 +485,47 @@ def test_verified_weakness_gets_more_time_and_numbered_practice_than_strength(db
     questions = lambda subject: sum(b["count"] for b in result["blocks"] if b["subject"] == subject and b.get("question_start"))
     assert minutes("فیزیک") > minutes("ریاضی")
     assert questions("فیزیک") > questions("ریاضی")
+
+
+def test_midweek_exam_does_not_empty_later_days_or_claim_false_capacity_shortage(db):
+    week = date(2099, 4, 4)
+    db.add(Assessment(student_id=1, title="آزمون میان هفته", date=week + timedelta(days=2),
+        results=json.dumps({"subjects": [{"name": "ریاضی", "topics": ["تابع"]}]})))
+    db.add_all([BookCatalog(book_id=subject + " خیلی سبز", subject=subject, chapter=topic,
+        question_range_start=1, question_range_end=2000) for subject, topic in (("ریاضی", "تابع"), ("فیزیک", "حرکت"), ("شیمی", "تعادل"))])
+    db.commit()
+    result = adaptive.build_week(db, 1, {}, 8, week, [], now=datetime(2099, 4, 3))
+    assert all(450 <= minutes <= 480 for minutes in result["daily_minutes"])
+    assert not any("زمان آزاد با استراحت‌ها" in warning for warning in result["warnings"])
+    assert any(b.get("question_start") and b["subject"] == "ریاضی" and b["day"] <= 2 for b in result["blocks"])
+    later = [b for b in result["blocks"] if b["subject"] == "ریاضی" and b["day"] > 2]
+    assert later and all("پس از آزمون" in b["description"] for b in later)
+    assert all(b["day"] == 2 for b in result["blocks"] if b["source_ref"] == "weekly-mock")
+
+
+def test_utc_server_regeneration_does_not_schedule_past_tehran_time(db, monkeypatch):
+    from datetime import timezone
+    from app.planner import clock
+    class FrozenUTC(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            instant = cls(2026, 10, 6, 10, 30, tzinfo=timezone.utc)
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+    monkeypatch.setattr(clock, "datetime", FrozenUTC)
+    assert clock.planner_now() == datetime(2026, 10, 6, 14)
+    result = adaptive.build_week(db, 1, {}, 4, date(2026, 10, 3), [])
+    assert all(b["day"] > 3 or (b["day"] == 3 and b["startHour"] >= 14 + 1/60) for b in result["blocks"])
+
+
+def test_default_week_uses_tehran_saturday_when_utc_is_still_friday(db, monkeypatch):
+    from datetime import timezone
+    from app.planner import clock
+    from app.routers.boom_ai import WeeklyPlanRequest, generate_weekly_plan
+    class FrozenUTC(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            instant = cls(2026, 10, 9, 21, 45, tzinfo=timezone.utc)
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+    monkeypatch.setattr(clock, "datetime", FrozenUTC)
+    result = generate_weekly_plan(WeeklyPlanRequest(daily_hours=4), SimpleNamespace(id=1), db)
+    assert result["week_start"] == "2026-10-10"

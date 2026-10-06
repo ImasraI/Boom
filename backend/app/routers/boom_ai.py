@@ -1827,8 +1827,9 @@ def generate_weekly_plan(request: WeeklyPlanRequest,
                          current_user: User = Depends(get_current_user),
                          db: Session = Depends(get_db)):
     from app.planner.adaptive import build_week
+    from app.planner.clock import planner_now
     try:
-        today = date.today()
+        today = planner_now().date()
         start = date.fromisoformat(request.week_start) if request.week_start else today - timedelta(days=(today.weekday() + 2) % 7)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid week_start date")
@@ -1857,8 +1858,9 @@ def generate_weekly_plan(request: WeeklyPlanRequest,
 @router.get("/plan-overview")
 def plan_overview(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.planner.adaptive import topic_evidence
+    from app.planner.clock import planner_now
     from app.auth.database import TaskProgress
-    today = date.today()
+    today = planner_now().date()
     exams = db.query(Assessment).filter(Assessment.student_id == current_user.id,
         Assessment.date >= today).order_by(Assessment.date).limit(20).all()
     progress = db.query(TaskProgress).filter(TaskProgress.student_id == current_user.id,

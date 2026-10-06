@@ -52,6 +52,7 @@ class CandidateTask:
     target_count: int = 0             # questions for test/practice tasks
     resource: str = ""                # empty = no resource needed
     deadline: Optional[str] = None    # YYYY-MM-DD, exam urgency
+    preferred_deadline: Optional[str] = None  # preparation priority; later consolidation is allowed
     weakness: float = 0.0             # 0..1 (from mastery/wrong-answer data)
     forgetting_risk: float = 0.0      # 0..1 (days since last practice)
     overdue: float = 0.0              # 0..1 backlog pressure
@@ -140,10 +141,11 @@ def _parse_hhmm(s: str) -> time:
 
 
 def _exam_urgency(task: dict, horizon_days: int = 14, reference_date=None) -> float:
-    if not task.get("deadline"):
+    deadline = task.get("deadline") or task.get("preferred_deadline")
+    if not deadline:
         return 0.0
     try:
-        dl = datetime.fromisoformat(task["deadline"]).date()
+        dl = datetime.fromisoformat(deadline).date()
     except ValueError:
         return 0.0
     days = (dl - (reference_date or datetime.now().date())).days
@@ -305,6 +307,8 @@ def generate_plan(inp: PlannerInput) -> PlannerResult:
                     "priority": priority_of(task, today.date()),
                     "reason": task.get("reason", ""), "part": part, "parts": part,
                 }
+                if task.get("preferred_deadline"):
+                    item["preferred_deadline"] = task["preferred_deadline"]
                 result.items.append(item)
                 task["_items"].append(item)
                 task["_remaining"] -= block
