@@ -25,6 +25,7 @@ import httpx
 import base64
 
 from app.config import get_settings
+from app.rag.provider_quota import block_daily_quota, blocked_quota, quota_identity
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -517,6 +518,7 @@ class GeminiLLMClient(BaseLLMClient):
         self.max_tokens = max_tokens
         self.timeout = timeout
         self.proxy = (proxy or "").strip()
+        self._quota_identity = quota_identity(self.base_url, model, api_key)
         self.client = httpx.Client(
             timeout=timeout,
             follow_redirects=True,
@@ -613,6 +615,10 @@ class GeminiLLMClient(BaseLLMClient):
         self.last_usage = ZERO_USAGE  # stays zero unless a response succeeds
         self.last_error = ""
         last_error = ""
+        blocked = blocked_quota(self._quota_identity)
+        if blocked:
+            self.last_error = blocked[1]
+            return ""
         for attempt in range(1, 5):
             wait_s = 2 * attempt  # default short backoff
             try:
@@ -624,6 +630,7 @@ class GeminiLLMClient(BaseLLMClient):
                         last_error += f" ({reason})"
                     self.last_error = last_error
                     if terminal:
+                        block_daily_quota(self._quota_identity, last_error)
                         logger.error(
                             "Gemini call blocked: %s - not retrying, a per-day "
                             "quota cannot clear inside this request.", last_error)

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
     func,
     inspect,
@@ -280,6 +281,39 @@ class GeneratedMock(Base):
     status = Column(String, nullable=False, default="claimed",
                     server_default="claimed")
     difficulty = Column(String, nullable=False, default="", server_default="")
+    bank_scope = Column(String, nullable=False, default="private", server_default="private")
+    bank_indexed = Column(Boolean, nullable=False, default=False, server_default="0")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BankQuestion(Base):
+    """An independent question; booklet snapshots refer to its stable id."""
+    __tablename__ = "bank_questions"
+    id = Column(Integer, primary_key=True)
+    fingerprint = Column(String, unique=True, nullable=False, index=True)
+    owner_id = Column(Integer, nullable=False, default=0, index=True)
+    major = Column(String, nullable=False, default="", index=True)
+    grade = Column(String, nullable=False, default="")
+    grade_level = Column(Integer, nullable=False, default=12, index=True)
+    difficulty = Column(String, nullable=False, default="konkur", index=True)
+    subject = Column(String, nullable=False, index=True)
+    topic = Column(String, nullable=False, default="")
+    content = Column(Text, nullable=False)
+    verified = Column(Boolean, nullable=False, default=False)
+    status = Column(String, nullable=False, default="active", index=True)
+    uses = Column(Integer, nullable=False, default=0)
+    admin_note = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class QuestionReport(Base):
+    __tablename__ = "question_reports"
+    __table_args__ = (UniqueConstraint("question_id", "student_id", "mock_id", name="uq_question_report_user_mock"),)
+    id = Column(Integer, primary_key=True)
+    question_id = Column(Integer, ForeignKey("bank_questions.id"), nullable=False, index=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    mock_id = Column(Integer, ForeignKey("generated_mocks.id"), nullable=False)
+    reason = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -528,6 +562,8 @@ def ensure_schema() -> None:
     # Difficulty the booklet was generated for - pool rows are matched to
     # requests by (major, difficulty), so it must be persisted.
     _ensure_column("generated_mocks", "difficulty", "VARCHAR DEFAULT ''")
+    _ensure_column("generated_mocks", "bank_scope", "VARCHAR DEFAULT 'private'")
+    _ensure_column("generated_mocks", "bank_indexed", "BOOLEAN DEFAULT 0")
     # Arena Elo snapshot on the user (see record_match_rating); existing DBs
     # backfill at the unrated starting value.
     _ensure_column("users", "rating", "INTEGER DEFAULT 1000")

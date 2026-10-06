@@ -1,0 +1,2 @@
+# Ship the only logo as a real PNG; builds must not depend on Git LFS setup.
+frontend/public/karzar-shield-detailed.png -filter -diff -merge -text

@@ -72,7 +72,7 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
     <aside className="boom-sidebar hidden md:flex flex-col fixed top-0 right-0 bottom-0 w-[220px] bg-[var(--card)] border-r border-[var(--border)] z-30">
       <div className="px-5 pt-7 pb-5 border-b border-[var(--border)]">
         <div className="flex items-center gap-3">
-          <img src="/logo-v2.png" alt="بوم" className="w-10 h-10 flex-shrink-0" />
+          <img src="/karzar-shield-detailed.png" alt="نشان سپر کارزار" className="w-10 h-10 flex-shrink-0" />
           <div>
             <p className="font-display text-2xl text-[var(--text)] leading-none">بوم</p>
             <p className="text-[10px] text-[var(--muted-2)] font-medium mt-0.5">برنامه ریز کنکور</p>
@@ -316,7 +316,7 @@ export default function App() {
       {screen === "schedule" && <Schedule {...p} userData={userData} />}
       {screen === "chat" && <Chat {...p} userData={userData} />}
       {screen === "evaluation" && <Evaluation {...p} />}
-      {screen === "mock" && <Mock {...p} />}
+      {screen === "mock" && <Mock {...p} userData={userData} />}
       {screen === "arena" && <Arena {...p} userData={userData} />}
       {screen === "leaderboard" && <Arena {...p} userData={userData} initialPhase="board" />}
       {screen === "admin" && <Admin {...p} />}

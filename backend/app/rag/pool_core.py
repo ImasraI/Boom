@@ -19,6 +19,8 @@ from sqlalchemy import select, update
 
 from app.auth.database import GeneratedMock, MockAttempt
 from app.rag import mock_generation
+from app.rag import question_bank
+from app.rag.provider_quota import is_daily_quota_error, pool_quota_status
 from app.rag.konkur_format import MAJOR_ALIASES, SPECIALIZED_SUBJECTS
 from app.utils.logger import get_logger
 
@@ -223,8 +225,9 @@ def note_provider_error(message: str) -> None:
 def provider_stall() -> str:
     """Reason the run must stop, or "" while the provider is healthy."""
     with _progress_lock:
-        if (_progress["active"]
-                and _progress["failures"] >= POOL_MAX_PROVIDER_FAILURES):
+        if (_progress["active"] and (
+                is_daily_quota_error(_progress["last_error"])
+                or _progress["failures"] >= POOL_MAX_PROVIDER_FAILURES)):
             return (_progress["last_error"]
                     or "provider refused repeatedly (no error text)")
         return ""
@@ -279,7 +282,20 @@ def pool_deficit(db, major_key: str, difficulty: str, target: int) -> int:
     return max(0, target - len(available))
 
 
-def generate_one(db, major_key: str, difficulty: str) -> bool:
+def _harvest_questions(db, questions, major_key, difficulty, grade=""):
+    # A too-small booklet is not served as a mock; its independently verified
+    # questions still belong in the bank and can assemble later booklets.
+    archive = GeneratedMock(student_id=0, title="بانک سوال — سوال‌های تاییدشده",
+        major=CANONICAL_MAJOR[major_key], grade=grade, duration_minutes=1,
+        questions=json.dumps(questions, ensure_ascii=False), status="bank_only",
+        difficulty=difficulty, bank_scope="shared")
+    db.add(archive)
+    db.flush()
+    question_bank.index_mock(db, archive)
+    db.commit()
+
+
+def generate_one(db, major_key: str, difficulty: str, *, grade="") -> bool:
     """Generate one standard booklet and insert it as a pending_use pool row.
 
     Returns True when a row was added. Generation failures are logged and
@@ -288,7 +304,8 @@ def generate_one(db, major_key: str, difficulty: str) -> bool:
     try:
         questions, _plan, duration = mock_generation.build_pool_booklet(
             major_key, difficulty, user_id=POOL_OWNER_ID,
-            report=_progress_reporter())
+            report=_progress_reporter(), grade=grade,
+            on_verified=lambda questions: _harvest_questions(db, questions, major_key, difficulty, grade))
     except Exception:
         logger.exception("Pool generation failed for %s/%s.",
                          major_key, difficulty)
@@ -298,16 +315,20 @@ def generate_one(db, major_key: str, difficulty: str) -> bool:
                        major_key, difficulty)
         return False
 
-    db.add(GeneratedMock(
+    mock = GeneratedMock(
         student_id=POOL_OWNER_ID,
         title=(f"آزمون آزمایشی بوم — {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"),
         major=CANONICAL_MAJOR[major_key],
-        grade="",
+        grade=grade,
         duration_minutes=duration,
         questions=json.dumps(questions, ensure_ascii=False),
         status="pending_use",
         difficulty=difficulty,
-    ))
+        bank_scope="shared",
+    )
+    db.add(mock)
+    db.flush()
+    question_bank.index_mock(db, mock)
     db.commit()
     logger.info("Pool +%d questions  [%s / %s]",
                 len(questions), major_key, difficulty)
@@ -342,6 +363,10 @@ def sweep(db, target: int, majors=None, difficulties=None,
 def _sweep_shelves(db, target: int, majors=None, difficulties=None,
                    dry_run: bool = False, max_booklets: int = 0) -> int:
     """The real sweep body; see sweep() for the contract."""
+    health = pool_quota_status()
+    if not dry_run and health["blocked"]:
+        note_provider_error(health["message"])
+        return 0
     majors = list(majors or POOL_MAJORS)
     difficulties = list(difficulties or POOL_DIFFICULTIES)
     produced = 0
@@ -382,7 +407,7 @@ def _sweep_shelves(db, target: int, majors=None, difficulties=None,
                     logger.error(
                         "Pool sweep aborted after %d row(s): the provider "
                         "refused %d call(s) in a row (%s).",
-                        produced, POOL_MAX_PROVIDER_FAILURES, stall)
+                        produced, progress_snapshot()["failures"], stall)
                     return produced
                 set_current(major_key, difficulty)
                 if generate_one(db, major_key, difficulty):
@@ -412,7 +437,7 @@ def duel_pool_deficit(db, major_key: str, target: int) -> int:
     return max(0, target - len(available))
 
 
-def generate_one_duel(db, major_key: str) -> bool:
+def generate_one_duel(db, major_key: str, *, grade="") -> bool:
     """Generate one scaled + verified duel booklet into the duel shelf.
 
     Same shared generation path as standard pool rows (build_pool_booklet),
@@ -425,7 +450,8 @@ def generate_one_duel(db, major_key: str) -> bool:
     try:
         questions, _plan, _ = mock_generation.build_pool_booklet(
             major_key, "konkur", user_id=POOL_OWNER_ID, plan=plan,
-            report=_progress_reporter())
+            report=_progress_reporter(), grade=grade,
+            on_verified=lambda questions: _harvest_questions(db, questions, major_key, DUEL_DIFFICULTY, grade))
     except Exception:
         logger.exception("Duel pool generation failed for %s.", major_key)
         return False
@@ -433,16 +459,20 @@ def generate_one_duel(db, major_key: str) -> bool:
         logger.warning("Duel pool generation produced nothing for %s.", major_key)
         return False
 
-    db.add(GeneratedMock(
+    mock = GeneratedMock(
         student_id=POOL_OWNER_ID,
         title=(f"دوئل رنکینگ بوم — {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"),
         major=CANONICAL_MAJOR[major_key],
-        grade="",
+        grade=grade,
         duration_minutes=duration,
         questions=json.dumps(questions, ensure_ascii=False),
         status="pending_use",
         difficulty=DUEL_DIFFICULTY,
-    ))
+        bank_scope="shared",
+    )
+    db.add(mock)
+    db.flush()
+    question_bank.index_mock(db, mock)
     db.commit()
     logger.info("Duel pool +%d questions  [%s]", len(questions), major_key)
     commit_questions(len(questions))
@@ -465,8 +495,12 @@ def sweep_duels(db, target: int, majors=None, dry_run: bool = False,
 
 
 def _sweep_duel_shelves(db, target: int, majors=None, dry_run: bool = False,
-                        max_booklets: int = 0) -> int:
+                       max_booklets: int = 0) -> int:
     """The real duel sweep body; see sweep_duels() for the contract."""
+    health = pool_quota_status()
+    if not dry_run and health["blocked"]:
+        note_provider_error(health["message"])
+        return 0
     produced = 0
     for major_key in list(majors or POOL_MAJORS):
         if _cancel_event.is_set():
@@ -492,7 +526,7 @@ def _sweep_duel_shelves(db, target: int, majors=None, dry_run: bool = False,
                 logger.error(
                     "Duel sweep aborted after %d row(s): the provider "
                     "refused %d call(s) in a row (%s).",
-                    produced, POOL_MAX_PROVIDER_FAILURES, stall)
+                    produced, progress_snapshot()["failures"], stall)
                 return produced
             set_current(major_key, DUEL_DIFFICULTY)
             if generate_one_duel(db, major_key):
@@ -501,7 +535,7 @@ def _sweep_duel_shelves(db, target: int, majors=None, dry_run: bool = False,
     return produced
 
 
-def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str):
+def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str, *, grade="", prefer_used=False):
     """Atomically claim the oldest pending_use duel row for this major that
     NEITHER player has attempted before. Marks it claimed + assigns it to
     player A (the match row's owner convention). Returns the row or None.
@@ -522,18 +556,84 @@ def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str):
         .where(GeneratedMock.id.not_in(seen_b))
         .order_by(GeneratedMock.created_at.asc())
     ).scalars().all()
+    if prefer_used:
+        reused = reused_duel(db, user_a, major_key, grade=grade, used_only=True, prefer_used=True)
+        if reused is None:
+            reused = reused_duel(db, user_a, major_key, grade=grade, prefer_used=True)
+        if reused is not None:
+            return reused
     for row in rows:
+        if grade and question_bank.grade_number(row.grade) > question_bank.grade_number(grade):
+            continue
         if not verified_booklet(row.questions):
             db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
                 GeneratedMock.status == "pending_use").values(status="quarantined"))
             continue
+        questions = question_bank.active_questions(db, row)
+        if len(questions) != len(json.loads(row.questions)):
+            row.status = "quarantined"
+            db.flush()
+            continue
+        ids = [q["bank_id"] for q in questions if q.get("bank_id")]
+        from app.auth.database import BankQuestion
+        if not prefer_used and ids and db.scalar(select(BankQuestion.id).where(
+                BankQuestion.id.in_(ids), BankQuestion.uses > 0).limit(1)):
+            continue  # A pending template can contain already-served questions.
         claimed = db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
             GeneratedMock.status == "pending_use").values(status="claimed", student_id=user_a))
         if claimed.rowcount == 1:
+            question_bank.mark_used(db, questions)
             db.flush()
             db.refresh(row)
             return row
-    return None
+    return reused_duel(db, user_a, major_key, grade=grade)
+
+
+def reused_duel(db, user_id, major_key, *, grade="", plan=None, topics=None, used_only=False, prefer_used=False):
+    label = CANONICAL_MAJOR.get(major_key)
+    if not label:
+        return None
+    plan = plan or mock_generation.scale_plan(mock_generation.default_plan(major_key), divisor=3, minimum=3)
+    questions = question_bank.assemble(db, user_id, plan, [label], grade=grade,
+        topics=topics, prefer_used=prefer_used, used_only=used_only, shared_only=not prefer_used)
+    if not questions:
+        return None
+    return question_bank.create_reused_mock(db, user_id, questions, label, grade,
+        DUEL_DIFFICULTY, max(10, sum(s["minutes"] for s in plan) // 3), ranked=True)
+
+
+def generate_selected(db, *, kind="mock", majors=None, difficulties=None, count=0, grade=""):
+    """Round-robin selected shelves. Zero means run until cancellation/refusal.
+
+    There is no stock/storage ceiling. A finite count limits newly generated
+    booklets in this run, independently of previous inventory.
+    """
+    majors = list(majors or POOL_MAJORS)
+    difficulties = list(difficulties or POOL_DIFFICULTIES)
+    shelves = [(m, d) for m in majors for d in difficulties] if kind in ("mock", "both") else []
+    if kind in ("ranked", "both"):
+        shelves += [(m, DUEL_DIFFICULTY) for m in majors]
+    produced = failures = cursor = 0
+    while shelves and not cancel_requested() and (not count or produced < count):
+        if pool_quota_status()["blocked"] or provider_stall():
+            break
+        major, difficulty = shelves[cursor % len(shelves)]
+        cursor += 1
+        add_planned(1)
+        set_current(major, difficulty)
+        kwargs = {"grade": grade} if grade else {}
+        success = generate_one_duel(db, major, **kwargs) if difficulty == DUEL_DIFFICULTY else generate_one(db, major, difficulty, **kwargs)
+        if success:
+            produced += 1
+            failures = 0
+            bump_produced()
+        else:
+            db.rollback()
+            failures += 1
+            if failures >= POOL_MAX_PROVIDER_FAILURES:
+                note_provider_error("تولید سه دفترچه معتبر ناموفق بود؛ تولید متوقف شد.")
+                break
+    return produced
 
 
 def verified_booklet(raw):

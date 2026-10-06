@@ -76,7 +76,7 @@ export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: s
         <div className="flex-1 flex flex-col justify-center max-w-md w-full mx-auto">
           <div className="auth-sheet py-8 anim-fade-up">
             <div className="flex flex-col items-center text-center">
-              <img src="/logo-v2.png" alt="لوگوی بوم" className="w-14 h-14 mb-4"
+              <img src="/karzar-shield-detailed.png" alt="نشان سپر کارزار" className="w-14 h-14 mb-4"
                    style={{ filter: "drop-shadow(0 6px 16px rgba(0,0,0,0.22))" }} />
               <p className="text-xs font-bold tracking-[0.2em] text-[var(--accent)] mb-1">خوش برگشتی</p>
               <h1 className="font-display text-4xl text-[var(--text)] leading-snug">ورود به حساب</h1>

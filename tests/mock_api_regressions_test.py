@@ -42,6 +42,7 @@ def test_generation_exception_refunds_reserved_quota(monkeypatch):
     calls = []
     monkeypatch.setattr(mocks, "consume_ai_use", lambda *a: calls.append("reserve"))
     monkeypatch.setattr(mocks, "release_ai_use", lambda *a: calls.append("refund"))
+    monkeypatch.setattr(mocks.question_bank, "assemble", lambda *a, **kw: [])
     def fail(*a, **kw):
         raise RuntimeError("provider offline")
     monkeypatch.setattr(mocks.mock_generation, "generate_booklet", fail)

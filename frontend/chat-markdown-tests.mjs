@@ -39,3 +39,24 @@ test("assistant rich text renders lists, code and math without raw HTML", () => 
   assert.match(html, /class="katex/);
   assert.doesNotMatch(html, /<script>/);
 });
+
+test("HTML line breaks in the assistant's Persian physics list render normally", () => {
+  const html = render("• گشتاور (τ = r×F)<br>• معادلهٔ نیوتن (τ = Iα)<BR />• انرژی جنبشی (K_rot = ½Iω²)");
+  assert.equal((html.match(/<br\s*\/>/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /&lt;br/i);
+  assert.match(html, /گشتاور/);
+  assert.match(html, /انرژی جنبشی/);
+});
+
+test("line breaks do not enable arbitrary HTML or reinterpret code examples", () => {
+  const html = render('متن<br onclick="alert(1)">ادامه\n\n`<br>`\n\n```html\n<br>\n```\n\n<script>alert(1)</script>');
+  assert.doesNotMatch(html, /<br onclick|<script>/);
+  assert.match(html, /<code>&lt;br&gt;<\/code>/);
+  assert.match(html, /<code class="language-html">&lt;br&gt;/);
+});
+
+test("a line break in a Markdown table stays within its own cell", () => {
+  const html = render("| درس | تمرین |\n|---|---|\n| فیزیک | گشتاور<br>انرژی |");
+  assert.match(html, /<td>گشتاور<br\/>\nانرژی<\/td>/);
+  assert.equal((html.match(/<tr>/g) ?? []).length, 2);
+});

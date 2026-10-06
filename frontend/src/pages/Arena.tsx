@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
 import { apiUrl, authHeaders, readApiError } from "../api"
 import { RichText } from "../richText"
+import ReportQuestion from "../components/ReportQuestion"
 
 type Phase = "lobby" | "queued" | "playing" | "finished" | "board" | "scheduled"
 
@@ -377,7 +378,7 @@ function DuelRunner({ match, onDone, onExit }: {
     if (elapsed >= totalSec) submit()
   }, [elapsed, totalSec, submit])
 
-  const q = questions[current]
+  const q = questions[Math.min(current, questions.length - 1)]
 
   if (!questions.length) {
     return (
@@ -409,6 +410,7 @@ function DuelRunner({ match, onDone, onExit }: {
         <div className="max-w-[560px] mx-auto">
           <p className="text-[11px] font-bold text-[var(--muted-2)] mb-2">سوال {current + 1} از {questions.length} — {q.subject}</p>
           <p className="text-[15px] font-bold text-[var(--text)] leading-relaxed mb-5 text-right whitespace-pre-wrap"><RichText text={q.text} /></p>
+          {match.mock_id && <ReportQuestion key={q.id} mockId={match.mock_id} questionId={q.id} />}
           <div className="space-y-2.5">
             {q.options.map((opt, i) => {
               const sel = answers[String(q.id)] === i
@@ -768,6 +770,9 @@ export default function Arena({ nav, userData, initialPhase }: {
       const m = await loadMatch(matchId)
       if (!m) return
       setMatch(m)
+      if (m.status === "cancelled") {
+        stopPoll(); setPhase("lobby"); setError("سوال مسابقه گزارش شد؛ مسابقه بدون تغییر رتبه لغو شد."); return;
+      }
       if (m.status === "finished") {
         stopPoll()
         setPhase("finished")
@@ -846,7 +851,9 @@ export default function Arena({ nav, userData, initialPhase }: {
     const m = await loadMatch(match.match_id)
     if (m) {
       setMatch(m)
-      setPhase("finished")
+      if (m.status === "cancelled") {
+        stopPoll(); setPhase("lobby"); setError("سوال مسابقه گزارش شد؛ مسابقه بدون تغییر رتبه لغو شد.");
+      } else setPhase("finished")
     }
   }
 

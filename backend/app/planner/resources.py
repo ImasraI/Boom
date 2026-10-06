@@ -101,7 +101,10 @@ def _read_question_runs(signature):
 def _ocr_ranges(book):
     # Pending OCR has not been promoted and is intentionally not a source.
     stem = Path(book).stem.strip().rstrip(" .")
-    directory = Path(get_settings().OCR_DIR) / stem / "pages"
+    root = Path(get_settings().OCR_DIR)
+    directory = root / stem / "pages"
+    if not directory.exists():
+        directory = root / (stem + ".pdf") / "pages"
     signature = []
     for path in sorted(directory.glob("page_*.json")):
         try:
@@ -110,6 +113,42 @@ def _ocr_ranges(book):
         except OSError:
             continue
     return [dict(row) for row in _read_question_runs(tuple(signature))]
+
+
+def _processed_books(student):
+    """Discover promoted question OCR without requiring raw PDFs on the VM.
+
+    Shared OCR is corpus data; private uploads stay scoped in _indexed_ranges.
+    Plain OCR prose alone is not evidence of printed question numbers.
+    """
+    root = Path(get_settings().OCR_DIR)
+    major = _norm(student.get("major"))
+    branch = "tajrobi" if "تجربی" in major else "ensani" if "انسانی" in major else "riazi"
+    books, seen = [], set()
+    for directory in sorted(root.iterdir()) if root.exists() else []:
+        if not directory.is_dir():
+            continue
+        name = directory.name.removesuffix(".pdf").strip().rstrip(" .")
+        normalized = _norm(name)
+        if name in seen or any(word in normalized for word in ("پاسخنامه", "کلید", "mock", "آزمون آزمایشی")):
+            continue
+        subject = _subject(name)
+        if subject not in _SUBJECTS:
+            continue
+        if "تجربی" in normalized and branch != "tajrobi":
+            continue
+        if "فیزیک" in normalized and "ریاضی" in normalized and branch != "riazi":
+            continue
+        match = re.search(r"(?:شیمی|فیزیک|زیست|ریاضی|حسابان|هندسه)\s*([123])(?=\D|$)", normalized)
+        grade = {1: 10, 2: 11, 3: 12}[int(match[1])] if match else 33
+        if grade != 33 and grade > _grade(student):
+            continue
+        ranges = _ocr_ranges(name)
+        if not ranges:
+            continue
+        seen.add(name)
+        books.append({"book": name, "subject": subject, "grade": grade, "ranges": ranges})
+    return books
 
 
 def _topic_score(topic, source_topic):
@@ -178,6 +217,7 @@ def available_books(db, student, user_id=None):
     by_name = {row["book"]: row for row in books}
     by_name.update({Path(row["book"]).stem.strip(): row for row in books})
     known_pdfs = {pdf.name for pdf in (Path(get_settings().RAW_DIR) / "test-books").rglob("*.pdf")}
+    known_stems = {Path(name).stem.strip() for name in known_pdfs}
     for row in db.query(BookCatalog).order_by(BookCatalog.book_id).all():
         entry = by_name.get(row.book_id)
         if entry is None:
@@ -194,12 +234,15 @@ def available_books(db, student, user_id=None):
     for entry in books:
         if not entry["ranges"]:
             entry["ranges"] = _ocr_ranges(entry["book"])
+    for entry in _processed_books(student):
+        if entry["book"] not in by_name and entry["book"] not in known_stems:
+            books.append(entry)
+            by_name[entry["book"]] = entry
     indexed = _indexed_ranges(user_id)
     for entry in books:
         extra = indexed.get(Path(entry["book"]).stem.strip(), [])
         signatures = {(r["q_from"], r["q_to"], r["page_from"], r["page_to"], r["topic"]) for r in entry["ranges"]}
         entry["ranges"].extend(r for r in extra if (r["q_from"], r["q_to"], r["page_from"], r["page_to"], r["topic"]) not in signatures)
-    known_stems = {Path(name).stem.strip() for name in known_pdfs}
     for name, ranges in indexed.items():
         # A student's indexed upload need not be in the shared raw directory.
         # Never reintroduce a shared PDF excluded for its track/grade above.

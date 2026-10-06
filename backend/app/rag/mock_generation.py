@@ -31,6 +31,7 @@ from app.rag.konkur_format import (  # noqa: F401  (re-exported for consumers)
     plan_totals,
 )
 from app.rag.llm import get_pool_llm_client
+from app.rag.provider_quota import is_daily_quota_error
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -139,7 +140,7 @@ def default_plan(major: str) -> List[dict]:
 def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
                        user_id: int = 0, verify: bool = True,
                        plan: Optional[List[dict]] = None,
-                       report: Reporter = None) -> tuple:
+                       report: Reporter = None, on_verified=None, grade: str = "") -> tuple:
     """One STANDARD booklet for a (major, difficulty) combination.
 
     The single generation path shared by /api/mocks/generate's live
@@ -165,13 +166,15 @@ def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
     planned = sum(int(s.get("questions") or 0) for s in plan)
     duration = sum(s["minutes"] for s in plan)
     questions = generate_booklet(user_id, plan, topics=[], difficulty=difficulty,
-                                 report=report)
+                                 report=report, grade=grade)
     if questions and verify:
         questions = verify_and_repair_booklet(questions, user_id,
                                               difficulty=difficulty,
                                               report=report)
         logger.info("Pool booklet verified: %d/%d question(s) survived the "
                     "answer-verification pass.", len(questions), planned)
+        if on_verified and questions:
+            on_verified(questions)
     if verify:
         short = _shortfall(questions, plan)
         empty_subject = any(produced == 0 for _, _, produced in short)
@@ -678,10 +681,8 @@ def verify_and_repair_booklet(
         not produce a clean 0-3 index at all        -> discard, regenerate a
         replacement for the same subject/topic, verify that too
     At most `max_regens` replacement attempts per question so an ambiguous
-    topic can't loop forever; if nothing verifies by then, the best-scoring
-    attempt is kept with a warning (verified > solvable-but-different >
-    unsolvable) - booklet size never shrinks. Replacements inherit the
-    original's "_id" and plan-enforced "subject".
+    topic can't loop forever; questions that never verify are discarded.
+    Replacements inherit the original's "_id" and plan-enforced "subject".
     """
     if not questions:
         return questions
@@ -707,6 +708,9 @@ def verify_and_repair_booklet(
         for attempt in range(1, max_regens + 1):
             repl = _generate_replacement(client, user_id, q, difficulty,
                                          gen_max_tokens, timeout)
+            if is_daily_quota_error(getattr(client, "last_error", "")):
+                _report(report, "provider_error", message=client.last_error)
+                return out
             if repl is None:
                 logger.warning("Verify: replacement attempt %d for a %s "
                                "question produced nothing parseable.",
@@ -719,6 +723,9 @@ def verify_and_repair_booklet(
                             "question; regenerating.", q["subject"])
                 continue
             repl_verdict = _verify_question(client, repl, timeout)
+            if is_daily_quota_error(getattr(client, "last_error", "")):
+                _report(report, "provider_error", message=client.last_error)
+                return out
             s = _score(repl_verdict, repl["answer"])
             if s > best_score:
                 best, best_score = repl, s
@@ -841,6 +848,14 @@ def generate_booklet(
     questions: List[dict] = []
     next_id = 1
 
+    terminal_error = ""
+
+    def track(event: str, data: dict) -> None:
+        nonlocal terminal_error
+        if event == "provider_error" and is_daily_quota_error(data.get("message", "")):
+            terminal_error = data["message"]
+        _report(report, event, **data)
+
     _report(report, "booklet",
             target=sum(int(s.get("questions") or 0) for s in plan))
     _report(report, "phase", name="generating")
@@ -849,8 +864,11 @@ def generate_booklet(
         if int(row.get("questions") or 0) <= 0:
             continue
         rows = _generate_subject_questions(
-            user_id, row, topics, difficulty, max_tokens, timeout, report=report,
+            user_id, row, topics, difficulty, max_tokens, timeout, report=track,
             grade=grade)
+        if terminal_error:
+            # No subsequent subjects or verification calls can clear a daily limit.
+            return []
         if not rows:
             logger.warning("Booklet: subject %s produced nothing; skipping.",
                            row["name"])

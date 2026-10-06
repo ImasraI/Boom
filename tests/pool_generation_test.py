@@ -224,7 +224,7 @@ def test_sweep_aborts_instead_of_hammering_a_dead_provider(monkeypatch, db):
 
     def refusing_generate_one(db_, major, difficulty):
         attempts.append(major)
-        pool_core.note_provider_error("HTTP 429 (daily quota exhausted)")
+        pool_core.note_provider_error("HTTP 429 (per-minute limit)")
         return False
 
     monkeypatch.setattr(pool_core, "generate_one", refusing_generate_one)

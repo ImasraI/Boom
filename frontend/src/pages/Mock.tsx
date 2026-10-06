@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { NavFn } from "../types"
+import { NavFn, SignupData } from "../types"
 import { apiUrl, authHeaders, readApiError } from "../api"
 import { RichText } from "../richText"
+import ReportQuestion from "../components/ReportQuestion"
 
-type Phase = "config" | "loading" | "test" | "result"
+type Phase = "config" | "loading" | "ready" | "test" | "result"
 
 interface MockQuestion {
   id: number
@@ -63,15 +64,20 @@ function BackButton({ onClick }: { onClick: () => void }) {
 
 /* ---------------- Config screen ---------------- */
 
-function ConfigView({ onStart }: { onStart: (cfg: Record<string, unknown>) => void }) {
+function ConfigView({ onStart, onBack, error }: {
+  onStart: (cfg: Record<string, unknown>) => void
+  onBack: () => void
+  error: string
+}) {
   const [difficulty, setDifficulty] = useState("konkur")
   const [count, setCount] = useState(0) // 0 = konkur standard
   const [topics, setTopics] = useState("")
+  const [mode, setMode] = useState("practice")
 
   return (
     <div className="min-h-screen bg-[var(--surface)] pb-16">
       <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-12 pb-4 flex items-center gap-3">
-        <BackButton onClick={() => history.back()} />
+        <BackButton onClick={onBack} />
         <div>
           <h1 className="font-bold text-lg text-[var(--text)]">آزمون آزمایشی هوشمند</h1>
           <p className="text-[11px] text-[var(--muted-2)]">دفترچه استاندارد کنکور از کتاب‌های خودت</p>
@@ -79,6 +85,21 @@ function ConfigView({ onStart }: { onStart: (cfg: Record<string, unknown>) => vo
       </div>
 
       <div className="px-4 mt-5 space-y-4 max-w-[430px] mx-auto">
+        {error && (
+          <p role="alert" className="border-s-4 border-red-500 bg-red-500/10 px-4 py-3 text-[13px] text-[var(--text)] leading-relaxed">
+            {error}
+          </p>
+        )}
+        <div className="border-b border-[var(--border)] pb-4">
+          <label className="text-[12px] font-bold text-[var(--muted)]">نوع دفترچه
+            <select value={mode} onChange={e => setMode(e.target.value)} className="block mt-2 w-full bg-[var(--surface)] border-b border-[var(--border-strong)] p-2 text-sm text-[var(--text)]">
+              <option value="practice">تمرین از سوال‌های قبلی</option>
+              <option value="practice_weak_areas">تمرین نقاط ضعف</option>
+              <option value="general">آزمون کامل کنکور</option>
+            </select>
+          </label>
+          <p className="text-[11px] text-[var(--muted-2)] mt-2">تمرین ابتدا از سوال‌های قبلیِ مرتبط استفاده می‌کند. تعداد واقعی سوال‌های موجود پیش از شروع نمایش داده می‌شود.</p>
+        </div>
         <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">سطح دشواری</p>
           <div className="grid grid-cols-3 gap-2">
@@ -119,7 +140,7 @@ function ConfigView({ onStart }: { onStart: (cfg: Record<string, unknown>) => vo
           <p className="text-[10px] text-[var(--muted-2)] mt-1.5">خالی بگذاری، سوالات از کل مباحث کنکوری می‌آید. برای تمرکز بر آزمون پیش رو، مباحث آن را وارد کن.</p>
         </div>
 
-        <button onClick={() => onStart({ difficulty, questions_per_subject: count || undefined, topics: topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
+        <button onClick={() => onStart({ mode, difficulty, questions_per_subject: count || undefined, topics: topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
           className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all">
           ساخت دفترچه آزمون
         </button>
@@ -133,39 +154,45 @@ function ConfigView({ onStart }: { onStart: (cfg: Record<string, unknown>) => vo
 
 /* ---------------- Timed test runner ---------------- */
 
-function TestRunner({ info, questions, onFinish, onExit }: {
+function TestRunner({ info, questions, onFinish, onExit, error }: {
   info: MockInfo
   questions: MockQuestion[]
-  onFinish: (answers: Record<string, number | "">, seconds: number) => void
+  onFinish: (answers: Record<string, number | "">, seconds: number) => Promise<boolean>
   onExit: () => void
+  error: string
 }) {
   const [current, setCurrent] = useState(0)
   const [answers, setAnswers] = useState<Record<string, number | "">>({})
   const [showSheet, setShowSheet] = useState(false)
+  const [reported, setReported] = useState<Set<number>>(() => new Set())
+  const [submitting, setSubmitting] = useState(false)
   const [remaining, setRemaining] = useState(info.duration_minutes * 60)
   const submittedRef = useRef(false)
+  const autoSubmittedRef = useRef(false)
   const answersRef = useRef(answers)
   answersRef.current = answers
 
-  const submit = useCallback(() => {
+  const submit = useCallback(async () => {
     if (submittedRef.current) return
     submittedRef.current = true
-    onFinish(answersRef.current, info.duration_minutes * 60 - remaining)
+    setSubmitting(true)
+    const success = await onFinish(answersRef.current, info.duration_minutes * 60 - remaining)
+    if (!success) submittedRef.current = false
+    setSubmitting(false)
   }, [info.duration_minutes, onFinish, remaining])
 
   useEffect(() => {
     const t = setInterval(() => {
-      setRemaining(r => {
-        if (r <= 1) {
-          clearInterval(t)
-          submit()
-          return 0
-        }
-        return r - 1
-      })
+      setRemaining(r => Math.max(0, r - 1))
     }, 1000)
     return () => clearInterval(t)
-  }, [submit])
+  }, [])
+  useEffect(() => {
+    if (remaining === 0 && !autoSubmittedRef.current) {
+      autoSubmittedRef.current = true
+      submit()
+    }
+  }, [remaining, submit])
 
   const q = questions[current]
   const answered = useMemo(
@@ -197,6 +224,7 @@ function TestRunner({ info, questions, onFinish, onExit }: {
       {/* question */}
       <div className="flex-1 overflow-auto px-4 py-5">
         <div className="max-w-[560px] mx-auto">
+          {error && <p role="alert" className="text-sm text-red-500 border-s-2 border-red-500 ps-3 mb-4">{error} پاسخ‌ها حفظ شده‌اند؛ دوباره «پایان و تصحیح» را بزن.</p>}
           {q?.topic && (
             <span className="inline-block px-2.5 py-1 rounded-lg bg-[var(--chip)] text-[var(--muted)] text-[10px] font-bold mb-3">{q.topic}</span>
           )}
@@ -205,7 +233,7 @@ function TestRunner({ info, questions, onFinish, onExit }: {
             {q?.options.map((opt, i) => {
               const sel = answers[String(q.id)] === i
               return (
-                <button key={i} onClick={() => pick(i)}
+                <button key={i} onClick={() => pick(i)} disabled={reported.has(q.id) || submitting || remaining === 0}
                   className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl border text-right transition-all ${
                     sel ? "bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)]" : "bg-[var(--card)] border-[var(--border)] text-[var(--text)] hover:border-[var(--border-strong)]"
                   }`}>
@@ -215,6 +243,8 @@ function TestRunner({ info, questions, onFinish, onExit }: {
               )
             })}
           </div>
+          {q && <ReportQuestion key={q.id} mockId={info.mock_id} questionId={q.id}
+            onReported={() => setReported(prev => new Set([...prev, q.id]))} />}
         </div>
       </div>
 
@@ -230,15 +260,15 @@ function TestRunner({ info, questions, onFinish, onExit }: {
             پاسخ‌برگ ({answered}/{questions.length})
           </button>
           <div className="flex-1" />
-          {current < questions.length - 1 ? (
+          {current < questions.length - 1 && remaining > 0 ? (
             <button onClick={() => setCurrent(c => c + 1)}
               className="px-6 h-10 rounded-xl bg-[var(--accent)] text-white text-[13px] font-bold">
               بعدی
             </button>
           ) : (
-            <button onClick={submit}
+            <button onClick={submit} disabled={submitting}
               className="px-6 h-10 rounded-xl bg-[var(--accent)] text-white text-[13px] font-bold">
-              پایان و تصحیح
+              {submitting ? "در حال ثبت…" : "پایان و تصحیح"}
             </button>
           )}
         </div>
@@ -249,7 +279,7 @@ function TestRunner({ info, questions, onFinish, onExit }: {
         <div className="fixed inset-0 bg-black/40 z-40 flex items-end justify-center" onClick={() => setShowSheet(false)}>
           <div className="w-full max-w-[430px] bg-[var(--card)] rounded-t-3xl p-5 pb-10 max-h-[70vh] overflow-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
-              <button onClick={submit} className="px-4 h-9 rounded-xl bg-[var(--accent)] text-white text-[12px] font-bold">پایان آزمون</button>
+              <button onClick={submit} disabled={submitting} className="px-4 h-9 rounded-xl bg-[var(--accent)] text-white text-[12px] font-bold">پایان آزمون</button>
               <p className="text-[13px] font-bold text-[var(--text)]">پاسخ‌برگ — {answered} از {questions.length} پر شده</p>
             </div>
             <div className="grid grid-cols-8 gap-1.5">
@@ -275,7 +305,7 @@ function TestRunner({ info, questions, onFinish, onExit }: {
 
 /* ---------------- Result / analysis ---------------- */
 
-function ResultView({ result, onBack, onRetry }: { result: MockResult; onBack: () => void; onRetry: () => void }) {
+function ResultView({ result, mockId, onBack, onRetry }: { result: MockResult; mockId: number; onBack: () => void; onRetry: () => void }) {
   const [tab, setTab] = useState<"summary" | "review">("summary")
   const pctColor = result.score >= 70 ? "text-green-500" : result.score >= 40 ? "text-[var(--accent)]" : "text-red-500"
 
@@ -372,6 +402,7 @@ function ResultView({ result, onBack, onRetry }: { result: MockResult; onBack: (
                       <span className="font-bold text-[var(--accent)]">راه‌حل: </span><RichText text={q.explanation} />
                     </p>
                   )}
+                  <ReportQuestion mockId={mockId} questionId={q.id} />
                 </div>
               </div>
             )
@@ -384,7 +415,7 @@ function ResultView({ result, onBack, onRetry }: { result: MockResult; onBack: (
 
 /* ---------------- Page ---------------- */
 
-export default function Mock({ nav }: { nav: NavFn }) {
+export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupData | null }) {
   const [phase, setPhase] = useState<Phase>("config")
   const [info, setInfo] = useState<MockInfo | null>(null)
   const [questions, setQuestions] = useState<MockQuestion[]>([])
@@ -398,7 +429,7 @@ export default function Mock({ nav }: { nav: NavFn }) {
       const res = await fetch(apiUrl("/api/mocks/generate"), {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(authHeaders() as Record<string, string>) },
-        body: JSON.stringify(cfg),
+        body: JSON.stringify({ ...cfg, student: { major: userData?.major, grade: userData?.grade } }),
       })
       if (!res.ok) throw new Error(await readApiError(res, "ساخت آزمون ناموفق بود"))
       const data: MockInfo = await res.json()
@@ -407,9 +438,10 @@ export default function Mock({ nav }: { nav: NavFn }) {
       })
       if (!qRes.ok) throw new Error(await readApiError(qRes, "دریافت دفترچه ناموفق بود"))
       const qData = await qRes.json()
+      if (!Array.isArray(qData.questions) || !qData.questions.length) throw new Error("سوال معتبری در این دفترچه باقی نمانده است؛ دفترچه دیگری انتخاب کن.")
       setInfo(data)
       setQuestions(qData.questions)
-      setPhase("test")
+      setPhase("ready")
     } catch (e) {
       setError(e instanceof Error ? e.message : "خطای نامشخص")
       setPhase("config")
@@ -417,7 +449,8 @@ export default function Mock({ nav }: { nav: NavFn }) {
   }
 
   async function finish(answers: Record<string, number | "">, seconds: number) {
-    if (!info) return
+    if (!info) return false
+    setError("")
     try {
       const res = await fetch(apiUrl(`/api/mocks/${info.mock_id}/submit`), {
         method: "POST",
@@ -427,43 +460,54 @@ export default function Mock({ nav }: { nav: NavFn }) {
       if (res.ok) {
         setResult(await res.json())
         setPhase("result")
-        return
+        return true
       }
-    } catch { /* fall through to local scoring below */ }
-    // Network failed mid-exam: keep the user unstuck with a local score.
-    setPhase("config")
+      throw new Error(await readApiError(res, "ثبت پاسخ‌های آزمون ناموفق بود"))
+    } catch (e) { setError(e instanceof Error ? e.message : "خطای ارتباط") }
+    return false
   }
 
-  if (phase === "loading") {
-    return (
+  return (
+    <>
+      <div hidden={phase !== "config"}>
+        <ConfigView onStart={start} onBack={() => nav("home")} error={error} />
+      </div>
+      {phase === "loading" && (
       <div className="min-h-screen bg-[var(--surface)] flex flex-col items-center justify-center gap-4">
         <div className="w-10 h-10 border-3 border-[var(--accent)] border-t-transparent rounded-full animate-spin" style={{ borderWidth: 3 }} />
         <p className="text-[13px] font-bold text-[var(--muted)]">در حال ساخت دفترچه از کتاب‌های تو...</p>
-        <p className="text-[11px] text-[var(--muted-2)]">حدود یک دقیقه طول می‌کشد</p>
+        <p className="text-[11px] text-[var(--muted-2)]">ساخت و بررسی پاسخ‌های دفترچه ممکن است چند دقیقه طول بکشد.</p>
       </div>
-    )
-  }
+      )}
 
-  if (phase === "test" && info && questions.length) {
-    return (
+      {phase === "ready" && info && <div className="min-h-screen bg-[var(--surface)] px-5 pt-16 text-[var(--text)]">
+        <div className="max-w-[560px] mx-auto space-y-5">
+          <BackButton onClick={() => setPhase("config")} />
+          <h1 className="font-display text-xl">{info.title}</h1>
+          <p className="text-sm text-[var(--muted)]">دفترچه آماده است: {questions.length} سوال · {info.duration_minutes} دقیقه</p>
+          <ul className="divide-y divide-[var(--border)]">{info.subjects.map(s => <li key={s.name} className="py-3 flex justify-between text-sm"><span>{s.name}</span><span>{questions.filter(q => q.subject === s.name).length} سوال</span></li>)}</ul>
+          <button onClick={() => setPhase("test")} className="w-full bg-[var(--accent)] text-white font-bold py-4">شروع آزمون</button>
+        </div>
+      </div>}
+
+      {phase === "test" && info && questions.length > 0 && (
       <TestRunner
         info={info}
         questions={questions}
         onFinish={finish}
         onExit={() => setPhase("config")}
+        error={error}
       />
-    )
-  }
+      )}
 
-  if (phase === "result" && result) {
-    return (
+      {phase === "result" && result && (
       <ResultView
         result={result}
+        mockId={info!.mock_id}
         onBack={() => { setResult(null); setPhase("config") }}
         onRetry={() => { setResult(null); setPhase("config") }}
       />
-    )
-  }
-
-  return <ConfigView onStart={start} />
+      )}
+    </>
+  )
 }

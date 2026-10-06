@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl, authHeaders, readApiError } from "../api";
 import type { NavFn } from "../types";
+import CorruptQuestions from "../components/CorruptQuestions";
 
 interface AllowEntry { id: number; phone: string; note: string; created_at: string | null }
 interface Usage { features: Record<string, number>; tokens_used_today: number }
@@ -27,6 +28,8 @@ interface PoolProgress {
 interface PoolPayload {
   target: number; shelves: Shelf[]; running?: boolean;
   cancel_requested?: boolean; progress?: PoolProgress;
+  provider_health?: { blocked: boolean; message?: string; retry_at?: string };
+  question_bank?: Record<string, number>;
 }
 interface SmsCredit { credit: number; configured: boolean; detail: string; bypass_active: boolean }
 interface SmsDelivery { message_id: number; send_at: number | null; delivery_at: number | null; delivery_state: number | null }
@@ -65,6 +68,11 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [busy, setBusy] = useState(false);
   const [restocking, setRestocking] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
+  const [poolKind, setPoolKind] = useState("mock");
+  const [poolMajor, setPoolMajor] = useState("riazi");
+  const [poolDifficulty, setPoolDifficulty] = useState("konkur");
+  const [poolGrade, setPoolGrade] = useState("دوازدهم");
+  const [poolCount, setPoolCount] = useState(0);
   const poolTimer = useRef<number | null>(null);
   async function checkDelivery() {
     setCheckingDelivery(true); setDelivery(null); setDeliveryError("");
@@ -166,7 +174,8 @@ export default function Admin({ nav }: { nav: NavFn }) {
     setBusy(true); setErr(""); setMsg("");
     try {
       const res = await fetch(apiUrl("/api/admin/pool/restock"), {
-        method: "POST", headers: { ...authHeaders() },
+        method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ kind: poolKind, major: poolMajor, difficulty: poolDifficulty, grade: poolGrade, count: poolCount }),
       });
       if (!res.ok) throw new Error(await readApiError(res, "شروع restock ناموفق بود"));
       setRestocking(true);
@@ -209,15 +218,6 @@ export default function Admin({ nav }: { nav: NavFn }) {
       setMsg("لغو درخواست شد؛ دفترچه فعلی تمام می‌شود و بقیه تولید متوقف می‌شود...");
     } catch (e) { setErr(e instanceof Error ? e.message : "خطا"); }
   }
-
-  // Stop the live poll once every shelf has reached the target again.
-  useEffect(() => {
-    if (restocking && pool && pool.shelves.every(s => s.available >= pool.target)) {
-      setRestocking(false);
-      setCancelRequested(false);
-      setMsg("همه قفسه‌ها پر شد");
-    }
-  }, [pool, restocking]);
 
   const progress = pool?.progress;
   const poolPercent = Math.min(100, Math.max(0, progress?.percent ?? 0));
@@ -363,9 +363,9 @@ export default function Admin({ nav }: { nav: NavFn }) {
             موجودی آزمون‌های آماده
           </h2>
           <span className="text-[10px] text-[var(--muted-2)] ms-auto">
-            هدف هر قفسه: {pool?.target ?? "—"}
+            ذخیره بدون سقف
           </span>
-          <button onClick={restock} disabled={busy || generating}
+          <button onClick={restock} disabled={busy || generating || pool?.provider_health?.blocked}
             className="text-[11px] px-3 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--surface)] font-bold disabled:opacity-40">
             {generating ? "در حال تولید..." : "تولید فوری"}
           </button>
@@ -381,6 +381,14 @@ export default function Admin({ nav }: { nav: NavFn }) {
             </span>
           )}
         </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border-y border-[var(--border)] py-4 mb-4 text-xs text-[var(--muted)]">
+          <label>نوع دفترچه<select aria-label="نوع دفترچه برای تولید" value={poolKind} onChange={e => setPoolKind(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]"><option value="mock">آزمون و تمرین</option><option value="ranked">دوئل رنکینگ</option><option value="both">هر دو</option></select></label>
+          <label>رشته<select aria-label="رشته برای تولید" value={poolMajor} onChange={e => setPoolMajor(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{Object.entries({ riazi: "ریاضی", tajrobi: "تجربی", insani: "انسانی", honar: "هنر", zaban: "زبان", all: "همه رشته‌ها" }).map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
+          <label>دشواری<select aria-label="دشواری برای تولید" value={poolDifficulty} onChange={e => setPoolDifficulty(e.target.value)} disabled={generating || poolKind === "ranked"} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{Object.entries(DIFFICULTY_FA).map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
+          <label>پایه<select value={poolGrade} onChange={e => setPoolGrade(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{["دهم", "یازدهم", "دوازدهم"].map(g => <option key={g}>{g}</option>)}</select></label>
+          <label>تعداد دفترچه؛ صفر = پیوسته<input aria-label="تعداد دفترچه" type="number" min={0} step={1} value={poolCount} onChange={e => setPoolCount(Math.max(0, Math.floor(Number(e.target.value))))} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]" /></label>
+        </div>
+        <p className="text-xs text-[var(--muted)] mb-4">فقط انتخاب‌های بالا تولید می‌شوند. حالت پیوسته تا لغو یا توقف سرویس ادامه دارد. بانک سوال: {(pool?.question_bank?.active ?? 0).toLocaleString("fa-IR")} فعال · {(pool?.question_bank?.corrupt ?? 0).toLocaleString("fa-IR")} گزارش‌شده</p>
         {/* Aggregate fill across every shelf. While a sweep is producing, the
             bar shimmers and the live run state (booklets done, shelf in
             flight, elapsed) sits right underneath it. */}
@@ -390,8 +398,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
               {generating ? "در حال تولید دفترچه‌ها..." : "موجودی کل قفسه‌ها"}
             </span>
             <span className="font-bold text-[var(--text)]">
-              {progress?.available ?? 0} از {progress?.capacity ?? 0} دفترچه
-              {progress ? ` (${poolPercent}٪)` : ""}
+              {progress?.available ?? 0} دفترچه آماده
             </span>
           </div>
           <div
@@ -418,7 +425,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
               )}
             </span>
             <span>
-              دوئل: {progress?.duel_available ?? 0} / {progress?.duel_capacity ?? 0}
+              دوئل آماده: {progress?.duel_available ?? 0}
             </span>
           </div>
           {/* Question detail for the paper being written right now. */}
@@ -428,9 +435,14 @@ export default function Admin({ nav }: { nav: NavFn }) {
               {progress.phase ? ` · مرحله: ${PHASE_FA[progress.phase] ?? progress.phase}` : ""}
             </p>
           )}
-          {progress?.last_error && (
-            <p className="text-[10px] text-red-400 mt-1.5 leading-relaxed">
-              تولید متوقف شد: {progress.last_error}
+          {(pool?.provider_health?.blocked || progress?.last_error) && (
+            <p role="alert" className="text-[12px] text-red-400 mt-1.5 leading-relaxed">
+              {pool?.provider_health?.blocked
+                ? pool.provider_health.message
+                : `تولید متوقف شد: ${progress?.last_error}`}
+              {pool?.provider_health?.retry_at && (
+                <> بازنشانی بعدی: {new Date(pool.provider_health.retry_at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" })}</>
+              )}
             </p>
           )}
         </div>
@@ -461,6 +473,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
           </p>
         )}
       </section>
+      <CorruptQuestions />
     </div>
   );
 }

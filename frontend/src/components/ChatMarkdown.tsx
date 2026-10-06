@@ -6,6 +6,23 @@ import "katex/dist/katex.min.css";
 
 const tableDivider = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/;
 
+type MarkdownNode = { type: string; value?: string; children?: MarkdownNode[] };
+
+// Convert only a plain line-break tag into Markdown's own break node.
+// Other HTML stays escaped, and fenced/inline code is never interpreted.
+function remarkHtmlBreaks() {
+  return (tree: MarkdownNode) => {
+    function visit(node: MarkdownNode) {
+      if (node.type === "html" && /^<br\s*\/?\s*>$/i.test(node.value?.trim() ?? "")) {
+        node.type = "break";
+        delete node.value;
+      }
+      node.children?.forEach(visit);
+    }
+    visit(tree);
+  };
+}
+
 // Some model replies place a note immediately after the last table row. GFM
 // otherwise treats that note as another cell, so separate table boundaries.
 export function prepareChatMarkdown(source: string): string {
@@ -44,7 +61,7 @@ export default function ChatMarkdown({ text }: { text: string }) {
   return (
     <div className="chat-markdown" dir="rtl">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkHtmlBreaks]}
         rehypePlugins={[rehypeKatex]}
         components={{
           table: ({ children }) => <div className="chat-table-scroll" role="region" aria-label="جدول پاسخ" tabIndex={0}><table>{children}</table></div>,

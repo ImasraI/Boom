@@ -292,7 +292,10 @@ def _reserve_match(db: Session, entry: ArenaQueueEntry, other: ArenaQueueEntry,
     if same_major and unfiltered:
         pooled = pool_core.claim_duel_booklet(
             db, entry.student_id, other.student_id,
-            _major_key_of(entry.major or ""))
+            _major_key_of(entry.major or ""), grade=grade)
+    if pooled is None:
+        pooled = pool_core.reused_duel(db, entry.student_id, _major_key_of(entry.major or ""),
+            grade=grade, plan=plan, topics=pair.get("topics"))
     if pooled is not None:
         mock = pooled
         logger.info("Arena match served from duel pool (mock %d).", mock.id)
@@ -382,6 +385,9 @@ def _generate_duel_booklet(match: ArenaMatch, plan: list,
                     difficulty="konkur", max_regens=1, timeout=45.0,
                 )
                 mock.questions = json.dumps(questions, ensure_ascii=False)
+                mock.bank_indexed = False
+                from app.rag import question_bank
+                question_bank.index_mock(mock_db, mock)
                 mock_db.commit()
                 logger.info("Arena match %d: verified booklet ready (%d questions)",
                             match.id, len(questions))
@@ -564,7 +570,7 @@ def create_ai_rival_match(
         # opponent_b = None is fine - the pool only needs both ids for the
         # seen-before filter, and an exhibition has no second player yet).
         pooled = pool_core.claim_duel_booklet(
-            db, current_user.id, 0, major_key)
+            db, current_user.id, 0, major_key, grade=grade, prefer_used=True)
         if pooled is not None:
             mock = pooled
         else:
@@ -890,7 +896,10 @@ def accept_scheduled(
         mock = None
         if same_major and unfiltered:
             mock = pool_core.claim_duel_booklet(
-                db, invite.host_id, current_user.id, _major_key_of(major))
+                db, invite.host_id, current_user.id, _major_key_of(major), grade=grade)
+        if mock is None:
+            mock = pool_core.reused_duel(db, invite.host_id, _major_key_of(major),
+                grade=grade, plan=pair["plan"], topics=pair.get("topics"))
         if mock is None:
             shared = "، ".join(pair["booklet_subjects"])
             mock = _new_duel_placeholder(
@@ -1018,7 +1027,16 @@ def submit(
     if not mock:
         raise HTTPException(status_code=500, detail="دفترچه مسابقه یافت نشد")
 
-    questions = json.loads(mock.questions)
+    from app.rag import question_bank
+    questions = question_bank.active_questions(db, mock)
+    if len(questions) != len(json.loads(mock.questions)) and not match.is_ai_opponent:
+        # Never compare scores taken against different sets of questions.
+        # A report during a live ranked game voids it without moving Elo.
+        match.status = "cancelled"
+        match.delta_a = match.delta_b = 0
+        match.finished_at = datetime.utcnow()
+        db.commit()
+        raise HTTPException(409, detail="سوالی از این مسابقه گزارش شده است؛ مسابقه بدون تغییر رتبه لغو شد")
     result = _score(questions, payload.answers)
     is_a = match.student_a_id == current_user.id
     if is_a:

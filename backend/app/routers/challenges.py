@@ -78,7 +78,7 @@ def _visible_questions(db: Session, mock: GeneratedMock) -> list:
     GET /api/mocks/{id} applies, so previews and accepts never leak keys)."""
     if not mock:
         return []
-    from app.routers.mocks import _load_questions  # late: avoids import cycle
+    from app.rag.question_bank import active_questions
 
     return [
         {
@@ -88,7 +88,7 @@ def _visible_questions(db: Session, mock: GeneratedMock) -> list:
             "text": q.get("text"),
             "options": q.get("options"),
         }
-        for q in _load_questions(mock)
+        for q in active_questions(db, mock)
         if (q.get("text") or "").strip()
     ]
 

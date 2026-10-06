@@ -2,6 +2,8 @@ import { accountStorage } from "../accountStorage";
 import { useState, useEffect, useRef, useCallback } from "react"
 import { NavFn } from "../types"
 import { SUBJECT_TESTS, SubjectTest, Question } from "../questions"
+import { apiUrl, authHeaders, readApiError } from "../api"
+import ReportQuestion from "../components/ReportQuestion"
 
 type Phase = "select" | "test" | "result"
 
@@ -286,6 +288,7 @@ function TestView({
             />
           ))}
         </div>
+        {test.mock_id && q.id && <ReportQuestion key={q.id} mockId={test.mock_id} questionId={q.id} />}
       </div>
 
       <div className="border-t border-[var(--border)] bg-[var(--card)] px-4 py-3 flex items-center gap-2">
@@ -466,6 +469,7 @@ function ResultView({
                   پاسخ صحیح: <span className="text-green-600 dark:text-green-400">{labels[q.answer]}. {q.options[q.answer]}</span>
                 </p>
               )}
+              {test.mock_id && q.id && <ReportQuestion mockId={test.mock_id} questionId={q.id} />}
             </div>
           )
         })}
@@ -494,6 +498,8 @@ export default function Evaluation({ nav }: { nav: NavFn }) {
   const [activeTest, setActiveTest] = useState<SubjectTest | null>(null)
   const [resultAnswers, setResultAnswers] = useState<(number | null)[]>([])
   const [resultTime, setResultTime] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
 
   const [history, setHistory] = useState<
     Record<string, { score: number; time: number; date: string }[]>
@@ -518,9 +524,15 @@ export default function Evaluation({ nav }: { nav: NavFn }) {
     })
   }
 
-  function handleStartTest(test: SubjectTest) {
-    setActiveTest(test)
-    setPhase("test")
+  async function handleStartTest(test: SubjectTest) {
+    if (loading) return
+    setLoading(true); setError("")
+    try {
+      const res = await fetch(apiUrl(`/api/mocks/assessment/${test.id}`), { method: "POST", headers: authHeaders() })
+      if (!res.ok) throw new Error(await readApiError(res, "ارزیابی دریافت نشد"))
+      setActiveTest(await res.json()); setPhase("test")
+    } catch (e) { setError(e instanceof Error ? e.message : "خطای ارتباط") }
+    finally { setLoading(false) }
   }
 
   function handleFinishTest(answers: (number | null)[], timeSeconds: number) {
@@ -542,7 +554,8 @@ export default function Evaluation({ nav }: { nav: NavFn }) {
 
   function handleRetry() {
     if (activeTest) {
-      setPhase("test")
+      setPhase("select")
+      handleStartTest(activeTest)
     }
   }
 
@@ -589,6 +602,8 @@ export default function Evaluation({ nav }: { nav: NavFn }) {
       </div>
 
       <div className="flex-1 overflow-auto p-4 space-y-4">
+        {loading && <p role="status" className="text-sm text-[var(--muted)]">در حال دریافت سوال‌های فعال…</p>}
+        {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 text-center">
             <p className="text-[20px] font-bold text-[var(--accent)]">{SUBJECT_TESTS.length}</p>

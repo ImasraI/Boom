@@ -58,6 +58,56 @@ def _test_block(count=20, topic="مرور مباحث"):
     return {"task_type": "test", "subject": "شیمی", "topic": topic, "count": count, "description": "تمرین"}
 
 
+def test_processed_ocr_alone_restores_numbered_practice_without_raw_pdfs(db, tmp_path):
+    pages = tmp_path / "ocr" / "شیمی 3 خیلی سبز" / "pages"
+    pages.mkdir(parents=True)
+    record = {"page": 18, "data": {"lesson_title": "تعادل", "questions": [
+        {"number": n, "text": "سوال", "options": ["الف", "ب", "ج", "د"]}
+        for n in range(30, 80)]}}
+    (pages / "page_0018.json").write_text(json.dumps(record), encoding="utf-8")
+    blocks = [_test_block(20, "تعادل")]
+    resources.assign_test_resources(db, {"grade": "دوازدهم"}, blocks, [])
+    assert blocks[0]["resource"] == "شیمی 3 خیلی سبز"
+    assert (blocks[0]["question_start"], blocks[0]["question_end"], blocks[0]["count"]) == (30, 49, 20)
+    assert "تست‌های ۳۰ تا ۴۹" in blocks[0]["title"]
+    assert resources.available_books(db, {"grade": "دهم"}) == []
+    week = adaptive.build_week(db, 1, {"grade": "دوازدهم"}, 4, date(2099, 4, 4), [], now=datetime(2099, 4, 3))
+    practice = [b for b in week["blocks"] if b.get("resource") == "شیمی 3 خیلی سبز" and b.get("question_start")]
+    assert practice
+    assert all(b["type"] == "test" and b["count"] == b["question_end"] - b["question_start"] + 1 for b in practice)
+
+
+def test_processed_book_with_pdf_suffix_and_joined_grade_name(db, tmp_path):
+    pages = tmp_path / "ocr" / "شیمی3خیلی سبز.pdf" / "pages"
+    pages.mkdir(parents=True)
+    (pages / "page_0001.json").write_text(json.dumps({"page": 1, "questions": [
+        {"number": 30, "text": "سوال", "options": ["الف", "ب"]}]}), encoding="utf-8")
+    assert resources.available_books(db, {"grade": "دهم"}) == []
+    books = resources.available_books(db, {"grade": "دوازدهم"})
+    assert books[0]["ranges"][0]["q_from"] == 30
+
+
+def test_processed_ocr_does_not_reintroduce_raw_books_excluded_by_track(db, tmp_path):
+    pdf = tmp_path / "raw/test-books/riazi/10/فیزیک خیلی سبز.pdf"
+    pdf.parent.mkdir(parents=True)
+    pdf.touch()
+    pages = tmp_path / "ocr" / pdf.stem / "pages"
+    pages.mkdir(parents=True)
+    (pages / "page_0001.json").write_text(json.dumps({"page": 1, "questions": [
+        {"number": 30, "text": "سوال", "options": ["الف", "ب"]}]}), encoding="utf-8")
+    assert resources.available_books(db, {"grade": "دهم", "major": "تجربی"}) == []
+
+
+def test_processed_ocr_books_respect_science_track_without_raw_pdfs(db, tmp_path):
+    for track in ("ریاضی", "تجربی"):
+        pages = tmp_path / "ocr" / f"فیزیک 1 {track} خیلی سبز" / "pages"
+        pages.mkdir(parents=True)
+        (pages / "page_0001.json").write_text(json.dumps({"page": 1, "questions": [
+            {"number": 30, "text": "سوال", "options": ["الف", "ب"]}]}), encoding="utf-8")
+    books = resources.available_books(db, {"major": "تجربی", "grade": "دهم"})
+    assert [b["book"] for b in books] == ["فیزیک 1 تجربی خیلی سبز"]
+
+
 def test_catalog_ranges_are_split_without_repeating_questions(db):
     db.add(BookCatalog(book_id="شیمی خیلی سبز", subject="شیمی", chapter="استوکیومتری",
                        question_range_start=30, question_range_end=110))

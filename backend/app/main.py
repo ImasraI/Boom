@@ -57,10 +57,13 @@ def _run_pool_sweep_once() -> None:
     """
     from app.auth.database import SessionLocal
     from app.rag import pool_core
-    db = SessionLocal()
+    if not pool_core.begin_progress("automatic"):
+        return  # A targeted admin run owns generation and its progress record.
+    db = None
     budget = max(0, settings.POOL_SWEEP_MAX_BOOKLETS)
     produced = duel = 0
     try:
+        db = SessionLocal()
         if budget:
             produced = pool_core.sweep(
                 db, target=settings.MOCK_POOL_TARGET, max_booklets=budget)
@@ -75,7 +78,9 @@ def _run_pool_sweep_once() -> None:
     except Exception:
         logger.exception("Pool top-up sweep failed")
     finally:
-        db.close()
+        if db is not None:
+            db.close()
+        pool_core.finish_progress()
 
 
 def _start_pool_worker() -> None:

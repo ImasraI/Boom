@@ -14,7 +14,7 @@ export default function Landing({ nav }: { nav: NavFn }) {
       <div className="relative flex-1 flex flex-col items-center justify-center text-center px-8">
         {/* Animated logo */}
         <div className="anim-pop mb-6 flex flex-col items-center">
-          <img src="/logo-v2.png" alt="لوگوی بوم" className="w-20 h-20 mb-4 floaty"
+          <img src="/karzar-shield-detailed.png" alt="نشان سپر کارزار" className="w-20 h-20 mb-4 floaty"
                style={{ filter: "drop-shadow(0 10px 22px rgba(0,0,0,0.28))" }} />
           <h1 className="font-display text-5xl text-[var(--text)] leading-none">بوم</h1>
           <p className="text-[11px] font-bold tracking-[0.25em] text-[var(--accent)] mt-1">BOOM</p>

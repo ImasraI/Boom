@@ -46,7 +46,10 @@ from app.auth.database import (
 )
 from app.auth.deps import get_current_user, get_db
 from app.auth.limits import consume_ai_use, release_ai_use
-from app.rag import mock_generation
+from app.rag import mock_generation, question_bank
+from app.rag.provider_quota import (
+    DAILY_QUOTA_MESSAGE, is_daily_quota_error, require_pool_available,
+)
 from app.rag.mock_generation import (
     KONKUR_SUBJECTS as _KONKUR_SUBJECTS,
     MAJOR_ALIASES as _MAJOR_ALIASES,
@@ -58,6 +61,12 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/mocks", tags=["mocks"])
+
+
+@router.post("/assessment/{test_id}")
+def start_assessment(test_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.rag.assessment_bank import create_assessment
+    return create_assessment(db, current_user.id, test_id)
 
 # Serializes pool claims within this server process (sync endpoints run in a
 # threadpool). Deployment is a single uvicorn process; SQLite serializes the
@@ -78,7 +87,7 @@ class MockConfig(BaseModel):
     duration_minutes: Optional[int] = Field(default=None, ge=1)  # default: sum of subject minutes
     topics: List[str] = []  # restrict to these topics (e.g. from the week's mock)
     difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard)$")
-    mode: str = Field(default="general", pattern="^(general|practice_weak_areas)$")
+    mode: str = Field(default="general", pattern="^(general|practice|practice_weak_areas)$")
     student: Optional[dict] = None
 
 
@@ -147,14 +156,21 @@ def _claim_pool_mock(db: Session, user_id: int, major_key_str: str,
         ).scalars().all()
         from app.rag.pool_core import verified_booklet
         for row in rows:
+            if grade and question_bank.grade_number(row.grade) > question_bank.grade_number(grade):
+                continue
             if not verified_booklet(row.questions):
                 db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
                     GeneratedMock.status == "pending_use").values(status="quarantined"))
+                continue
+            questions = question_bank.active_questions(db, row)
+            if len(questions) != len(json.loads(row.questions)):
+                row.status = "quarantined"
                 continue
             claimed = db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
                 GeneratedMock.status == "pending_use").values(
                     status="claimed", student_id=user_id, grade=grade or row.grade))
             if claimed.rowcount == 1:
+                question_bank.mark_used(db, questions)
                 db.commit()
                 db.refresh(row)
                 return row
@@ -176,6 +192,8 @@ def _persist_mock(db: Session, *, user_id: int, questions: List[dict],
         difficulty=difficulty,
     )
     db.add(mock)
+    db.flush()
+    question_bank.index_mock(db, mock)
     db.commit()
     db.refresh(mock)
     return mock
@@ -199,6 +217,27 @@ def generate_mock(
 def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session):
     poolable, plan, major = _resolve_plan(config)
     grade = (config.student or {}).get("grade") or ""
+    weak = []
+    if config.mode == "practice_weak_areas":
+        weak = mock_generation.weak_areas(current_user.id)
+        plan = mock_generation.bias_plan(plan, weak)
+    labels = _MAJOR_LABELS.get(_major_key(major)) or [major]
+    topics = config.topics or [w.get("topic", "") for w in weak]
+    practice = config.mode != "general"
+    questions = question_bank.assemble(db, current_user.id, plan, labels, config.difficulty,
+        grade, topics, prefer_used=True, used_only=practice, allow_partial=practice)
+    if practice and not questions:
+        questions = question_bank.assemble(db, current_user.id, plan, labels, config.difficulty,
+            grade, topics, prefer_used=True, allow_partial=True)
+    if questions:
+        actual_plan = [{**s, "questions": sum(q["subject"] == s["name"] for q in questions)} for s in plan]
+        actual_plan = [s for s in actual_plan if s["questions"]]
+        duration = config.duration_minutes or max(1, round(sum(s["minutes"] for s in plan) * len(questions) / sum(s["questions"] for s in plan)))
+        mock = question_bank.create_reused_mock(db, current_user.id, questions, major or "ریاضی فیزیک", grade,
+            config.difficulty, duration)
+        db.commit()
+        return {"mock_id": mock.id, "title": mock.title, "duration_minutes": duration,
+                "total_questions": len(questions), "subjects": actual_plan, "source": "question_bank"}
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
 
     # 1) Fast path: claim a pre-generated booklet from the pool.
@@ -219,24 +258,34 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
 
     # 2) Slow path: live generation (pool empty for this combination, or a
        # customized request the pool can never satisfy).
-    weak = []
-    if config.mode == "practice_weak_areas":
-        weak = mock_generation.weak_areas(current_user.id)
-        if weak:
-            plan = mock_generation.bias_plan(plan, weak)
-        else:
-            logger.info("practice_weak_areas requested but user %d has no "
-                        "WrongAnswer rows; falling back to general mode.",
-                        current_user.id)
+    require_pool_available()
 
     duration = config.duration_minutes or sum(s["minutes"] for s in plan)
+
+    provider_error = ""
+
+    def report(event, data):
+        nonlocal provider_error
+        if event == "provider_error":
+            provider_error = data.get("message") or ""
 
     questions = mock_generation.generate_booklet(
         current_user.id, plan,
         topics=config.topics, difficulty=config.difficulty,
+        grade=grade, report=report,
     )
     if questions:
-        questions = mock_generation.verify_and_repair_booklet(questions, current_user.id, difficulty=config.difficulty)
+        questions = mock_generation.verify_and_repair_booklet(
+            questions, current_user.id, difficulty=config.difficulty, report=report)
+    if questions and (is_daily_quota_error(provider_error) or any(
+            sum(q.get("subject") == row["name"] for q in questions) != row["questions"] for row in plan)):
+        _persist_mock(db, user_id=current_user.id, questions=questions, duration=duration,
+            major=major or "ریاضی فیزیک", grade=grade, difficulty=config.difficulty,
+            title="سوال‌های تاییدشده از تولید ناتمام", status="bank_only")
+    if is_daily_quota_error(provider_error):
+        require_pool_available()  # Includes the provider reset time when available.
+        raise HTTPException(503, detail={"code": "provider_daily_quota",
+                                         "message": DAILY_QUOTA_MESSAGE})
     if not questions or any(sum(q.get("subject") == row["name"] for q in questions) != row["questions"] for row in plan):
         raise HTTPException(status_code=502,
                             detail="مدل زبانی دفترچه معتبری تولید نکرد؛ دوباره تلاش کنید.")
@@ -334,7 +383,8 @@ def get_mock(
             ).scalar_one_or_none() is not None
             if not is_challenge_recipient:
                 raise HTTPException(status_code=404, detail="آزمون پیدا نشد")
-    questions = _load_questions(mock)
+    questions = question_bank.active_questions(db, mock)
+    db.commit()
     # Duel booklets are filled asynchronously after match reservation: hide
     # placeholder rows (empty text) so the duel client keeps polling until
     # the real AI-generated questions land.
@@ -354,6 +404,20 @@ def get_mock(
             for q in visible
         ],
     }
+
+
+class QuestionReportIn(BaseModel):
+    reason: str = Field(min_length=5, max_length=2000)
+
+
+@router.post("/{mock_id:int}/questions/{question_id:int}/report")
+def report_question(mock_id: int, question_id: int, payload: QuestionReportIn,
+                    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # Reuse exactly the booklet read authorization, including duel opponents
+    # and accepted challenge recipients. An arbitrary bank id is never accepted.
+    get_mock(mock_id, current_user, db)
+    return question_bank.record_report(db, db.get(GeneratedMock, mock_id), current_user.id,
+                                       question_id, payload.reason.strip())
 
 
 class SubmitPayload(BaseModel):
@@ -398,9 +462,9 @@ def submit_mock(
         ).scalar_one_or_none()
         if challenge_invite is None:
             raise HTTPException(status_code=404, detail="آزمون پیدا نشد")
-    questions = _load_questions(mock)
+    questions = question_bank.active_questions(db, mock)
     if not questions:
-        raise HTTPException(status_code=500, detail="دفترچه آزمون خراب است")
+        raise HTTPException(status_code=409, detail="سوال معتبری برای تصحیح این دفترچه باقی نمانده است")
 
     # A database write lock serializes submissions for this student across processes.
     # This preserves historical rows while making retries return the first result.
