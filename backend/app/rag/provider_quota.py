@@ -101,15 +101,18 @@ def blocked_quota(identity: str) -> tuple[float, str] | None:
         return entry
 
 
-def pool_gemini_keys(settings) -> list[str]:
+def pool_gemini_keys(settings, *, verification: bool = False) -> list[str]:
     """Explicit pool credentials in priority order, without duplicates.
 
     The primary retains the existing dedicated/shared-key behavior. Backups
     are opt-in and are never implicitly taken from chat or embedding workers.
     """
-    primary = ((settings.POOL_LLM_API_KEY or "").strip()
+    dedicated = (getattr(settings, "POOL_VERIFY_LLM_API_KEY", "") if verification
+                 else settings.POOL_LLM_API_KEY)
+    primary = ((dedicated or "").strip()
                or (settings.GEMINI_API_KEY or "").strip())
-    extras = getattr(settings, "POOL_GEMINI_API_KEYS", "") or ""
+    name = "POOL_VERIFY_GEMINI_API_KEYS" if verification else "POOL_GEMINI_API_KEYS"
+    extras = getattr(settings, name, "") or ""
     return list(dict.fromkeys(key.strip() for key in [primary, *extras.split(",")]
                              if key.strip()))
 
@@ -134,17 +137,35 @@ def pool_quota_status() -> dict:
     from app.config import get_settings
 
     settings = get_settings()
-    provider = ((settings.POOL_LLM_PROVIDER or "").strip()
-                or (settings.LLM_PROVIDER or "").strip()).lower()
+    generation = _stage_quota_status(settings)
+    if generation["blocked"]:
+        return generation
+    if (getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "") or "").strip():
+        return _stage_quota_status(settings, verification=True)
+    return generation
+
+
+def _stage_quota_status(settings, *, verification: bool = False) -> dict:
+    if verification:
+        provider = settings.POOL_VERIFY_LLM_PROVIDER.strip().lower()
+        override_model = getattr(settings, "POOL_VERIFY_LLM_MODEL_NAME", "")
+    else:
+        provider = ((settings.POOL_LLM_PROVIDER or "").strip()
+                    or (settings.LLM_PROVIDER or "").strip()).lower()
+        override_model = settings.POOL_LLM_MODEL_NAME
     if provider != "gemini":
         return {"blocked": False}
-    model = ((settings.POOL_LLM_MODEL_NAME or "").strip()
+    model = ((override_model or "").strip()
              or settings.GEMINI_MODEL_NAME.strip())
     entries = [blocked_quota(quota_identity(settings.GEMINI_BASE_URL, model, key))
-               for key in pool_gemini_keys(settings)]
+               for key in pool_gemini_keys(settings, verification=verification)]
     # Explicitly configured alternatives may still answer. Never enable the
     # chat provider implicitly: stocking shelves must not drain chat's quota.
-    if not entries or any(entry is None for entry in entries) or _has_pool_fallback(settings):
+    fallback = not verification and _has_pool_fallback(settings)
+    if not entries and verification:
+        return {"blocked":True, "code":"provider_not_configured", "stage":"verification",
+                "message":"کلید سرویس بررسی پاسخ آزمون تنظیم نشده است؛ مدیر سایت تنظیمات را بررسی کند."}
+    if not entries or any(entry is None for entry in entries) or fallback:
         return {"blocked": False}
     until = min(entry[0] for entry in entries)
     return {
@@ -153,6 +174,7 @@ def pool_quota_status() -> dict:
         "message": DAILY_QUOTA_MESSAGE,
         "retry_at": datetime.fromtimestamp(until, timezone.utc).isoformat(),
         "retry_after": max(1, math.ceil(until - datetime.now(timezone.utc).timestamp())),
+        **({"stage": "verification"} if verification else {}),
     }
 
 
@@ -162,4 +184,5 @@ def require_pool_available() -> None:
     status = pool_quota_status()
     if status["blocked"]:
         raise HTTPException(503, detail=status,
-                            headers={"Retry-After": str(status["retry_after"])})
+                            headers=({"Retry-After": str(status["retry_after"])}
+                                     if status.get("retry_after") else None))

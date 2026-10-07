@@ -1,5 +1,56 @@
 # Mock pool credentials and free capacity
 
+## Independent drafting and answer checks
+
+The deployed configuration uses Groq `openai/gpt-oss-120b` to draft questions
+and replacements, with Gemini independently solving them. Chat and planning
+keep their existing Groq settings; OCR/vision and retrieval keep Gemini.
+Only independently accepted questions enter the reusable question bank.
+The verifier receives diagram data, but never the draft's answer or explanation.
+
+Configure these roles in ignored `backend/.env`:
+
+```dotenv
+POOL_LLM_PROVIDER=groq
+POOL_LLM_API_KEY=<existing Groq key>
+POOL_LLM_MODEL_NAME=openai/gpt-oss-120b
+POOL_LLM_FALLBACK_PROVIDERS=
+POOL_VERIFY_LLM_PROVIDER=gemini
+POOL_VERIFY_LLM_API_KEY=<existing Gemini key>
+POOL_VERIFY_LLM_MODEL_NAME=gemini-3.6-flash
+POOL_VERIFY_GEMINI_API_KEYS=<optional ordered Gemini backup keys>
+POOL_VERIFY_MAX_TOKENS=2400
+POOL_VERIFY_REASONING_EFFORT=low
+POOL_GENERATION_BATCH_SIZE=4
+POOL_GENERATION_MAX_TOKENS=2400
+POOL_GENERATION_CONTEXT_CHARS=1800
+POOL_GENERATION_REQUESTS_PER_MINUTE=1
+POOL_WORKER_INPROCESS=False
+```
+
+Four-question drafts and one new draft request per minute provide a conservative
+starting budget for Groq's free token allowance while chat shares its organization.
+Actual capacity also depends on input/output size and other traffic. Existing
+provider retries respect transient rate limits and Retry-After. Pacing is shared
+among pool clients in one backend process; separate processes/organizations have
+their own scheduler and provider-enforced limits.
+
+Start a selected mock type from Admin; automatic restock stays disabled.
+This configuration takes longer for a full booklet than for a short practice.
+Stored, verified questions remain reusable without generation calls. If every
+Gemini verifier key is known exhausted, new generation stops before drafting
+spends Groq tokens. It never falls back to Groq verifying its own drafts.
+An empty `POOL_VERIFY_LLM_PROVIDER` preserves the legacy single-provider behavior.
+
+The browser starts `/api/mocks/generation` and polls its account-scoped job.
+Long drafting no longer holds a Cloudflare request open. Repeated starts reuse
+the same active job; leaving the page stops polling without cancelling generation.
+Completed booklets persist in SQLite. Transient job status expires after two hours
+and resets on a backend restart; an interrupted job must be requested again.
+The synchronous `/api/mocks/generate` endpoint remains for existing API clients.
+
+## Gemini credential failover
+
 Pool generation supports explicitly configured Gemini backup credentials.
 Set `POOL_LLM_PROVIDER=gemini`, keep the primary key in `POOL_LLM_API_KEY`,
 and add ordered backup keys to the comma-separated `POOL_GEMINI_API_KEYS`
@@ -14,6 +65,8 @@ and reset timestamps across restarts. Known exhausted credentials are skipped
 without another API request. If every Gemini credential is blocked and no
 usable alternative provider is configured, restock/live generation returns a
 readable HTTP 503 with the earliest reset time; verified stock remains usable.
+The independent verifier uses `POOL_VERIFY_GEMINI_API_KEYS` rather than the
+drafting role's `POOL_GEMINI_API_KEYS`, preserving the same persisted cooldowns.
 Per-minute limits keep bounded retries and `Retry-After` backoff. Timeouts,
 malformed answers and temporary limits do not silently switch credentials.
 

@@ -3,6 +3,7 @@ import { NavFn, SignupData } from "../types"
 import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
+import { requestMockGeneration } from "../mockGeneration"
 
 type Phase = "config" | "loading" | "ready" | "test" | "result"
 
@@ -431,12 +432,9 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
     setPhase("loading")
     setError("")
     try {
-      const data = await apiJson<MockInfo>("/api/mocks/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(authHeaders() as Record<string, string>) },
-        body: JSON.stringify({ ...cfg, student: { major: userData?.major, grade: userData?.grade } }),
-        signal: controller.signal,
-      }, 300000)
+      const data = await requestMockGeneration<MockInfo>(
+        { ...cfg, student: { major: userData?.major, grade: userData?.grade } }, controller.signal,
+      )
       const qData = await apiJson<{ questions: MockQuestion[] }>(`/api/mocks/${data.mock_id}`, { signal: controller.signal })
       if (!Array.isArray(qData.questions) || !qData.questions.length) throw new Error("سوال معتبری در این دفترچه باقی نمانده است؛ دفترچه دیگری انتخاب کن.")
       setInfo(data)
@@ -479,7 +477,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
       <div className="min-h-screen bg-[var(--surface)] flex flex-col items-center justify-center gap-4">
         <div className="w-10 h-10 border-3 border-[var(--accent)] border-t-transparent rounded-full animate-spin" style={{ borderWidth: 3 }} />
         <p className="text-[13px] font-bold text-[var(--muted)]">در حال ساخت دفترچه از کتاب‌های تو...</p>
-        <p className="text-[11px] text-[var(--muted-2)]">ساخت و بررسی پاسخ‌های دفترچه ممکن است چند دقیقه طول بکشد.</p>
+        <p className="text-[11px] text-[var(--muted-2)]">ساخت و بررسی پاسخ‌های دفترچه ممکن است چند دقیقه طول بکشد. بازگشت به تنظیمات تولید را متوقف نمی‌کند.</p>
         <button onClick={() => { generationRef.current?.abort(); setPhase("config") }} className="text-sm text-[var(--accent)]">بازگشت به تنظیمات</button>
       </div>
       )}

@@ -75,6 +75,7 @@ def test_correct_answers_contribute_to_strength_evidence(db):
 def test_unverified_question_is_dropped(monkeypatch):
     from app.rag import mock_generation as mg
     monkeypatch.setattr(mg, "get_pool_llm_client", lambda: object())
+    monkeypatch.setattr(mg, "get_pool_verifier_client", lambda: object())
     # The solver verifies in batches now; this stub is "solved none of them".
     monkeypatch.setattr(mg, "_verify_batch", lambda *a: {1: None})
     monkeypatch.setattr(mg, "_verify_question", lambda *a: None)
@@ -86,6 +87,7 @@ def test_unverified_question_is_dropped(monkeypatch):
 def test_verified_question_has_persisted_status(monkeypatch):
     from app.rag import mock_generation as mg
     monkeypatch.setattr(mg, "get_pool_llm_client", lambda: object())
+    monkeypatch.setattr(mg, "get_pool_verifier_client", lambda: object())
     # Batch solver agrees with the stored key on question 1.
     monkeypatch.setattr(mg, "_verify_batch", lambda *a: {1: 0})
     monkeypatch.setattr(mg, "_verify_question", lambda *a: 0)

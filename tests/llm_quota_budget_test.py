@@ -96,6 +96,7 @@ class CountingSolver:
 
 def _patch_solver(monkeypatch, solver):
     monkeypatch.setattr(mg, "get_pool_llm_client", lambda: solver)
+    monkeypatch.setattr(mg, "get_pool_verifier_client", lambda: solver)
     return solver
 
 
@@ -120,7 +121,7 @@ def test_wrong_keys_are_repaired_and_never_kept(monkeypatch):
     and only then kept - and the answer key must come from the replacement."""
     questions = [_question(i) for i in range(1, 4)]
     solver = CountingSolver(script=["correct", "correct", "wrong"])
-    monkeypatch.setattr(mg, "get_pool_llm_client", lambda: solver)
+    _patch_solver(monkeypatch, solver)
     fresh = _question(1, answer=0)
     fresh["text"] = "سوال جایگزین"
     monkeypatch.setattr(mg, "_generate_replacement", lambda *a, **k: fresh)
@@ -135,8 +136,7 @@ def test_wrong_keys_are_repaired_and_never_kept(monkeypatch):
 
 def test_unsolvable_questions_are_not_marked_verified(monkeypatch):
     """null / an unclean reply means \"could not verify\", never a guess."""
-    monkeypatch.setattr(mg, "get_pool_llm_client", lambda: CountingSolver(
-        script=["unsolvable"]))
+    _patch_solver(monkeypatch, CountingSolver(script=["unsolvable"]))
     monkeypatch.setattr(mg, "_generate_replacement", lambda *a, **k: None)
     assert mg.verify_and_repair_booklet([_question(1)], 1, max_regens=1) == []
 
@@ -163,8 +163,7 @@ def test_a_refused_call_stops_after_one_request(monkeypatch):
 
 
 def test_fail_closed_also_when_the_first_batch_is_refused(monkeypatch):
-    monkeypatch.setattr(mg, "get_pool_llm_client", lambda: CountingSolver(
-        empty_after=0))
+    _patch_solver(monkeypatch, CountingSolver(empty_after=0))
     assert mg.verify_and_repair_booklet([_question(1)], 1, timeout=10) == []
 
 

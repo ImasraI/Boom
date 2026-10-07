@@ -8,10 +8,9 @@ sources). This module owns the pipeline only:
   build_booklet_prompt   -> the structured Persian generation prompt
   generate_booklet       -> per-subject LLM calls + JSON parse + padding
 
-`generate_booklet` makes ONE LLM call per subject row of the plan (not one
-giant call): 105-160 question booklets degrade badly in a single generation
-(format drift, repetition), while focused per-subject calls hold quality and
-isolate failures. It returns validated rows in storage shape ({"_id",
+`generate_booklet` drafts each subject separately, using smaller batches when
+configured for a provider with a limited token budget. Focused batches reduce
+format drift and isolate failures. It returns parsed rows in storage shape ({"_id",
 "subject", "topic", "text", "options", "answer", "explanation"}) or [] when
 nothing usable was produced — callers decide how to surface that (502 for
 /api/mocks, silent placeholder for arena duels).
@@ -30,8 +29,10 @@ from app.rag.konkur_format import (  # noqa: F401  (re-exported for consumers)
     major_key,
     plan_totals,
 )
-from app.rag.llm import get_pool_llm_client
-from app.rag.provider_quota import is_daily_quota_error
+from app.config import get_settings
+from app.rag.llm import get_pool_llm_client, get_pool_verifier_client
+from app.rag.provider_quota import is_daily_quota_error, quota_identity
+from app.rag.pool_pacing import wait_for_draft_slot
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -504,7 +505,7 @@ def _verify_question(client, question: dict, timeout: float) -> Optional[int]:
     Returns the solver's option index, or None when it can't produce a clean
     answer (unsolvable / unparseable / call failed)."""
     prompt = _VERIFY_PROMPT.format(
-        text=question["text"],
+        text=_solver_text(question),
         o0=question["options"][0], o1=question["options"][1],
         o2=question["options"][2], o3=question["options"][3],
     )
@@ -520,10 +521,20 @@ def _verify_question(client, question: dict, timeout: float) -> Optional[int]:
 # One solver call per BATCH of questions instead of one per question.
 # A 105-question ریاضی فیزیک booklet used to cost ~108 requests (3 generation
 # + 105 verification), which no free tier can serve: Gemini's free tier allows
-# 20 requests per day per model, so the pool could never build a single row.
-# At 10 questions per call the same booklet costs ~14 requests, and the saving
+# a small daily allowance, so the pool could not build a single row.
+# At 10 questions per call verification costs far fewer requests, and the saving
 # scales with every paid tier too.
 _VERIFY_BATCH_SIZE = 10
+
+
+def _solver_text(question: dict) -> str:
+    """Include the visible diagram, never the generator's key/explanation."""
+    text = question["text"]
+    figure = question.get("figure") or {}
+    if isinstance(figure, dict) and figure.get("type") not in (None, "none") and figure.get("data"):
+        visible = {"type":figure["type"], "data":figure["data"]}
+        text += "\nداده‌های شکل سوال:\n" + json.dumps(visible, ensure_ascii=False)
+    return text
 
 
 def _verify_batch_prompt(batch: List[dict]) -> str:
@@ -532,7 +543,7 @@ def _verify_batch_prompt(batch: List[dict]) -> str:
     for i, q in enumerate(batch, start=1):
         options = "\n".join(f"   {j}) {opt}"
                             for j, opt in enumerate(q["options"]))
-        items.append(f"[{i}]\nمتن سوال: {q['text']}\nگزینه‌ها:\n{options}")
+        items.append(f"[{i}]\nمتن سوال: {_solver_text(q)}\nگزینه‌ها:\n{options}")
     example = ", ".join(f'"{i}": {(i - 1) % 4}' for i in range(1, len(batch) + 1))
     return ("تو یک حل‌کننده مستقل تست چهارگزینه‌ای هستی. هر سوال را جدا و مستقل حل کن."
             "\n\n" + "\n\n".join(items) +
@@ -646,10 +657,10 @@ def _generate_replacement(client, user_id: int, question: dict,
     row = {"name": question["subject"], "questions": 1, "minutes": 1}
     context = retrieve_book_context(user_id, [question["subject"]],
                                     [topic] if topic else [], per_subject=2)
+    context = _draft_context(context)
     prompt = build_booklet_prompt([row], [topic] if topic else [],
                                   difficulty, context)
-    raw = client.generate([{"role": "user", "content": prompt}],
-                          max_tokens=max_tokens, timeout=timeout)
+    raw = _draft_generate(client, prompt, max_tokens, timeout)
     rows = parse_booklet(raw)
     return rows[0] if rows else None
 
@@ -672,9 +683,9 @@ def verify_and_repair_booklet(
 ) -> List[dict]:
     """Independently re-solve every question; replace the broken ones.
 
-    The solver sees only question texts and options and returns the options it
-    computed - one call per batch of _VERIFY_BATCH_SIZE questions (a booklet
-    costs ~14 provider requests instead of ~108), one call per replacement.
+    The solver sees question texts, options and diagram data, without the
+    generator's answer or explanation. It checks _VERIFY_BATCH_SIZE questions
+    per call, then independently checks each drafted replacement.
     Verdict per question:
       - solver index == stored answer               -> keep as-is
       - solver clean but different, OR solver could
@@ -686,7 +697,8 @@ def verify_and_repair_booklet(
     """
     if not questions:
         return questions
-    client = get_pool_llm_client()
+    client = get_pool_verifier_client()
+    generator = None  # Create a drafting client only if a replacement is needed.
     _report(report, "phase", name="verifying")
 
     def _score(verdict: Optional[int], stated: int) -> int:
@@ -706,10 +718,12 @@ def verify_and_repair_booklet(
 
         best, best_score = q, _score(verdict, q["answer"])
         for attempt in range(1, max_regens + 1):
-            repl = _generate_replacement(client, user_id, q, difficulty,
+            if generator is None:
+                generator = get_pool_llm_client()
+            repl = _generate_replacement(generator, user_id, q, difficulty,
                                          gen_max_tokens, timeout)
-            if is_daily_quota_error(getattr(client, "last_error", "")):
-                _report(report, "provider_error", message=client.last_error)
+            if is_daily_quota_error(getattr(generator, "last_error", "")):
+                _report(report, "provider_error", message=generator.last_error)
                 return out
             if repl is None:
                 logger.warning("Verify: replacement attempt %d for a %s "
@@ -761,66 +775,84 @@ def _weak_block(entries: List[dict]) -> str:
             f"شبیه همین مفاهیم بزن):\n{lines}\n\n")
 
 
+def _draft_context(context: str) -> str:
+    limit = max(0, getattr(get_settings(), "POOL_GENERATION_CONTEXT_CHARS", 0))
+    return context[:limit] if limit else context
+
+
+def _draft_generate(client, prompt: str, max_tokens: int, timeout: float) -> str:
+    settings = get_settings()
+    limit = max(0, getattr(settings, "POOL_GENERATION_MAX_TOKENS", 0))
+    budget = min(max_tokens, limit) if limit else max_tokens
+    # Only the drafting path is paced; ordinary chat uses the plain clients.
+    provider = (settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER).strip().lower()
+    model = (settings.POOL_LLM_MODEL_NAME or settings.LLM_MODEL_NAME).strip()
+    identity = quota_identity(provider, model, settings.POOL_LLM_API_KEY or settings.LLM_API_KEY)
+    wait_for_draft_slot(identity, max(0, getattr(settings, "POOL_GENERATION_REQUESTS_PER_MINUTE", 0)))
+    return client.generate([{"role":"user", "content":prompt}], max_tokens=budget, timeout=timeout)
+
+
 def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
                                 difficulty: str, max_tokens: int,
                                 timeout: float,
                                 report: Reporter = None,
                                 grade: str = "") -> List[dict]:
-    """One subject -> one (retried) LLM call. Subject name is enforced from
-    the plan row so scoring/grouping never depends on the model's spelling.
-    A row may carry "topics" (per-subject topic targets) and "weak" (weak-area
-    entries) from bias_plan; row-level values win over the global topics."""
+    """Retrieve once per subject, optionally draft in smaller paced batches.
+
+    Subject names, grade and per-subject weak areas are enforced from the
+    plan. Smaller batches fit provider token limits without repeated RAG calls.
+    """
     count = int(row.get("questions") or 0)
+    if count <= 0:
+        return []
     subject = row["name"]
     row_topics = row.get("topics") or topics
-    context = retrieve_book_context(user_id, [subject], row_topics)
+    context = _draft_context(retrieve_book_context(user_id, [subject], row_topics))
     if not (context or "").strip():
-        # Make the ungrounded path VISIBLE: this subject's questions come from
-        # general model knowledge, not the student's books. Logged per subject
-        # (not per booklet) so a partial grounding failure is still diagnosable
-        # from the logs afterwards.
-        logger.warning(
-            "Booklet grounding MISS: subject %r generated with zero book "
-            "context (user %s) - questions will be LLM-knowledge-only.",
-            subject, user_id,
-        )
-    # ~90 output tokens per question (Persian text + 4 options + explanation)
+        logger.warning("Booklet grounding MISS: subject %r generated with zero book "
+                       "context (user %s) - questions will be LLM-knowledge-only.",
+                       subject, user_id)
     budget = max(max_tokens, count * 90)
-
     client = get_pool_llm_client()
+    batch_size = max(0, getattr(get_settings(), "POOL_GENERATION_BATCH_SIZE", 0)) or count
     rows: List[dict] = []
-    for attempt, target in enumerate((count, max(3, count // 2))):
+    for offset in range(0, count, batch_size):
+        target = min(batch_size, count - offset)
+        batch = _draft_subject_batch(client, row, target, row_topics,
+                                     difficulty, context, budget, timeout, report, grade, rows)
+        if batch is None:
+            return []
+        rows.extend(batch)
+    rows = pad_booklet(rows[:count])
+    for r in rows:
+        r["subject"] = subject
+    return rows
+
+
+def _draft_subject_batch(client, row, count, row_topics, difficulty, context,
+                         budget, timeout, report, grade, already):
+    subject = row["name"]
+    rows: List[dict] = []
+    for attempt, target in enumerate((count, max(1, count // 2))):
         prompt = build_booklet_prompt([{**row, "questions": target}],
                                       row_topics, difficulty, context,
                                       weak_block=_weak_block(row.get("weak") or []),
                                       grade=grade)
-        raw = client.generate(
-            [{"role": "user", "content": prompt}],
-            max_tokens=budget, timeout=timeout,
-        )
+        if already:
+            previous = "\n".join(q["text"][:120] for q in already[-8:])
+            prompt += "\n\nاین سوال‌ها قبلاً ساخته شده‌اند؛ سوال تکراری نساز:\n" + previous
+        raw = _draft_generate(client, prompt, budget, timeout)
         if not (raw or "").strip():
-            # Not one character back: the provider refused the call (quota,
-            # rate limit, timeout). Retrying with half the questions merely
-            # doubles the wait and the wasted quota, so stop here and say why.
-            # The pool turns this into a sweep abort instead of hammering
-            # every remaining shelf for minutes (or hours).
-            reason = (getattr(client, "last_error", "")
-                      or "provider returned no response")
-            logger.error("Subject %s: provider refused the call (%s).",
-                         subject, reason)
+            reason = getattr(client, "last_error", "") or "provider returned no response"
+            logger.error("Subject %s: provider refused the call (%s).", subject, reason)
             _report(report, "provider_error", message=reason, subject=subject)
-            return []
-        rows = parse_booklet(raw)
-        _report(report, "generated", count=len(rows), subject=subject,
-                target=count)
-        if len(rows) >= count // 2:
+            return None
+        rows = parse_booklet(raw)[:count]
+        if len(rows) >= max(1, (count + 1) // 2):
             break
         logger.warning("Subject %s: attempt %d produced %d/%d valid questions.",
                        subject, attempt + 1, len(rows), count)
-
-    rows = pad_booklet(rows[:count])
-    for r in rows:
-        r["subject"] = subject  # plan row wins over LLM spelling
+    _report(report, "generated", count=len(rows), subject=subject, target=count)
     return rows
 
 

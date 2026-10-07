@@ -601,8 +601,10 @@ class GeminiLLMClient(BaseLLMClient):
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
-            "max_tokens": max_tokens or self.max_tokens,
-            **({"reasoning_effort": "none"} if self._is_thinking_model else {}),
+            "max_tokens": max(max_tokens or self.max_tokens,
+                              getattr(self, "minimum_completion_tokens", 0)),
+            **({"reasoning_effort": getattr(self, "reasoning_effort", "none")}
+               if self._is_thinking_model else {}),
         }
 
     def generate(
@@ -1233,6 +1235,36 @@ def get_pool_llm_client() -> BaseLLMClient:
         return primary
     logger.info("Pool LLM failover chain: %s", " -> ".join(labels))
     return FallbackLLMClient(clients, labels)
+
+
+def get_pool_verifier_client() -> BaseLLMClient:
+    """Answer checking is independent of drafting when explicitly configured.
+
+    No automatic fallback to the drafting provider: an exhausted Gemini
+    solver must not quietly let Groq check its own generated answer keys.
+    """
+    settings = get_settings()
+    provider = (getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "") or "").strip().lower()
+    if not provider:
+        return get_pool_llm_client()
+    key = (getattr(settings, "POOL_VERIFY_LLM_API_KEY", "") or "").strip()
+    model = (getattr(settings, "POOL_VERIFY_LLM_MODEL_NAME", "") or "").strip() or None
+    if provider != "gemini":
+        return get_llm_client(provider=provider, api_key=key or None, model=model)
+    keys = pool_gemini_keys(settings, verification=True)
+    if not keys:
+        return MockLLMClient()
+    clients = [get_llm_client(provider="gemini", api_key=credential, model=model)
+               for credential in keys]
+    for client in clients:
+        client.temperature = 0.0
+        client.minimum_completion_tokens = max(0, getattr(settings, "POOL_VERIFY_MAX_TOKENS", 0))
+        effort = getattr(settings, "POOL_VERIFY_REASONING_EFFORT", "low")
+        client.reasoning_effort = effort if effort in {"none","low","medium","high"} else "low"
+    if len(clients) == 1:
+        return clients[0]
+    return FallbackLLMClient(clients, ["gemini verifier"] +
+                             [f"gemini verifier backup {i}" for i in range(1, len(clients))])
 
 
 def get_vision_llm_client() -> BaseLLMClient:

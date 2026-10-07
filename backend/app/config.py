@@ -49,6 +49,18 @@ class Settings(BaseSettings):
     # Ordered Gemini backup credentials for mock generation only. Comma-separated;
     # keys from one Google project share its quota. Never expose this in the UI.
     POOL_GEMINI_API_KEYS: str = ""
+    # Independent answer solver; empty provider keeps legacy same-provider checks.
+    POOL_VERIFY_LLM_PROVIDER: str = ""
+    POOL_VERIFY_LLM_API_KEY: str = ""
+    POOL_VERIFY_LLM_MODEL_NAME: str = ""
+    POOL_VERIFY_GEMINI_API_KEYS: str = ""
+    POOL_VERIFY_MAX_TOKENS: int = 0
+    POOL_VERIFY_REASONING_EFFORT: str = "low"
+    # Drafting workload limits; 0 preserves the previous subject calls.
+    POOL_GENERATION_BATCH_SIZE: int = 0
+    POOL_GENERATION_MAX_TOKENS: int = 0
+    POOL_GENERATION_CONTEXT_CHARS: int = 0
+    POOL_GENERATION_REQUESTS_PER_MINUTE: int = 0
     # Extra providers to CONTINUE on when the pool provider runs out of its
     # per-day quota (comma-separated, e.g. "groq,cerebras"). Quota scope and
     # allowances depend on the provider, project/organization and model.

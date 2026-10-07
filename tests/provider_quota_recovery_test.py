@@ -90,6 +90,7 @@ def test_verifier_stops_after_replacement_exhausts_daily_quota(monkeypatch):
     calls, events = [], []
     questions = [{"_id": i, "text": f"question {i}", "subject": "شیمی", "answer": 0} for i in range(3)]
     monkeypatch.setattr(mock_generation, "get_pool_llm_client", lambda: client)
+    monkeypatch.setattr(mock_generation, "get_pool_verifier_client", lambda: client)
     monkeypatch.setattr(mock_generation, "_batch_verdicts", lambda *args: iter((q, 1) for q in questions))
     def refuse(*args):
         calls.append(1)

@@ -19,6 +19,54 @@ function load(name, extra = {}) {
   return {exports, values, reloads:()=>reloads};
 }
 
+test('mock generation polls until verified results are ready using short requests', async () => {
+  const calls = [];
+  const replies = [{job_id:'own-job',status:'running'}, {job_id:'own-job',status:'running'},
+    {job_id:'own-job',status:'ready',result:{mock_id:42,total_questions:3}}];
+  const h = load('mockGeneration', {
+    DOMException, require:()=>({apiJson:async (...args)=>{calls.push(args); return replies.shift()}}),
+    setTimeout:callback=>setTimeout(callback,1),
+  });
+  const controller = new AbortController();
+  const result = await h.exports.requestMockGeneration({mode:'practice'},controller.signal);
+  assert.equal(result.mock_id,42);
+  assert.equal(calls.length,3);
+  assert.equal(calls[0][0],'/api/mocks/generation');
+  assert.equal(JSON.parse(calls[0][1].body).mode,'practice');
+  assert.equal(calls[1][0],'/api/mocks/generation/own-job');
+  assert.ok(calls.every(call=>call[1].signal===controller.signal));
+});
+
+test('leaving mock generation aborts polling without requesting another booklet', async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const h = load('mockGeneration', {
+    DOMException, require:()=>({apiJson:async ()=>{
+      calls++; queueMicrotask(()=>controller.abort());
+      return {job_id:'own-job',status:'running'};
+    }}),
+  });
+  await assert.rejects(h.exports.requestMockGeneration({},controller.signal),{name:'AbortError'});
+  assert.equal(calls,1);
+});
+
+test('mock status preserves provider errors and rejects a missing result', async () => {
+  const quota = new Error('verification quota exhausted');
+  let calls = 0;
+  const h = load('mockGeneration', {
+    DOMException, require:()=>({apiJson:async ()=>{
+      if(calls++) throw quota;
+      return {job_id:'own-job',status:'running'};
+    }}),
+    setTimeout:callback=>setTimeout(callback,1),
+  });
+  await assert.rejects(h.exports.requestMockGeneration({},new AbortController().signal),error=>error===quota);
+  const invalid = load('mockGeneration', {
+    DOMException, require:()=>({apiJson:async ()=>({job_id:'own-job',status:'ready'})}),
+  });
+  await assert.rejects(invalid.exports.requestMockGeneration({},new AbortController().signal),/دفترچه آماده نشد/);
+});
+
 test('a missing deployed page reloads once and restores its selected panel', () => {
   const h = load('pageRecovery');
   const e = new TypeError('Failed to fetch dynamically imported module: /assets/Mock-old.js');

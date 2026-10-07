@@ -28,6 +28,7 @@ live generation call.
 
 import json
 import threading
+from threading import Thread
 from datetime import datetime
 from typing import List, Optional, Tuple
 
@@ -41,13 +42,14 @@ from app.auth.database import (
     ChallengeInvite,
     GeneratedMock,
     MockAttempt,
+    SessionLocal,
     StudentProfile,
     User,
     WrongAnswer,
 )
 from app.auth.deps import get_current_user, get_db
 from app.auth.limits import consume_ai_use, release_ai_use
-from app.rag import mock_generation, question_bank
+from app.rag import mock_generation, question_bank, mock_jobs
 from app.rag.provider_quota import (
     DAILY_QUOTA_MESSAGE, is_daily_quota_error, require_pool_available,
 )
@@ -213,6 +215,49 @@ def generate_mock(
         # Provider, retrieval and persistence failures must all refund the reservation.
         release_ai_use(current_user.id, "mock_generate")
         raise
+
+
+def _run_generation_job(job_id: str, config: MockConfig, user_id: int) -> None:
+    try:
+        with SessionLocal() as db:
+            user = db.get(User, user_id)
+            if user is None:
+                raise HTTPException(401, "حساب کاربری پیدا نشد.")
+            result = _generate_reserved_mock(config, user, db)
+        mock_jobs.finish(job_id, result=result)
+    except Exception as exc:
+        release_ai_use(user_id, "mock_generate")
+        if isinstance(exc, HTTPException):
+            error = exc
+        else:
+            logger.exception("Background mock generation failed for user %s", user_id)
+            error = HTTPException(502, "ساخت دفترچه ناموفق بود؛ دوباره تلاش کنید.")
+        mock_jobs.finish(job_id, error=error)
+
+
+@router.post("/generation", status_code=202)
+def start_generation(config: MockConfig, current_user: User = Depends(get_current_user)):
+    job, created = mock_jobs.reserve(current_user.id)
+    if not created:
+        return job  # Repeated clicks resume the same job without more quota.
+    reserved = False
+    try:
+        consume_ai_use(current_user.id, "mock_generate")
+        reserved = True
+        Thread(target=_run_generation_job,
+            args=(job['job_id'], config, current_user.id), daemon=True,
+            name="mock-generation").start()
+    except Exception:
+        mock_jobs.discard(job['job_id'])
+        if reserved:
+            release_ai_use(current_user.id, "mock_generate")
+        raise
+    return job
+
+
+@router.get("/generation/{job_id}")
+def generation_status(job_id: str, current_user: User = Depends(get_current_user)):
+    return mock_jobs.get(job_id, current_user.id)
 
 
 def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session):
