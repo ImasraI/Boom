@@ -7,6 +7,9 @@ and replacements, with Gemini independently solving them. Chat and planning
 keep their existing Groq settings; OCR/vision and retrieval keep Gemini.
 Only independently accepted questions enter the reusable question bank.
 The verifier receives diagram data, but never the draft's answer or explanation.
+References to missing figures/tables cannot be certified by a guessed answer;
+they require a replacement. The solver also rejects ambiguous or incomplete
+questions rather than choosing the closest option.
 
 Configure these roles in ignored `backend/.env`:
 

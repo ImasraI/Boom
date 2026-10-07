@@ -192,6 +192,38 @@ def test_solver_receives_chart_data_without_generator_metadata(monkeypatch):
         assert "PRIVATE_GENERATOR_EXPLANATION" not in prompt
 
 
+def test_missing_table_is_repaired_even_when_solver_guesses_stated_answer(monkeypatch):
+    bad=question()
+    bad['text']='در جدول زیر، ترکیب X کدام است؟'
+    bad['figure']={'type':'none','data':{}}
+    fresh=question(2)
+    fresh['text']='یک سوال کامل بدون جدول'
+    solver=Replies(['{"answers":{"1":0}}','{"answer":0}'])
+    drafter=Replies([json.dumps({'questions':[fresh]})])
+    monkeypatch.setattr(mg,'get_pool_verifier_client',lambda:solver)
+    monkeypatch.setattr(mg,'get_pool_llm_client',lambda:drafter)
+    monkeypatch.setattr(mg,'retrieve_book_context',lambda *a,**kw:'source')
+    out=mg.verify_and_repair_booklet([bad],7,max_regens=1)
+    assert len(out)==1 and out[0]['text']==fresh['text'] and len(drafter.prompts)==1
+
+
+def test_missing_diagram_never_spends_a_single_solver_call():
+    bad=question()
+    bad['text']='مطابق نمودار زیر، سرعت چند است؟'
+    solver=Replies([])
+    assert mg._verify_question(solver,bad,30) is None and not solver.prompts
+
+
+def test_supplied_chart_and_inline_table_are_not_rejected_as_missing():
+    q=question()
+    q['text']='مطابق نمودار زیر، کدام مقدار بیشتر است؟'
+    q['figure']={'type':'bar_chart','data':{'categories':['A','B'],'values':[1,2]}}
+    assert not mg._missing_visible_reference(q)
+    q['text']='جدول زیر را ببینید:\n| x | y |\n|---|---|\n|1|2|'
+    q['figure']={'type':'none','data':{}}
+    assert not mg._missing_visible_reference(q)
+
+
 def test_pacing_is_shared_by_new_clients_but_not_other_credentials(monkeypatch):
     waits=[]
     monkeypatch.setattr(pool_pacing.time,"monotonic",lambda:100.0)

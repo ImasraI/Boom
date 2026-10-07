@@ -103,6 +103,7 @@ _GENERATE_PROMPT = """تو طراح آزمون آزمایشی کنکور هست�
 - برای هر سوال: متن سوال، دقیقا ۴ گزینه، شماره گزینه صحیح (۰ تا ۳) و یک توضیح کوتاه حل.
 - پاسخ‌ها بین گزینه‌ها پخش باشند (همه «الف» نباشند).
 - هیچ سوال تکراری یا تله‌ای با جواب واضح نساز؛ گزینه‌های انحرافی معنادار باشند.
+- هر سوال باید کامل، علمی و دارای تنها یک پاسخ قطعی باشد؛ به شکل یا جدول ناموجود اشاره نکن و هویت ماده را تنها از فرمول مولکولی حدس نزن.
 - شکل فقط وقتی اضافه شود که برای فهم سوال واقعاً به تصویر نیاز است؛ بیشتر سوال‌ها باید figure با type برابر none داشته باشند.
 - اگر figure.type برابر none نیست، figure.data اجباری و کامل و فقط شامل داده‌های عددی/هندسی باشد؛ هرگز توضیح متنی به‌جای داده شکل ننویس.
 - اعداد و اندازه‌های داخل figure.data باید دقیقاً با ادعاهای متن سوال سازگار باشند؛ زاویه، طول یا مقداری را تقریب یا نقض نکن.
@@ -456,6 +457,7 @@ def pad_booklet(questions: List[dict]) -> List[dict]:
 # ---------------------------------------------------------------------------
 
 _VERIFY_PROMPT = """تو یک حل‌کننده مستقل تست چهارگزینه‌ای هستی. فقط این سوال را حل کن.
+اگر اطلاعات کافی نیست، شکل یا جدول اشاره‌شده وجود ندارد، چند پاسخ ممکن است یا صورت سوال از نظر علمی مبهم است، answer را null بگذار. نزدیک‌ترین گزینه را حدس نزن.
 
 سوال:
 {text}
@@ -504,6 +506,8 @@ def _verify_question(client, question: dict, timeout: float) -> Optional[int]:
     text and its four options - never the stored answer or explanation.
     Returns the solver's option index, or None when it can't produce a clean
     answer (unsolvable / unparseable / call failed)."""
+    if _missing_visible_reference(question):
+        return None
     prompt = _VERIFY_PROMPT.format(
         text=_solver_text(question),
         o0=question["options"][0], o1=question["options"][1],
@@ -537,6 +541,21 @@ def _solver_text(question: dict) -> str:
     return text
 
 
+def _missing_visible_reference(question: dict) -> bool:
+    """A referenced figure/table must actually be visible to the learner."""
+    text = str(question.get('text') or '')
+    normalized = _norm_qtext(text)
+    if not re.search(r'(?:شکل|نمودار|جدول|تصویر)\s*(?:زیر|مقابل|روبرو|روبه\s*رو|داده\s*شده)',normalized):
+        return False
+    figure = question.get('figure') or {}
+    if isinstance(figure,dict) and figure.get('type') not in (None,'none') and figure.get('data'):
+        return False
+    # Markdown tables are rendered inline by the same rich-text component.
+    if re.search(r'(?m)^\s*\|[^\n]+\|\s*\n\s*\|[|:\s-]+\|',text):
+        return False
+    return True
+
+
 def _verify_batch_prompt(batch: List[dict]) -> str:
     """Solver prompt for several questions at once (1-based numbering)."""
     items = []
@@ -546,6 +565,7 @@ def _verify_batch_prompt(batch: List[dict]) -> str:
         items.append(f"[{i}]\nمتن سوال: {_solver_text(q)}\nگزینه‌ها:\n{options}")
     example = ", ".join(f'"{i}": {(i - 1) % 4}' for i in range(1, len(batch) + 1))
     return ("تو یک حل‌کننده مستقل تست چهارگزینه‌ای هستی. هر سوال را جدا و مستقل حل کن."
+            " اگر اطلاعات کافی نیست، شکل یا جدول وجود ندارد، چند پاسخ ممکن است یا صورت سوال علمی و قطعی نیست، null برگردان؛ نزدیک‌ترین گزینه را حدس نزن."
             "\n\n" + "\n\n".join(items) +
             "\n\nخروجی فقط JSON و بدون هیچ توضیح اضافه، در این قالب:\n"
             '{"answers": {' + example + '}}\n'
@@ -709,6 +729,8 @@ def verify_and_repair_booklet(
     out: List[dict] = []
     seen_texts: set = set()
     for q, verdict in _batch_verdicts(client, questions, timeout, report):
+        if _missing_visible_reference(q):
+            verdict = None  # A solver guess cannot certify a missing visual.
         if verdict == q["answer"] and _norm_qtext(q["text"]) not in seen_texts:
             q = {**q, "verification_status": "verified"}
             out.append(q)
