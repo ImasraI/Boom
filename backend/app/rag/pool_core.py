@@ -626,7 +626,13 @@ def generate_selected(db, *, kind="mock", majors=None, difficulties=None, count=
         shelves += [(m, DUEL_DIFFICULTY) for m in majors]
     produced = failures = cursor = 0
     while shelves and not cancel_requested() and (not count or produced < count):
-        if pool_quota_status()["blocked"] or provider_stall():
+        health = pool_quota_status()
+        if health['blocked'] and health.get('code') == 'provider_rate_limit':
+            set_phase('waiting_for_quota')
+            if _cancel_event.wait(min(60, max(1, health['retry_after']))):
+                break
+            continue
+        if health["blocked"] or provider_stall():
             break
         major, difficulty = shelves[cursor % len(shelves)]
         cursor += 1

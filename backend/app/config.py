@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Embedding model configuration
     EMBEDDING_PROVIDER: str = "ollama"  # ollama, gemini, groq, openai, huggingface
     EMBEDDING_API_KEY: str = ""
+    EMBEDDING_GEMINI_API_KEYS: str = ""  # Same-model query/indexing backups.
     EMBEDDING_MODEL_NAME: str = "nomic-embed-text"
     EMBEDDING_BASE_URL: str = "http://localhost:11434"
     EMBEDDING_DEVICE: str = "cpu"
@@ -34,6 +35,7 @@ class Settings(BaseSettings):
     # LLM provider configuration
     LLM_PROVIDER: str = "groq"  # Options: "groq", "openai", "omniroute", "ollama", "mock"
     LLM_API_KEY: str = ""
+    LLM_GROQ_API_KEYS: str = ""  # Explicit chat backups; comma-separated.
     LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
     LLM_MODEL_NAME: str = "llama-3.1-8b-instant"
     # Separate key (and optional model) for MOCK GENERATION (the pool worker,
@@ -49,6 +51,7 @@ class Settings(BaseSettings):
     # Ordered Gemini backup credentials for mock generation only. Comma-separated;
     # keys from one Google project share its quota. Never expose this in the UI.
     POOL_GEMINI_API_KEYS: str = ""
+    POOL_GROQ_API_KEYS: str = ""  # Explicit drafting backups, never implicitly chat keys.
     # Independent answer solver; empty provider keeps legacy same-provider checks.
     POOL_VERIFY_LLM_PROVIDER: str = ""
     POOL_VERIFY_LLM_API_KEY: str = ""

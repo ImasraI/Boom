@@ -27,7 +27,7 @@ import base64
 from app.config import get_settings
 from app.rag.provider_quota import (
     DAILY_QUOTA_MESSAGE, block_daily_quota, blocked_quota, pool_gemini_keys, quota_identity,
-    block_access, blocked_access,
+    block_access, blocked_access, block_rate_limit, rate_limited, groq_keys,
 )
 from app.utils.logger import get_logger
 
@@ -320,6 +320,7 @@ class GroqLLMClient(BaseLLMClient):
         timeout: float = 300.0,
     ):
         self.base_url = "https://api.groq.com/openai/v1"
+        self._quota_identity = quota_identity(self.base_url, model, api_key)
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -381,6 +382,17 @@ class GroqLLMClient(BaseLLMClient):
         # flaky call doesn't degrade weekly-planning to the default fallback.
         self.last_usage = ZERO_USAGE  # stays zero unless a response succeeds
         self.last_error = ""
+        self.last_error_code = ""
+        access = blocked_access(self._quota_identity)
+        daily = blocked_quota(self._quota_identity)
+        if access or daily:
+            self.last_error = access or "daily quota exhausted"
+            self.last_error_code = "provider_access_denied" if access else "provider_daily_quota"
+            return ""
+        if getattr(self, "switch_on_rate_limit", False) and rate_limited(self._quota_identity):
+            self.last_error = "HTTP 429: credential is cooling down"
+            self.last_error_code = "provider_rate_limit"
+            return ""
         last = ""
         for attempt in range(4):
             wait_s = 2 * (attempt + 1)  # default short backoff
@@ -412,6 +424,13 @@ class GroqLLMClient(BaseLLMClient):
                     logger.warning("Unexpected response format from Groq: %s", data)
             except httpx.HTTPStatusError as e:
                 last = ""
+                status = e.response.status_code
+                if status in (401, 403):
+                    self.last_error = f"HTTP {status}"
+                    self.last_error_code = "provider_access_denied"
+                    block_access(self._quota_identity, status)
+                    return ""
+                self.last_error = f"HTTP {status}"
                 logger.warning(
                     "Groq request failed (attempt %d): %s", attempt + 1, e,
                 )
@@ -422,12 +441,21 @@ class GroqLLMClient(BaseLLMClient):
                     reason, terminal = _quota_reason(e.response)
                     self.last_error = "HTTP 429" + (f" ({reason})" if reason else "")
                     if terminal:
+                        self.last_error_code = "provider_daily_quota"
+                        delay = _retry_after_seconds(e.response, fallback=86400, cap=86400)
+                        block_daily_quota(self._quota_identity, self.last_error, retry_seconds=max(60, delay))
                         logger.error(
                             "Groq call blocked: %s - not retrying, a per-day "
                             "quota cannot clear inside this request.",
                             self.last_error)
                         break
                     wait_s = _retry_after_seconds(e.response, fallback=wait_s)
+                    if getattr(self, "switch_on_rate_limit", False):
+                        block_rate_limit(self._quota_identity, _retry_after_seconds(e.response, 60, cap=3600))
+                        self.last_error_code = "provider_rate_limit"
+                        return ""
+                elif status < 500:
+                    return ""
             except httpx.TimeoutException:
                 last = ""
                 logger.warning(
@@ -623,6 +651,10 @@ class GeminiLLMClient(BaseLLMClient):
         self.last_error = ""
         self.last_error_code = ""
         last_error = ""
+        if getattr(self, "switch_on_rate_limit", False) and rate_limited(self._quota_identity):
+            self.last_error = "HTTP 429: credential is cooling down"
+            self.last_error_code = "provider_rate_limit"
+            return ""
         access = blocked_access(self._quota_identity)
         if access:
             self.last_error = access
@@ -660,6 +692,10 @@ class GeminiLLMClient(BaseLLMClient):
                         return ""  # already reported; no extra "failed" line
                     if resp.status_code == 429:
                         wait_s = _retry_after_seconds(resp, fallback=wait_s)
+                        if getattr(self, "switch_on_rate_limit", False):
+                            block_rate_limit(self._quota_identity, _retry_after_seconds(resp, 60, cap=3600))
+                            self.last_error_code = "provider_rate_limit"
+                            return ""
                     time.sleep(wait_s)
                     continue
                 resp.raise_for_status()
@@ -1033,6 +1069,14 @@ def get_llm_client(
     provider = (provider or settings.LLM_PROVIDER or "").strip().lower()
 
     if provider == "groq":
+        if api_key is None and getattr(settings, "LLM_GROQ_API_KEYS", ""):
+            keys = groq_keys(settings)
+            clients = [get_llm_client(provider="groq", api_key=key, model=model) for key in keys]
+            if len(clients) > 1:
+                return FallbackLLMClient(clients, ["groq chat"] +
+                    [f"groq chat backup {i}" for i in range(1, len(clients))], switch_on_rate_limit=True)
+            if clients:
+                return clients[0]
         key = api_key if api_key is not None else settings.LLM_API_KEY
         model_name = model if model is not None else settings.LLM_MODEL_NAME
         if not key:
@@ -1119,23 +1163,20 @@ class FallbackLLMClient(BaseLLMClient):
     A per-day quota belongs to a provider's project/organization and model,
     and cannot clear inside a
     request, while one booklet needs a dozen or more calls - so a single spent
-    free tier would otherwise stop the whole pool. This wrapper tries the next
-    configured provider when the current one reports a per-day quota, and
-    only then:
-
-      * any OTHER failure (per-minute limit, timeout, unparseable reply) stays
-        with the current provider, because moving a transient blip onto
-        another key would silently spend a quota we do not need;
-      * a provider that answers keeps the rest of the run (failover happens
-        once per client, not per call);
-      * `last_error` always describes the LAST provider tried, so the pool's
-        "provider refused" reporting stays accurate.
+    free tier would otherwise stop the whole pool. Daily/access refusals try
+    explicit alternatives. Multi-key fleets also switch on minute limits,
+    honoring the unavailable key's cooldown across newly created clients.
+    Network failures and malformed responses retain normal retry behavior.
     """
 
-    def __init__(self, clients: List[BaseLLMClient], labels: List[str]):
+    def __init__(self, clients: List[BaseLLMClient], labels: List[str], *, switch_on_rate_limit: bool = False):
         self._clients = list(clients)
         self._labels = list(labels)
         self._idx = 0
+        self.switch_on_rate_limit = switch_on_rate_limit
+        if switch_on_rate_limit:
+            for client in self._clients:
+                client.switch_on_rate_limit = True
         self.last_error = ""
         self.last_error_code = ""
         self.last_usage = ZERO_USAGE
@@ -1160,7 +1201,11 @@ class FallbackLLMClient(BaseLLMClient):
         timeout: Optional[float] = None,
         images: Optional[Sequence[ImageInput]] = None,
     ) -> str:
-        while True:
+        indices = list(range(self._idx, len(self._clients)))
+        if self.switch_on_rate_limit:
+            indices += list(range(self._idx))
+        for position, index in enumerate(indices):
+            self._idx = index
             client = self.active
             raw = client.generate(messages, max_tokens=max_tokens,
                                   timeout=timeout, images=images)
@@ -1172,23 +1217,29 @@ class FallbackLLMClient(BaseLLMClient):
             reason = getattr(client, "last_error", "") or ""
             code = getattr(client, "last_error_code", "")
             exhausted = (code in {"provider_daily_quota", "provider_access_denied"}
+                         or (self.switch_on_rate_limit and code == "provider_rate_limit")
                          or self._exhausted(reason))
-            if self._idx + 1 >= len(self._clients) or not exhausted:
+            if position + 1 >= len(indices) or not exhausted:
                 self.last_error = reason or (
                     f"{self.active_label} returned no response")
                 self.last_error_code = code
                 return raw
             logger.warning(
                 "Pool provider %s is unavailable (%s); continuing on %s.",
-                self.active_label, code or "provider_daily_quota", self._labels[self._idx + 1],
+                self.active_label, code or "provider_daily_quota", self._labels[indices[position + 1]],
             )
-            self._idx += 1
 
     def generate_stream(
         self,
         messages: List[LLMMessage],
         images: Optional[Sequence[ImageInput]] = None,
     ) -> Generator[str, None, None]:
+        if self.switch_on_rate_limit:
+            # Complete before emitting so a refused key can switch without
+            # duplicate/partial answers. Successful usage stays chargeable.
+            result = self.generate(messages, images=images)
+            yield result or "خطا: سرویس پاسخ‌گویی موقتاً در دسترس نیست؛ دوباره تلاش کنید."
+            return
         yield from self.active.generate_stream(messages, images=images)
 
 
@@ -1236,6 +1287,13 @@ def get_pool_llm_client() -> BaseLLMClient:
             client = get_llm_client(provider="gemini", api_key=key, model=pool_model)
             clients.append(client)
             labels.append(f"gemini backup {len(clients) - 1}")
+    if primary_label == "groq":
+        keys = groq_keys(settings, pool=True)
+        # Rebuild explicitly so the pool never inherits the chat backup fleet.
+        if keys:
+            clients = [get_llm_client(provider="groq", api_key=key, model=pool_model) for key in keys]
+            primary = clients[0]
+            labels = ["groq"] + [f"groq backup {i}" for i in range(1, len(clients))]
     for name in wanted:
         if name in labels:
             continue
@@ -1250,7 +1308,8 @@ def get_pool_llm_client() -> BaseLLMClient:
     if len(clients) == 1:
         return primary
     logger.info("Pool LLM failover chain: %s", " -> ".join(labels))
-    return FallbackLLMClient(clients, labels)
+    return FallbackLLMClient(clients, labels, switch_on_rate_limit=bool(
+        getattr(settings, "POOL_GROQ_API_KEYS", "") or getattr(settings, "POOL_GEMINI_API_KEYS", "")))
 
 
 def get_pool_verifier_client() -> BaseLLMClient:
@@ -1280,7 +1339,7 @@ def get_pool_verifier_client() -> BaseLLMClient:
     if len(clients) == 1:
         return clients[0]
     return FallbackLLMClient(clients, ["gemini verifier"] +
-                             [f"gemini verifier backup {i}" for i in range(1, len(clients))])
+                             [f"gemini verifier backup {i}" for i in range(1, len(clients))], switch_on_rate_limit=True)
 
 
 def get_vision_llm_client() -> BaseLLMClient:

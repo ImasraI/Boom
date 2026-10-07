@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 _LOCK = threading.Lock()
 _BLOCKS: dict[str, tuple[float, str]] = {}
 _ACCESS_BLOCKS: dict[str, str] = {}
+_RATE_BLOCKS: dict[str, float] = {}
 _LOADED_PATHS: set[str] = set()
 DAILY_QUOTA_MESSAGE = (
     "سهمیه روزانه سرویس ساخت آزمون تمام شده است. آزمون‌های آماده همچنان قابل "
@@ -93,12 +94,28 @@ def next_gemini_reset(now: datetime) -> datetime:
     return datetime.combine(tomorrow, datetime.min.time(), tzinfo=pacific).astimezone(timezone.utc)
 
 
-def block_daily_quota(identity: str, reason: str) -> None:
-    until = next_gemini_reset(datetime.now(timezone.utc)).timestamp()
+def block_daily_quota(identity: str, reason: str, *, retry_seconds: float | None = None) -> None:
+    now = datetime.now(timezone.utc)
+    until = (now.timestamp() + retry_seconds if retry_seconds is not None
+             else next_gemini_reset(now).timestamp())
     with _LOCK:
         _load_saved_locked()
         _BLOCKS[identity] = (until, reason)
         _save_locked()
+
+
+def block_rate_limit(identity: str, seconds: float) -> None:
+    with _LOCK:
+        _RATE_BLOCKS[identity] = datetime.now(timezone.utc).timestamp() + max(1, seconds)
+
+
+def rate_limited(identity: str) -> float:
+    with _LOCK:
+        remaining = _RATE_BLOCKS.get(identity, 0) - datetime.now(timezone.utc).timestamp()
+        if remaining <= 0:
+            _RATE_BLOCKS.pop(identity, None)
+            return 0
+        return remaining
 
 
 def block_access(identity: str, status: int) -> None:
@@ -144,6 +161,14 @@ def pool_gemini_keys(settings, *, verification: bool = False) -> list[str]:
                              if key.strip()))
 
 
+def groq_keys(settings, *, pool: bool = False) -> list[str]:
+    primary = ((getattr(settings, "POOL_LLM_API_KEY", "") if pool else "")
+               or settings.LLM_API_KEY or "")
+    extras = getattr(settings, "POOL_GROQ_API_KEYS" if pool else "LLM_GROQ_API_KEYS", "")
+    return list(dict.fromkeys(key.strip() for key in [primary, *(extras or "").split(",")]
+                             if key.strip()))
+
+
 def _has_pool_fallback(settings) -> bool:
     """Mirror supported factory fallbacks without opening HTTP clients."""
     names = {name.strip().lower() for name in
@@ -180,16 +205,29 @@ def _stage_quota_status(settings, *, verification: bool = False) -> dict:
         provider = ((settings.POOL_LLM_PROVIDER or "").strip()
                     or (settings.LLM_PROVIDER or "").strip()).lower()
         override_model = settings.POOL_LLM_MODEL_NAME
-    if provider != "gemini":
+    if provider not in {"gemini", "groq"}:
         return {"blocked": False}
-    model = ((override_model or "").strip()
-             or settings.GEMINI_MODEL_NAME.strip())
-    identities = [quota_identity(settings.GEMINI_BASE_URL, model, key)
-                  for key in pool_gemini_keys(settings, verification=verification)]
+    model = ((override_model or "").strip() or
+             (settings.GEMINI_MODEL_NAME if provider == "gemini" else settings.LLM_MODEL_NAME).strip())
+    base = settings.GEMINI_BASE_URL if provider == "gemini" else "https://api.groq.com/openai/v1"
+    keys = (pool_gemini_keys(settings, verification=verification) if provider == "gemini"
+            else groq_keys(settings, pool=True))
+    identities = [quota_identity(base, model, key) for key in keys]
     entries = [(blocked_quota(identity), blocked_access(identity)) for identity in identities]
+    cooldowns = [rate_limited(identity) for identity in identities]
     # Explicitly configured alternatives may still answer. Never enable the
     # chat provider implicitly: stocking shelves must not drain chat's quota.
     fallback = not verification and _has_pool_fallback(settings)
+    if entries and not fallback and all(daily or access or seconds > 0
+            for (daily, access), seconds in zip(entries, cooldowns)):
+        waits = [seconds for (daily, access), seconds in zip(entries, cooldowns)
+                 if not daily and not access and seconds > 0]
+        if waits:
+            retry_after = max(1, math.ceil(min(waits)))
+            return {"blocked": True, "code": "provider_rate_limit", "retry_after": retry_after,
+                    "retry_at": (datetime.now(timezone.utc) + timedelta(seconds=retry_after)).isoformat(),
+                    "message": "سرویس ساخت آزمون به سقف موقت درخواست‌ها رسیده است؛ پس از زمان اعلام‌شده دوباره تلاش کنید.",
+                    **({"stage": "verification"} if verification else {})}
     if not entries and verification:
         return {"blocked":True, "code":"provider_not_configured", "stage":"verification",
                 "message":"کلید سرویس بررسی پاسخ آزمون تنظیم نشده است؛ مدیر سایت تنظیمات را بررسی کند."}

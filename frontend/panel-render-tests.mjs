@@ -12,6 +12,9 @@ test('Mock page and its shared math/report modules load with an empty profile', 
   const html = renderToStaticMarkup(React.createElement(Mock, {nav(){},userData:null}));
   assert.match(html, /تمرین از سوال‌های قبلی/);
   assert.match(html, /ساخت دفترچه آزمون/);
+  assert.match(html, /آزمون با استاندارد کنکور/);
+  assert.match(html, /تعداد کل سوال‌ها/);
+  assert.doesNotMatch(html, /آزمون کامل کنکور/);
   assert.doesNotMatch(html, /صفحه آماده نشد/);
 });
 

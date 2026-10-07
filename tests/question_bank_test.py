@@ -51,6 +51,54 @@ PLAN = [{"name": "ریاضی", "questions": 2, "minutes": 10}]
 MAJORS = [pool_core.CANONICAL_MAJOR["riazi"]]
 
 
+def test_five_konkur_style_questions_are_assembled_from_shared_pool(db, monkeypatch):
+    source = make_mock(db, count=5, label='pool math')
+    questions = json.loads(source.questions)
+    for subject in ('فیزیک', 'شیمی'):
+        questions += [{**{k:v for k,v in q.items() if k!='bank_id'}, '_id':len(questions)+i+1, 'subject':subject,
+            'text':subject+' question '+str(i)} for i,q in enumerate(questions[:5])]
+    source.questions=json.dumps(questions); source.bank_indexed=False
+    bank.index_mock(db, source); db.commit()
+    monkeypatch.setattr(mocks, 'require_pool_available', lambda: pytest.fail('Ready pool stock needs no provider'))
+    config=mocks.MockConfig(mode='general', total_questions=5,
+        student={'major':MAJORS[0], 'grade':'دوازدهم'})
+    result=mocks._generate_reserved_mock(config, db.get(User,1), db)
+    assert result['total_questions']==5 and result['source']=='question_bank'
+    assert sum(s['questions'] for s in result['subjects'])==5
+    assert result['duration_minutes'] < 145
+    assert source.student_id==0
+    visible=mocks.get_mock(result['mock_id'], db.get(User,1), db)
+    assert len(visible['questions'])==5 and all('answer' not in q for q in visible['questions'])
+
+
+@pytest.mark.parametrize('total',[1,2,5,10,105,200])
+def test_total_count_is_independent_of_konkur_style(total):
+    poolable, plan, _=mocks._resolve_plan(mocks.MockConfig(total_questions=total))
+    assert not poolable
+    assert sum(s['questions'] for s in plan)==min(total,105)
+    assert all(s['questions'] > 0 for s in plan)
+
+
+def test_general_prefers_unused_stock_while_practice_prefers_used_stock(db, monkeypatch):
+    old=make_mock(db,count=5,label='used')
+    bank.mark_used(db, bank.active_questions(db,old)); db.commit()
+    make_mock(db,count=5,label='fresh')
+    monkeypatch.setattr(mocks,'require_pool_available',lambda:pytest.fail('Stock available'))
+    result=mocks._generate_reserved_mock(mocks.MockConfig(mode='general', subjects=['ریاضی'],
+        total_questions=5, student={'major':MAJORS[0],'grade':'دوازدهم'}),db.get(User,1),db)
+    questions=json.loads(db.get(GeneratedMock,result['mock_id']).questions)
+    assert all(q['text'].startswith('fresh') for q in questions)
+
+
+def test_weakness_practice_retains_explicit_total_count(db, monkeypatch):
+    make_mock(db, count=10, label='weakness')
+    monkeypatch.setattr(mocks.mock_generation,'weak_areas',lambda _: [{'subject':'ریاضی','topic':'تابع','hits':5,'weight':5}])
+    monkeypatch.setattr(mocks,'require_pool_available',lambda:pytest.fail('Stock available'))
+    result=mocks._generate_reserved_mock(mocks.MockConfig(mode='practice_weak_areas',subjects=['ریاضی'],
+        total_questions=5,student={'major':MAJORS[0],'grade':'دوازدهم'}),db.get(User,1),db)
+    assert result['total_questions']==5
+
+
 def test_one_report_excludes_only_that_question_from_all_copies(db):
     source = make_mock(db)
     questions = bank.active_questions(db, source)

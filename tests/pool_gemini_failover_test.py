@@ -26,9 +26,13 @@ def settings(**overrides):
 def isolated_quota(monkeypatch):
     monkeypatch.setattr(quota, "_state_file", lambda: None)
     quota._BLOCKS.clear()
+    quota._RATE_BLOCKS.clear()
+    quota._ACCESS_BLOCKS.clear()
     quota._LOADED_PATHS.clear()
     yield
     quota._BLOCKS.clear()
+    quota._RATE_BLOCKS.clear()
+    quota._ACCESS_BLOCKS.clear()
     quota._LOADED_PATHS.clear()
 
 
@@ -175,18 +179,19 @@ def test_backup_keys_are_deduplicated_and_not_taken_from_chat_or_vision(monkeypa
         child.client.close()
 
 
-def test_minute_limit_uses_backoff_without_spending_backup(monkeypatch):
+def test_minute_limit_switches_explicit_backup_and_remembers_cooldown(monkeypatch):
     configure(monkeypatch, settings())
     waits = []
     monkeypatch.setattr(llm.time, "sleep", waits.append)
     client = llm.get_pool_llm_client()
     minute = httpx.Response(429, headers={"Retry-After":"2"}, json={"error":{"message":"per minute rate limit"}})
-    primary_calls = install_transport(client._clients[0], [minute]*4)
-    backup_calls = install_transport(client._clients[1], [])
-    assert client.generate([]) == ""
-    assert len(primary_calls) == 4 and not backup_calls
-    assert waits and not quota.pool_quota_status()["blocked"]
-    assert client._clients[0].last_error_code == ""
+    primary_calls = install_transport(client._clients[0], [minute])
+    backup_calls = install_transport(client._clients[1], [success()])
+    assert client.generate([]) == "verified reply"
+    assert len(primary_calls) == 1 and len(backup_calls) == 1
+    assert not waits and not quota.pool_quota_status()["blocked"]
+    assert client._clients[0].last_error_code == "provider_rate_limit"
+    assert quota.rate_limited(client._clients[0]._quota_identity) > 0
     for child in client._clients:
         child.client.close()
 

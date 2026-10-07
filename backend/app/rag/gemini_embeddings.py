@@ -11,6 +11,8 @@ import httpx
 
 from app.rag.embeddings import BaseEmbeddingModel
 from app.utils.logger import get_logger
+from app.rag.provider_quota import (quota_identity, blocked_access, blocked_quota,
+    block_access, block_daily_quota, block_rate_limit, rate_limited)
 
 logger = get_logger(__name__)
 
@@ -119,6 +121,9 @@ class GeminiEmbeddingModel(BaseEmbeddingModel):
         self.dimensions, self.batch_size = dimensions, batch_size
         # The validated worker configuration is promoted only after migration.
         self.api_key, self.proxy = api_key.strip(), proxy
+        self._quota_identity = quota_identity(base_url, self.model, self.api_key)
+        self.last_error_code = ""
+        self.switch_on_rate_limit = False
         self.fingerprint = f"gemini:{self.model}:{dimensions}:retrieval_v1"
         self.base_url = base_url.rstrip("/")
         self.client = httpx.Client(timeout=60, trust_env=False, proxy=proxy or None,
@@ -149,6 +154,15 @@ class GeminiEmbeddingModel(BaseEmbeddingModel):
         return item
 
     def _post(self, operation: str, payload: dict):
+        self.last_error_code = ""
+        if blocked_access(self._quota_identity):
+            self.last_error_code = "provider_access_denied"
+        elif blocked_quota(self._quota_identity):
+            self.last_error_code = "provider_daily_quota"
+        elif self.switch_on_rate_limit and rate_limited(self._quota_identity):
+            self.last_error_code = "provider_rate_limit"
+        if self.last_error_code:
+            raise EmbeddingError("Gemini embedding credential is unavailable; respecting its retry period.")
         for attempt in range(3):
             self.rate_limiter.wait(self._activity)
             try:
@@ -171,6 +185,10 @@ class GeminiEmbeddingModel(BaseEmbeddingModel):
                 except ValueError:
                     raise EmbeddingError("Gemini returned invalid embedding JSON.") from None
             # Daily/project quota cannot clear during an interactive request.
+            if response.status_code in (401, 403):
+                block_access(self._quota_identity, response.status_code)
+                self.last_error_code = "provider_access_denied"
+                raise EmbeddingError("Gemini embedding credential was rejected.")
             daily_limit = False
             provider_delay = None
             quota_limits = []
@@ -186,6 +204,17 @@ class GeminiEmbeddingModel(BaseEmbeddingModel):
                             provider_delay = float(str(detail["retryDelay"]).removesuffix("s"))
                 except (ValueError, AttributeError, TypeError):
                     pass
+                if daily_limit:
+                    block_daily_quota(self._quota_identity, "embedding daily quota")
+                    self.last_error_code = "provider_daily_quota"
+                elif self.switch_on_rate_limit:
+                    try:
+                        delay = max(1, float(response.headers.get('retry-after', provider_delay or 60)))
+                    except (TypeError, ValueError):
+                        delay = 60
+                    block_rate_limit(self._quota_identity, min(delay, 3600))
+                    self.last_error_code = "provider_rate_limit"
+                    raise EmbeddingError("Gemini embedding credential reached its minute limit.")
             if (response.status_code == 429 and not daily_limit or response.status_code >= 500) and attempt < 2:
                 try:
                     fallback = provider_delay if provider_delay is not None else (60 if response.status_code == 429 else 5)

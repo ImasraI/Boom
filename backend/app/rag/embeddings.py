@@ -238,10 +238,40 @@ class OpenAICompatibleEmbeddingModel(BaseEmbeddingModel):
         return results[0] if results else []
 
 
-@lru_cache(maxsize=4)
+@lru_cache(maxsize=16)
 def _gemini_model(api_key, model_name, dimensions, batch_size, rpm, base_url, proxy):
     from app.rag.gemini_embeddings import GeminiEmbeddingModel
     return GeminiEmbeddingModel(api_key, model_name, dimensions, batch_size, rpm, base_url, proxy)
+
+
+class FallbackEmbeddingModel(BaseEmbeddingModel):
+    """Credential failover without changing model, dimensions or retrieval format."""
+    def __init__(self, clients):
+        self.clients = clients
+        for client in clients:
+            client.switch_on_rate_limit = True
+
+    def _call(self, method, value):
+        from app.rag.gemini_embeddings import EmbeddingError
+        for index, client in enumerate(self.clients):
+            try:
+                return getattr(client, method)(value)
+            except EmbeddingError:
+                if client.last_error_code not in {"provider_access_denied", "provider_daily_quota", "provider_rate_limit"}:
+                    raise
+                if index == len(self.clients) - 1:
+                    raise
+
+    def embed_documents(self, texts):
+        return self._call('embed_documents', texts)
+
+    def embed_query(self, text):
+        from app.rag.gemini_embeddings import EmbeddingError
+        try:
+            return self._call('probe_query', text)
+        except EmbeddingError:
+            logger.warning("Embedding providers unavailable; using lexical retrieval.")
+            return []
 
 
 def get_embedding_model() -> BaseEmbeddingModel:
@@ -249,6 +279,13 @@ def get_embedding_model() -> BaseEmbeddingModel:
     provider = (settings.EMBEDDING_PROVIDER or "").strip().lower()
 
     if provider == "gemini":
+        backups = getattr(settings, "EMBEDDING_GEMINI_API_KEYS", "")
+        if backups:
+            keys = list(dict.fromkeys(key.strip() for key in [settings.EMBEDDING_API_KEY or settings.GEMINI_API_KEY, *backups.split(',')] if key.strip()))
+            return FallbackEmbeddingModel([_gemini_model(key, settings.EMBEDDING_MODEL_NAME,
+                settings.EMBEDDING_DIMENSIONS, settings.EMBEDDING_BATCH_SIZE,
+                settings.EMBEDDING_REQUESTS_PER_MINUTE, settings.EMBEDDING_GEMINI_BASE_URL,
+                settings.EMBEDDING_PROXY or settings.GEMINI_PROXY) for key in keys])
         return _gemini_model(
             settings.EMBEDDING_API_KEY or settings.GEMINI_API_KEY,
             settings.EMBEDDING_MODEL_NAME, settings.EMBEDDING_DIMENSIONS,

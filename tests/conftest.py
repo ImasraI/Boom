@@ -11,11 +11,14 @@ os.environ["POOL_GENERATION_REQUESTS_PER_MINUTE"] = "0"
 
 
 @pytest.fixture(autouse=True)
-def isolate_access_health():
+def isolate_access_health(monkeypatch):
     from app.rag import provider_quota
-    provider_quota._ACCESS_BLOCKS.clear()
+    monkeypatch.setattr(provider_quota, '_state_file', lambda: None)
+    states = (provider_quota._ACCESS_BLOCKS, provider_quota._BLOCKS,
+              provider_quota._RATE_BLOCKS, provider_quota._LOADED_PATHS)
+    for state in states: state.clear()
     yield
-    provider_quota._ACCESS_BLOCKS.clear()
+    for state in states: state.clear()
 
 
 def pytest_sessionfinish(session, exitstatus):

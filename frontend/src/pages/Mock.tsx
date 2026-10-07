@@ -71,9 +71,9 @@ function ConfigView({ onStart, onBack, error }: {
   error: string
 }) {
   const [difficulty, setDifficulty] = useState("konkur")
-  const [count, setCount] = useState(0) // 0 = konkur standard
+  const [count, setCount] = useState(5) // 0 = official full booklet; independent of style.
   const [topics, setTopics] = useState("")
-  const [mode, setMode] = useState("practice")
+  const [mode, setMode] = useState("general")
 
   return (
     <div className="min-h-screen bg-[var(--surface)] pb-16">
@@ -96,10 +96,10 @@ function ConfigView({ onStart, onBack, error }: {
             <select value={mode} onChange={e => setMode(e.target.value)} className="block mt-2 w-full bg-[var(--surface)] border-b border-[var(--border-strong)] p-2 text-sm text-[var(--text)]">
               <option value="practice">تمرین از سوال‌های قبلی</option>
               <option value="practice_weak_areas">تمرین نقاط ضعف</option>
-              <option value="general">آزمون کامل کنکور</option>
+              <option value="general">آزمون با استاندارد کنکور</option>
             </select>
           </label>
-          <p className="text-[11px] text-[var(--muted-2)] mt-2">تمرین ابتدا از سوال‌های قبلیِ مرتبط استفاده می‌کند. تعداد واقعی سوال‌های موجود پیش از شروع نمایش داده می‌شود.</p>
+          <p className="text-[11px] text-[var(--muted-2)] mt-2">استاندارد کنکور، سبک سوال‌هاست؛ تعداد را جدا انتخاب کن. آزمون از سوال‌های آمادهٔ بانک و استخر استفاده می‌کند؛ تمرین، سوال‌های قبلی را در اولویت می‌گذارد.</p>
         </div>
         <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">سطح دشواری</p>
@@ -118,16 +118,16 @@ function ConfigView({ onStart, onBack, error }: {
         </div>
 
         <div className="study-section p-4">
-          <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">تعداد سوال هر درس</p>
+          <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">تعداد کل سوال‌ها</p>
           <div className="grid grid-cols-3 gap-2">
-            {[0, 5, 10].map(n => (
+            {[5, 10, 0].map(n => (
               <button key={n} onClick={() => setCount(n)}
                 className={`py-2.5 rounded-xl text-[12px] font-bold border transition-colors ${
                   count === n
                     ? "bg-[var(--accent)] text-white border-[var(--accent)]"
                     : "border-[var(--border-strong)] text-[var(--muted)]"
                 }`}>
-                {n === 0 ? "استاندارد کنکور" : `${n} سوال`}
+                {n === 0 ? "دفترچه کامل" : `${n} سوال`}
               </button>
             ))}
           </div>
@@ -141,7 +141,7 @@ function ConfigView({ onStart, onBack, error }: {
           <p className="text-[10px] text-[var(--muted-2)] mt-1.5">خالی بگذاری، سوالات از کل مباحث کنکوری می‌آید. برای تمرکز بر آزمون پیش رو، مباحث آن را وارد کن.</p>
         </div>
 
-        <button onClick={() => onStart({ mode, difficulty, questions_per_subject: count || undefined, topics: topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
+        <button onClick={() => onStart({ mode, difficulty, total_questions: count || undefined, topics: topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
           className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all">
           ساخت دفترچه آزمون
         </button>

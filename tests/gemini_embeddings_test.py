@@ -72,7 +72,7 @@ def test_daily_quota_stops_without_retry_and_does_not_leak_response(caplog):
     assert "private-text" not in caplog.text and "private-api-key" not in caplog.text
     with pytest.raises(EmbeddingError):
         model.embed_documents(["private-text"])
-    assert len(calls) == 2
+    assert len(calls) == 1  # Remember the terminal refusal across subsequent operations.
     model.close()
 
 

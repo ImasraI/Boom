@@ -87,6 +87,7 @@ _CANONICAL_MAJOR = {k: v[0] for k, v in _MAJOR_LABELS.items()}
 class MockConfig(BaseModel):
     subjects: Optional[List[str]] = None  # default: all major subjects
     questions_per_subject: Optional[int] = Field(default=None, ge=1)  # default: konkur counts
+    total_questions: Optional[int] = Field(default=None, ge=1, le=200)
     duration_minutes: Optional[int] = Field(default=None, ge=1)  # default: sum of subject minutes
     topics: List[str] = []  # restrict to these topics (e.g. from the week's mock)
     difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard)$")
@@ -111,14 +112,15 @@ def _resolve_plan(config: "MockConfig") -> Tuple[bool, List[dict], str]:
 
     A request can be served from the pre-generated pool only when it asks
     for exactly a standard booklet: official subject plan, no custom
-    subjects/counts/duration/topics, general mode. Anything customized is
-    always generated live for that student.
+    subjects/counts/duration/topics, general mode. Customized requests can
+    assemble verified stock from the question bank before live generation.
     """
     student = config.student or {}
     major = student.get("major") or ""
     poolable = (
         not config.subjects
         and not config.questions_per_subject
+        and not config.total_questions
         and not config.duration_minutes
         and not config.topics
         and config.mode == "general"
@@ -129,6 +131,15 @@ def _resolve_plan(config: "MockConfig") -> Tuple[bool, List[dict], str]:
     if config.questions_per_subject:
         plan = [{**s, "questions": min(config.questions_per_subject, s["questions"])}
                 for s in plan]
+    if config.total_questions:
+        total = min(config.total_questions, sum(s["questions"] for s in plan))
+        weight = sum(s["questions"] for s in plan)
+        shares = [total * s["questions"] / weight for s in plan]
+        counts = [int(n) for n in shares]
+        for i in sorted(range(len(plan)), key=lambda i: -(shares[i] - counts[i]))[:total - sum(counts)]:
+            counts[i] += 1
+        plan = [{**s, "questions": n, "minutes": max(1, round(s["minutes"] * n / s["questions"]))}
+                for s, n in zip(plan, counts) if n]
     return poolable, plan, major
 
 
@@ -273,12 +284,13 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
     weak = []
     if config.mode == "practice_weak_areas":
         weak = mock_generation.weak_areas(current_user.id)
-        plan = mock_generation.bias_plan(plan, weak)
+        plan = mock_generation.bias_plan(plan, weak,
+            extra_cap=0 if config.total_questions or config.questions_per_subject else 5)
     labels = _MAJOR_LABELS.get(_major_key(major)) or [major]
     topics = config.topics or [w.get("topic", "") for w in weak]
     practice = config.mode != "general"
     questions = question_bank.assemble(db, current_user.id, plan, labels, config.difficulty,
-        grade, topics, prefer_used=True, used_only=practice, allow_partial=practice)
+        grade, topics, prefer_used=practice, used_only=practice, allow_partial=practice)
     if practice and not questions:
         questions = question_bank.assemble(db, current_user.id, plan, labels, config.difficulty,
             grade, topics, prefer_used=True, allow_partial=True)
@@ -307,6 +319,7 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
                 "duration_minutes": claimed.duration_minutes,
                 "total_questions": len(_load_questions(claimed)),
                 "subjects": plan,
+                "source": "pool",
             }
 
     # 2) Slow path: live generation (pool empty for this combination, or a
@@ -343,6 +356,7 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
         raise HTTPException(503, detail={"code": "provider_daily_quota",
                                          "message": DAILY_QUOTA_MESSAGE})
     if not questions or any(sum(q.get("subject") == row["name"] for q in questions) != row["questions"] for row in plan):
+        require_pool_available()  # Include cooldown/reset details when every key is limited.
         raise HTTPException(status_code=502,
                             detail="مدل زبانی دفترچه معتبری تولید نکرد؛ دوباره تلاش کنید.")
 
