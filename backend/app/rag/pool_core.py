@@ -20,7 +20,7 @@ from sqlalchemy import select, update
 from app.auth.database import GeneratedMock, MockAttempt
 from app.rag import mock_generation
 from app.rag import question_bank
-from app.rag.provider_quota import is_daily_quota_error, pool_quota_status
+from app.rag.provider_quota import is_terminal_provider_error, pool_quota_status
 from app.rag.konkur_format import MAJOR_ALIASES, SPECIALIZED_SUBJECTS
 from app.utils.logger import get_logger
 
@@ -226,7 +226,7 @@ def provider_stall() -> str:
     """Reason the run must stop, or "" while the provider is healthy."""
     with _progress_lock:
         if (_progress["active"] and (
-                is_daily_quota_error(_progress["last_error"])
+                is_terminal_provider_error(_progress["last_error"])
                 or _progress["failures"] >= POOL_MAX_PROVIDER_FAILURES)):
             return (_progress["last_error"]
                     or "provider refused repeatedly (no error text)")

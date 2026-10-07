@@ -222,8 +222,8 @@ class PoolRunIn(BaseModel):
 def pool_restock(db: Session = Depends(get_db), payload: PoolRunIn | None = None):
     """Generate the selected shelves independently of existing inventory.
 
-    Each booklet = one LLM call per subject + one verification call per
-    question, so a sweep of several empty shelves can take minutes - the
+    Each booklet uses paced draft batches and independent solver batches,
+    so a sweep of several empty shelves can take minutes - the
     request runs the sweep in a background thread and returns immediately;
     poll GET /api/admin/pool to watch the shelves fill.
     """

@@ -27,6 +27,7 @@ import base64
 from app.config import get_settings
 from app.rag.provider_quota import (
     DAILY_QUOTA_MESSAGE, block_daily_quota, blocked_quota, pool_gemini_keys, quota_identity,
+    block_access, blocked_access,
 )
 from app.utils.logger import get_logger
 
@@ -622,6 +623,11 @@ class GeminiLLMClient(BaseLLMClient):
         self.last_error = ""
         self.last_error_code = ""
         last_error = ""
+        access = blocked_access(self._quota_identity)
+        if access:
+            self.last_error = access
+            self.last_error_code = "provider_access_denied"
+            return ""
         blocked = blocked_quota(self._quota_identity)
         if blocked:
             # Preserve a machine-readable daily signal for generation callers,
@@ -633,6 +639,12 @@ class GeminiLLMClient(BaseLLMClient):
             wait_s = 2 * attempt  # default short backoff
             try:
                 resp = self.client.post(url, json=payload, timeout=req_timeout)
+                if resp.status_code in (401, 403):
+                    self.last_error = f"HTTP {resp.status_code}"
+                    self.last_error_code = "provider_access_denied"
+                    block_access(self._quota_identity, resp.status_code)
+                    logger.error("Gemini credential/model access rejected: HTTP %s; not retrying.", resp.status_code)
+                    return ""
                 if resp.status_code == 429 or resp.status_code >= 500:
                     reason, terminal = _quota_reason(resp)
                     last_error = f"HTTP {resp.status_code}"
@@ -1125,6 +1137,7 @@ class FallbackLLMClient(BaseLLMClient):
         self._labels = list(labels)
         self._idx = 0
         self.last_error = ""
+        self.last_error_code = ""
         self.last_usage = ZERO_USAGE
 
     @property
@@ -1137,7 +1150,7 @@ class FallbackLLMClient(BaseLLMClient):
 
     @staticmethod
     def _exhausted(reason: str) -> bool:
-        """True for a per-day quota (the only reason worth switching keys)."""
+        """Recognize legacy clients' terminal daily-quota text."""
         return bool(_DAILY_QUOTA_RE.search(reason or ""))
 
     def generate(
@@ -1154,17 +1167,20 @@ class FallbackLLMClient(BaseLLMClient):
             self.last_usage = getattr(client, "last_usage", ZERO_USAGE)
             if (raw or "").strip():
                 self.last_error = ""
+                self.last_error_code = ""
                 return raw
             reason = getattr(client, "last_error", "") or ""
-            exhausted = (getattr(client, "last_error_code", "") == "provider_daily_quota"
+            code = getattr(client, "last_error_code", "")
+            exhausted = (code in {"provider_daily_quota", "provider_access_denied"}
                          or self._exhausted(reason))
             if self._idx + 1 >= len(self._clients) or not exhausted:
                 self.last_error = reason or (
                     f"{self.active_label} returned no response")
+                self.last_error_code = code
                 return raw
             logger.warning(
-                "Pool provider %s reached its daily quota; continuing on %s.",
-                self.active_label, self._labels[self._idx + 1],
+                "Pool provider %s is unavailable (%s); continuing on %s.",
+                self.active_label, code or "provider_daily_quota", self._labels[self._idx + 1],
             )
             self._idx += 1
 

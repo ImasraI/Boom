@@ -67,6 +67,12 @@ usable alternative provider is configured, restock/live generation returns a
 readable HTTP 503 with the earliest reset time; verified stock remains usable.
 The independent verifier uses `POOL_VERIFY_GEMINI_API_KEYS` rather than the
 drafting role's `POOL_GEMINI_API_KEYS`, preserving the same persisted cooldowns.
+HTTP 401/403 also advances to an explicitly configured backup. Rejected
+credential/model identities persist without their secret values and are skipped
+after restart; they have no daily retry timer. Configure a valid replacement, or
+clear the saved access rejection after resolving access for that same credential.
+If every verifier credential is rejected, Admin and live generation return a
+readable HTTP 503 before spending Groq tokens; verified stock stays usable.
 Per-minute limits keep bounded retries and `Retry-After` backoff. Timeouts,
 malformed answers and temporary limits do not silently switch credentials.
 

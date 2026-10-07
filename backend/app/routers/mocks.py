@@ -51,7 +51,7 @@ from app.auth.deps import get_current_user, get_db
 from app.auth.limits import consume_ai_use, release_ai_use
 from app.rag import mock_generation, question_bank, mock_jobs
 from app.rag.provider_quota import (
-    DAILY_QUOTA_MESSAGE, is_daily_quota_error, require_pool_available,
+    DAILY_QUOTA_MESSAGE, is_daily_quota_error, is_terminal_provider_error, require_pool_available,
 )
 from app.rag.mock_generation import (
     KONKUR_SUBJECTS as _KONKUR_SUBJECTS,
@@ -335,8 +335,11 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
         _persist_mock(db, user_id=current_user.id, questions=questions, duration=duration,
             major=major or "ریاضی فیزیک", grade=grade, difficulty=config.difficulty,
             title="سوال‌های تاییدشده از تولید ناتمام", status="bank_only")
-    if is_daily_quota_error(provider_error):
+    if is_terminal_provider_error(provider_error):
         require_pool_available()  # Includes the provider reset time when available.
+        if not is_daily_quota_error(provider_error):
+            raise HTTPException(503, detail={"code":"provider_access_denied",
+                "message":"کلید سرویس آزمون رد شده یا دسترسی ندارد؛ مدیر سایت باید کلید معتبر تنظیم کند."})
         raise HTTPException(503, detail={"code": "provider_daily_quota",
                                          "message": DAILY_QUOTA_MESSAGE})
     if not questions or any(sum(q.get("subject") == row["name"] for q in questions) != row["questions"] for row in plan):

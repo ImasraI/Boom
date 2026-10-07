@@ -138,6 +138,25 @@ def test_missing_verifier_key_is_reported_before_drafting(isolated_settings):
     assert exc.value.status_code==503 and exc.value.detail["code"]=="provider_not_configured"
 
 
+def test_rejected_verifier_blocks_drafting_and_keeps_accepted_questions(monkeypatch,isolated_settings):
+    config=isolated_settings
+    for key in quota.pool_gemini_keys(config,verification=True):
+        quota.block_access(quota.quota_identity(config.GEMINI_BASE_URL,config.POOL_VERIFY_LLM_MODEL_NAME,key),401)
+    status=quota.pool_quota_status()
+    assert status['blocked'] and status['stage']=='verification' and status['code']=='provider_access_denied'
+    solver=Replies(['{"answers":{"1":0}}',''])
+    def refusal(messages,**kwargs):
+        solver.last_error='HTTP 401'
+        return ''
+    monkeypatch.setattr(mg,'get_pool_verifier_client',lambda:solver)
+    monkeypatch.setattr(mg,'get_pool_llm_client',lambda:pytest.fail('Rejected verification must not spend Groq on repairs'))
+    monkeypatch.setattr(mg,'_VERIFY_BATCH_SIZE',1)
+    original=solver.generate
+    solver.generate=lambda messages,**kwargs: original(messages,**kwargs) if not solver.prompts else refusal(messages,**kwargs)
+    out=mg.verify_and_repair_booklet([question(1),question(2)],7)
+    assert [q['_id'] for q in out]==[1]
+
+
 def test_batched_drafts_retrieve_once_and_preserve_grade_and_subject(monkeypatch):
     calls=[]
     drafter=Replies([json.dumps({"questions":[question(i) for i in ids]})

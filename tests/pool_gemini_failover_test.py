@@ -59,6 +59,54 @@ def daily_limit():
         {"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}})
 
 
+@pytest.mark.parametrize('status',[401,403])
+def test_rejected_primary_uses_backup_without_retrying_same_key(monkeypatch,status):
+    configure(monkeypatch,settings())
+    client=llm.get_pool_llm_client()
+    primary=install_transport(client._clients[0],[httpx.Response(status,json={'error':'rejected'})])
+    backup=install_transport(client._clients[1],[success(),success()])
+    assert client.generate([])==client.generate([])=='verified reply'
+    assert len(primary)==1 and len(backup)==2
+    assert quota.blocked_access(client._clients[0]._quota_identity)==f'HTTP {status}'
+    for child in client._clients: child.client.close()
+
+
+def test_access_denial_survives_restart_without_storing_credentials(monkeypatch,tmp_path):
+    config=settings()
+    configure(monkeypatch,config)
+    state=tmp_path/'limits.json'
+    monkeypatch.setattr(quota,'_state_file',lambda:state)
+    identity=quota.quota_identity(config.GEMINI_BASE_URL,config.POOL_LLM_MODEL_NAME,config.POOL_LLM_API_KEY)
+    quota.block_access(identity,401)
+    quota._ACCESS_BLOCKS.clear();quota._LOADED_PATHS.clear()
+    client=llm.get_pool_llm_client()
+    primary=install_transport(client._clients[0],[])
+    backup=install_transport(client._clients[1],[success()])
+    assert client.generate([])=='verified reply' and not primary and len(backup)==1
+    assert 'primary-secret' not in state.read_text() and 'backup-secret' not in state.read_text()
+    for child in client._clients: child.client.close()
+
+
+def test_all_access_denials_need_changed_credentials_not_a_daily_retry(monkeypatch):
+    config=settings()
+    configure(monkeypatch,config)
+    for key in quota.pool_gemini_keys(config):
+        quota.block_access(quota.quota_identity(config.GEMINI_BASE_URL,config.POOL_LLM_MODEL_NAME,key),401)
+    status=quota.pool_quota_status()
+    assert status['blocked'] and status['code']=='provider_access_denied' and 'retry_at' not in status
+    config.POOL_GEMINI_API_KEYS='new-credential'
+    assert not quota.pool_quota_status()['blocked']
+
+
+def test_access_denied_primary_waits_only_for_daily_blocked_backup(monkeypatch):
+    config=settings()
+    configure(monkeypatch,config)
+    quota.block_access(quota.quota_identity(config.GEMINI_BASE_URL,config.POOL_LLM_MODEL_NAME,config.POOL_LLM_API_KEY),401)
+    quota.block_daily_quota(quota.quota_identity(config.GEMINI_BASE_URL,config.POOL_LLM_MODEL_NAME,'backup-secret'),'daily quota')
+    status=quota.pool_quota_status()
+    assert status['blocked'] and status['code']=='provider_daily_quota' and status['retry_after']>0
+
+
 def test_daily_refusal_switches_to_backup_and_keeps_successful_usage(monkeypatch):
     configure(monkeypatch, settings())
     client = llm.get_pool_llm_client()

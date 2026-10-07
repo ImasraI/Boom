@@ -31,7 +31,7 @@ from app.rag.konkur_format import (  # noqa: F401  (re-exported for consumers)
 )
 from app.config import get_settings
 from app.rag.llm import get_pool_llm_client, get_pool_verifier_client
-from app.rag.provider_quota import is_daily_quota_error, quota_identity
+from app.rag.provider_quota import is_terminal_provider_error, quota_identity
 from app.rag.pool_pacing import wait_for_draft_slot
 from app.utils.logger import get_logger
 
@@ -722,7 +722,7 @@ def verify_and_repair_booklet(
                 generator = get_pool_llm_client()
             repl = _generate_replacement(generator, user_id, q, difficulty,
                                          gen_max_tokens, timeout)
-            if is_daily_quota_error(getattr(generator, "last_error", "")):
+            if getattr(generator, "last_error", ""):
                 _report(report, "provider_error", message=generator.last_error)
                 return out
             if repl is None:
@@ -737,7 +737,7 @@ def verify_and_repair_booklet(
                             "question; regenerating.", q["subject"])
                 continue
             repl_verdict = _verify_question(client, repl, timeout)
-            if is_daily_quota_error(getattr(client, "last_error", "")):
+            if getattr(client, "last_error", ""):
                 _report(report, "provider_error", message=client.last_error)
                 return out
             s = _score(repl_verdict, repl["answer"])
@@ -884,7 +884,7 @@ def generate_booklet(
 
     def track(event: str, data: dict) -> None:
         nonlocal terminal_error
-        if event == "provider_error" and is_daily_quota_error(data.get("message", "")):
+        if event == "provider_error" and is_terminal_provider_error(data.get("message", "")):
             terminal_error = data["message"]
         _report(report, event, **data)
 

@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 _LOCK = threading.Lock()
 _BLOCKS: dict[str, tuple[float, str]] = {}
+_ACCESS_BLOCKS: dict[str, str] = {}
 _LOADED_PATHS: set[str] = set()
 DAILY_QUOTA_MESSAGE = (
     "سهمیه روزانه سرویس ساخت آزمون تمام شده است. آزمون‌های آماده همچنان قابل "
@@ -26,6 +27,10 @@ DAILY_QUOTA_MESSAGE = (
 
 def is_daily_quota_error(reason: str) -> bool:
     return bool(re.search(r"per.?day|daily", reason or "", re.IGNORECASE))
+
+
+def is_terminal_provider_error(reason: str) -> bool:
+    return is_daily_quota_error(reason) or bool(re.search(r"\bHTTP (?:401|403)\b", reason or ""))
 
 
 def quota_identity(base_url: str, model: str, key: str) -> str:
@@ -49,6 +54,11 @@ def _load_saved_locked() -> None:
         for identity, until in entries.items():
             if re.fullmatch(r"[0-9a-f]{64}", identity) and isinstance(until, (int, float)) and math.isfinite(until) and until > now:
                 _BLOCKS[identity] = (until, DAILY_QUOTA_MESSAGE)
+        access = entries.get('__access', {})
+        if isinstance(access, dict):
+            for identity, code in access.items():
+                if re.fullmatch(r'[0-9a-f]{64}', identity) and code in {'HTTP 401','HTTP 403'}:
+                    _ACCESS_BLOCKS[identity] = code
     except (OSError, ValueError, TypeError, AttributeError):
         pass
 
@@ -63,6 +73,8 @@ def _save_locked() -> None:
         # Provider response text can contain credentials; store only fingerprints and reset times.
         saved = {identity: until for identity, (until, _) in _BLOCKS.items()
                  if until > datetime.now(timezone.utc).timestamp()}
+        if _ACCESS_BLOCKS:
+            saved['__access'] = dict(_ACCESS_BLOCKS)
         temporary.write_text(json.dumps(saved), encoding="utf-8")
         os.chmod(temporary, 0o600)
         temporary.replace(path)
@@ -87,6 +99,21 @@ def block_daily_quota(identity: str, reason: str) -> None:
         _load_saved_locked()
         _BLOCKS[identity] = (until, reason)
         _save_locked()
+
+
+def block_access(identity: str, status: int) -> None:
+    """A rejected credential/model needs changed configuration, not daily retries."""
+    assert status in (401, 403)
+    with _LOCK:
+        _load_saved_locked()
+        _ACCESS_BLOCKS[identity] = f'HTTP {status}'
+        _save_locked()
+
+
+def blocked_access(identity: str) -> str | None:
+    with _LOCK:
+        _load_saved_locked()
+        return _ACCESS_BLOCKS.get(identity)
 
 
 def blocked_quota(identity: str) -> tuple[float, str] | None:
@@ -157,17 +184,23 @@ def _stage_quota_status(settings, *, verification: bool = False) -> dict:
         return {"blocked": False}
     model = ((override_model or "").strip()
              or settings.GEMINI_MODEL_NAME.strip())
-    entries = [blocked_quota(quota_identity(settings.GEMINI_BASE_URL, model, key))
-               for key in pool_gemini_keys(settings, verification=verification)]
+    identities = [quota_identity(settings.GEMINI_BASE_URL, model, key)
+                  for key in pool_gemini_keys(settings, verification=verification)]
+    entries = [(blocked_quota(identity), blocked_access(identity)) for identity in identities]
     # Explicitly configured alternatives may still answer. Never enable the
     # chat provider implicitly: stocking shelves must not drain chat's quota.
     fallback = not verification and _has_pool_fallback(settings)
     if not entries and verification:
         return {"blocked":True, "code":"provider_not_configured", "stage":"verification",
                 "message":"کلید سرویس بررسی پاسخ آزمون تنظیم نشده است؛ مدیر سایت تنظیمات را بررسی کند."}
-    if not entries or any(entry is None for entry in entries) or fallback:
+    if not entries or any(not daily and not access for daily, access in entries) or fallback:
         return {"blocked": False}
-    until = min(entry[0] for entry in entries)
+    retryable = [daily[0] for daily, access in entries if daily and not access]
+    if not retryable:
+        return {"blocked":True, "code":"provider_access_denied",
+                **({"stage":"verification"} if verification else {}),
+                "message":"کلید سرویس آزمون رد شده یا دسترسی ندارد؛ مدیر سایت باید کلید معتبر تنظیم کند."}
+    until = min(retryable)
     return {
         "blocked": True,
         "code": "provider_daily_quota",
