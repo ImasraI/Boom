@@ -7,7 +7,7 @@ Available implementations:
 3. GroqLLMClient: Client for Groq's OpenAI-compatible API.
 4. GeminiLLMClient: Gemini's /v1beta/openai endpoint (vision capable,
    optional GEMINI_PROXY for geo-blocked regions).
-5. CerebrasLLMClient: Cerebras Inference (fastest free tier, ~1M tokens/day).
+5. CerebrasLLMClient: Cerebras Inference (OpenAI-compatible API).
 6. OpenAICompatibleClient: Generic OpenAI-compatible client.
 
 The chat/planning provider is selected through LLM_PROVIDER in .env; mock
@@ -25,7 +25,9 @@ import httpx
 import base64
 
 from app.config import get_settings
-from app.rag.provider_quota import block_daily_quota, blocked_quota, quota_identity
+from app.rag.provider_quota import (
+    DAILY_QUOTA_MESSAGE, block_daily_quota, blocked_quota, pool_gemini_keys, quota_identity,
+)
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -293,6 +295,8 @@ def _quota_reason(response: httpx.Response) -> tuple:
     # Keep the message readable in a log line / admin panel: provider texts
     # are long, multiline and full of documentation URLs.
     message = str(error.get("message") or data.get("message") or "")
+    message = re.sub(r"\b(?:AIza[A-Za-z0-9_-]{20,}|AQ\.[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9_-]{20,})",
+                     "[redacted]", message)
     message = re.sub(r"https?://\S+", "", message)
     message = " ".join(message.split())[:160].strip(" .،")
     nested = json.dumps(error.get("details") or data.get("details") or "",
@@ -614,10 +618,14 @@ class GeminiLLMClient(BaseLLMClient):
 
         self.last_usage = ZERO_USAGE  # stays zero unless a response succeeds
         self.last_error = ""
+        self.last_error_code = ""
         last_error = ""
         blocked = blocked_quota(self._quota_identity)
         if blocked:
-            self.last_error = blocked[1]
+            # Preserve a machine-readable daily signal for generation callers,
+            # including after restart when the stored reason is localized.
+            self.last_error = "daily quota exhausted: " + DAILY_QUOTA_MESSAGE
+            self.last_error_code = "provider_daily_quota"
             return ""
         for attempt in range(1, 5):
             wait_s = 2 * attempt  # default short backoff
@@ -630,6 +638,7 @@ class GeminiLLMClient(BaseLLMClient):
                         last_error += f" ({reason})"
                     self.last_error = last_error
                     if terminal:
+                        self.last_error_code = "provider_daily_quota"
                         block_daily_quota(self._quota_identity, last_error)
                         logger.error(
                             "Gemini call blocked: %s - not retrying, a per-day "
@@ -720,9 +729,7 @@ class GeminiLLMClient(BaseLLMClient):
 class CerebrasLLMClient(BaseLLMClient):
     """HTTP client for Cerebras Inference's OpenAI-compatible API.
 
-    The free tier is the most generous of the supported providers (~30 RPM,
-    ~1M tokens/day) and the wafer-scale hardware streams >1000 tok/s, so it
-    suits both the interactive chatbot and token-heavy booklet generation.
+    Check the account's current limits and trial/billing status before use.
     gpt-oss models emit hidden analysis tokens like Groq's, so the same
     reasoning_effort=low + completion-floor handling applies.
     """
@@ -1095,7 +1102,8 @@ def get_llm_client(
 class FallbackLLMClient(BaseLLMClient):
     """Run generation on the first pool provider that still answers.
 
-    A per-day quota is PER PROVIDER (and per model) and cannot clear inside a
+    A per-day quota belongs to a provider's project/organization and model,
+    and cannot clear inside a
     request, while one booklet needs a dozen or more calls - so a single spent
     free tier would otherwise stop the whole pool. This wrapper tries the next
     configured provider when the current one reports a per-day quota, and
@@ -1146,13 +1154,15 @@ class FallbackLLMClient(BaseLLMClient):
                 self.last_error = ""
                 return raw
             reason = getattr(client, "last_error", "") or ""
-            if self._idx + 1 >= len(self._clients) or not self._exhausted(reason):
+            exhausted = (getattr(client, "last_error_code", "") == "provider_daily_quota"
+                         or self._exhausted(reason))
+            if self._idx + 1 >= len(self._clients) or not exhausted:
                 self.last_error = reason or (
                     f"{self.active_label} returned no response")
                 return raw
             logger.warning(
-                "Pool provider %s is out of quota (%s); continuing on %s.",
-                self.active_label, reason, self._labels[self._idx + 1],
+                "Pool provider %s reached its daily quota; continuing on %s.",
+                self.active_label, self._labels[self._idx + 1],
             )
             self._idx += 1
 
@@ -1175,7 +1185,8 @@ def get_pool_llm_client() -> BaseLLMClient:
 
     POOL_LLM_FALLBACK_PROVIDERS adds providers to continue on when the first
     one runs out of its per-day quota; with none configured the primary client
-    is returned unchanged.
+    is returned unchanged unless POOL_GEMINI_API_KEYS supplies explicit backups
+    for a Gemini primary. Those keys must have independently available quota.
     """
     settings = get_settings()
     pool_key = (settings.POOL_LLM_API_KEY or "").strip()
@@ -1191,12 +1202,22 @@ def get_pool_llm_client() -> BaseLLMClient:
     wanted = [name.strip().lower()
               for name in (settings.POOL_LLM_FALLBACK_PROVIDERS or "").split(",")]
     wanted = [name for name in wanted if name]
-    if not wanted:
-        return primary
-
     primary_label = pool_provider or (settings.LLM_PROVIDER or "").strip().lower()
     clients: List[BaseLLMClient] = [primary]
     labels: List[str] = [primary_label or "default"]
+    if primary_label == "gemini":
+        primary_key = (pool_key or settings.GEMINI_API_KEY or "").strip()
+        keys = pool_gemini_keys(settings)
+        if not primary_key and keys:
+            primary_key = keys[0]
+            primary = get_llm_client(provider="gemini", api_key=primary_key, model=pool_model)
+            clients[0] = primary
+        for key in keys:
+            if key == primary_key:
+                continue
+            client = get_llm_client(provider="gemini", api_key=key, model=pool_model)
+            clients.append(client)
+            labels.append(f"gemini backup {len(clients) - 1}")
     for name in wanted:
         if name in labels:
             continue

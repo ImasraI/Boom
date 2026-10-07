@@ -101,23 +101,52 @@ def blocked_quota(identity: str) -> tuple[float, str] | None:
         return entry
 
 
+def pool_gemini_keys(settings) -> list[str]:
+    """Explicit pool credentials in priority order, without duplicates.
+
+    The primary retains the existing dedicated/shared-key behavior. Backups
+    are opt-in and are never implicitly taken from chat or embedding workers.
+    """
+    primary = ((settings.POOL_LLM_API_KEY or "").strip()
+               or (settings.GEMINI_API_KEY or "").strip())
+    extras = getattr(settings, "POOL_GEMINI_API_KEYS", "") or ""
+    return list(dict.fromkeys(key.strip() for key in [primary, *extras.split(",")]
+                             if key.strip()))
+
+
+def _has_pool_fallback(settings) -> bool:
+    """Mirror supported factory fallbacks without opening HTTP clients."""
+    names = {name.strip().lower() for name in
+             (settings.POOL_LLM_FALLBACK_PROVIDERS or "").split(",")}
+    for name in names - {"gemini"}:
+        if name in {"groq", "openai", "omniroute"} and (settings.LLM_API_KEY or "").strip():
+            return True
+        if name == "cerebras" and (settings.CEREBRAS_API_KEY or "").strip():
+            return True
+        if name == "ollama" and any(host in settings.LLM_BASE_URL for host in
+                                    ("localhost:11434", "127.0.0.1:11434")):
+            return True
+    return False
+
+
 def pool_quota_status() -> dict:
     """Read health without a network request or creating another HTTP client."""
     from app.config import get_settings
 
     settings = get_settings()
-    provider = (settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER or "").strip().lower()
+    provider = ((settings.POOL_LLM_PROVIDER or "").strip()
+                or (settings.LLM_PROVIDER or "").strip()).lower()
     if provider != "gemini":
         return {"blocked": False}
-    model = (settings.POOL_LLM_MODEL_NAME or settings.GEMINI_MODEL_NAME).strip()
-    key = (settings.POOL_LLM_API_KEY or settings.GEMINI_API_KEY).strip()
-    entry = blocked_quota(quota_identity(settings.GEMINI_BASE_URL, model, key))
+    model = ((settings.POOL_LLM_MODEL_NAME or "").strip()
+             or settings.GEMINI_MODEL_NAME.strip())
+    entries = [blocked_quota(quota_identity(settings.GEMINI_BASE_URL, model, key))
+               for key in pool_gemini_keys(settings)]
     # Explicitly configured alternatives may still answer. Never enable the
     # chat provider implicitly: stocking shelves must not drain chat's quota.
-    fallback = bool((settings.POOL_LLM_FALLBACK_PROVIDERS or "").strip())
-    if not entry or fallback:
+    if not entries or any(entry is None for entry in entries) or _has_pool_fallback(settings):
         return {"blocked": False}
-    until, _reason = entry
+    until = min(entry[0] for entry in entries)
     return {
         "blocked": True,
         "code": "provider_daily_quota",

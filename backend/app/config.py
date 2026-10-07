@@ -46,11 +46,13 @@ class Settings(BaseSettings):
     # Optional provider override for MOCK GENERATION only (e.g. "cerebras"
     # while the chatbot runs on another provider). Empty = LLM_PROVIDER.
     POOL_LLM_PROVIDER: str = ""
+    # Ordered Gemini backup credentials for mock generation only. Comma-separated;
+    # keys from one Google project share its quota. Never expose this in the UI.
+    POOL_GEMINI_API_KEYS: str = ""
     # Extra providers to CONTINUE on when the pool provider runs out of its
-    # per-day quota (comma-separated, e.g. "groq,cerebras"). Quotas are per
-    # provider and per model, so a spent free tier is another provider's
-    # problem; a per-day limit cannot clear inside a request, and a booklet
-    # needs many. Each fallback uses its own key/model from settings. Empty
+    # per-day quota (comma-separated, e.g. "groq,cerebras"). Quota scope and
+    # allowances depend on the provider, project/organization and model.
+    # Each fallback uses its own key/model from settings. Empty
     # (default) = no failover: pool generation fails fast with the reason.
     POOL_LLM_FALLBACK_PROVIDERS: str = ""
     # Optional local state file: keep terminal provider quotas across restarts.
@@ -64,9 +66,8 @@ class Settings(BaseSettings):
     GEMINI_MODEL_NAME: str = "gemini-3.6-flash"
 
     # Cerebras Inference (wafer-scale hardware, OpenAI-compatible API).
-    # Free tier: ~30 RPM / ~1M tokens per day - the most generous free token
-    # budget of the three providers, and extremely fast (>1000 tok/s), so it
-    # suits the interactive chatbot and the token-heavy mock generation.
+    # Check current account limits and billing before enabling: Cerebras now
+    # offers time-limited trial credits rather than a permanent free tier.
     CEREBRAS_API_KEY: str = ""
     CEREBRAS_BASE_URL: str = "https://api.cerebras.ai/v1"
     CEREBRAS_MODEL_NAME: str = "gpt-oss-120b"
