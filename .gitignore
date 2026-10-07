@@ -13,6 +13,9 @@ dist/
 # IDE
 .vscode/
 .idea/
+# Editor recovery files can contain copies of ignored credentials.
+*.swp
+*.swo
 
 # OS
 .DS_Store
