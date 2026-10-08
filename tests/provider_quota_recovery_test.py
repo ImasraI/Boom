@@ -141,10 +141,11 @@ def test_ready_mock_is_served_even_if_provider_is_blocked(monkeypatch):
     assert "answer" not in result
 
 
-def test_blocked_restock_does_not_launch_a_thread(monkeypatch):
+def test_access_denied_restock_does_not_launch_a_thread(monkeypatch):
     def blocked():
         raise HTTPException(503, quota.DAILY_QUOTA_MESSAGE)
     monkeypatch.setattr(admin, "require_pool_available", blocked)
+    monkeypatch.setattr(admin, "pool_quota_status", lambda: {'blocked':True, 'code':'provider_access_denied'})
     monkeypatch.setattr(admin.threading, "Thread", lambda **kw: pytest.fail("Do not launch blocked work"))
     with pytest.raises(HTTPException) as error:
         admin.pool_restock(None)

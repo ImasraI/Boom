@@ -51,6 +51,48 @@ PLAN = [{"name": "ریاضی", "questions": 2, "minutes": 10}]
 MAJORS = [pool_core.CANONICAL_MAJOR["riazi"]]
 
 
+def test_mock_stock_only_refuses_empty_bank_without_any_provider_call(db, monkeypatch):
+    monkeypatch.setattr(mock_generation, 'generate_booklet', lambda *a, **kw: pytest.fail('No live drafting'))
+    with pytest.raises(HTTPException) as error:
+        mocks._generate_reserved_mock(mocks.MockConfig(total_questions=5,stock_only=True),db.get(User,1),db)
+    assert error.value.status_code==409 and error.value.detail['code']=='pool_empty'
+
+
+def test_full_mock_cannot_claim_a_short_subject_template(db):
+    source=make_mock(db,count=1)
+    assert mocks._claim_pool_mock(db,1,'riazi','konkur','دوازدهم',PLAN) is None
+    db.refresh(source)
+    assert source.status=='pending_use'  # Still useful bank stock, not corrupt.
+
+
+def test_stock_inventory_excludes_unverified_corrupt_and_private_questions(db):
+    good=make_mock(db,count=3)
+    make_mock(db,count=7,label='unverified',verified=False)
+    make_mock(db,owner=1,status='claimed',count=4,label='private')
+    bank.record_report(db,good,1,1,'broken question')
+    inventory=pool_core.stock_inventory(db)
+    assert sum(row['verified'] for row in inventory)==2
+    assert sum(row['unused'] for row in inventory)==2
+
+
+def test_ranked_stock_only_rejects_insufficient_subject_stock_before_charge(db, monkeypatch):
+    make_mock(db,count=1)
+    monkeypatch.setattr(arena,'get_settings',lambda:SimpleNamespace(POOL_ALLOW_LIVE_GENERATION=False))
+    monkeypatch.setattr(arena,'consume_ai_use',lambda *a:pytest.fail('Do not charge an unavailable duel'))
+    with pytest.raises(HTTPException) as error:
+        arena.join_queue(arena.JoinPayload(student={'major':MAJORS[0],'grade':'دوازدهم'}),db.get(User,1),db)
+    assert error.value.status_code==409 and error.value.detail['code']=='pool_empty'
+
+
+def test_admin_reports_unlimited_capacity_and_actual_verified_stock(db):
+    make_mock(db,count=3)
+    result=admin.pool_levels(db)
+    assert result['unlimited_storage'] and result['progress']['capacity'] is None
+    assert result['progress']['duel_capacity'] is None
+    assert sum(s['verified'] for s in result['inventory'])==3
+    assert next(s for s in result['catalog'] if s['key']=='riazi')['ranked_questions']==34
+
+
 def test_five_konkur_style_questions_are_assembled_from_shared_pool(db, monkeypatch):
     source = make_mock(db, count=5, label='pool math')
     questions = json.loads(source.questions)
@@ -155,6 +197,7 @@ def test_background_session_failure_releases_generation_slot(monkeypatch):
         raise RuntimeError("database unavailable")
 
     monkeypatch.setattr(database, "SessionLocal", unavailable)
+    monkeypatch.setattr(admin.pool_service, "SessionLocal", unavailable)
     monkeypatch.setattr(admin, "require_pool_available", lambda: None)
     # Run the actual background callback synchronously to verify its failure
     # cleanup, without introducing a real thread into the unit test.

@@ -35,10 +35,11 @@ from app.routers import arena
 
 # A shelf booklet must carry verified questions: claim_duel_booklet quarantines
 # any pending row whose answer keys were never verified.
-VERIFIED_SHELF_BOOKLET = (
-    '[{"verification_status":"verified","_id":1,"subject":"ریاضی","topic":"",'
-    '"text":"q","options":["a","b","c","d"],"answer":1,"explanation":""}]'
-)
+VERIFIED_SHELF_BOOKLET = json.dumps([
+    {'verification_status':'verified','_id':i+1,'subject':subject,'topic':'',
+     'text':f'q {subject} {i}','options':['a','b','c','d'],'answer':1,'explanation':''}
+    for subject, count in [('ریاضی',13),('فیزیک',11),('شیمی',10)]
+    for i in range(count)], ensure_ascii=False)
 
 
 @pytest.fixture()
@@ -350,10 +351,16 @@ def test_cross_major_duel_never_takes_a_single_major_shelf_booklet(db):
     entry_a = _queue(db, a, "ریاضی فیزیک")
     _queue(db, b, "علوم تجربی")
     match = arena._try_pair(db, entry_a)
-    assert match is not None and match.mock_ready is False
+    assert match is not None and match.mock_ready is True
+    # Its verified questions may assemble a new shared-intersection booklet,
+    # while the single-major shelf row itself remains unclaimed.
+    assert match.mock_id != db.query(GeneratedMock).filter(
+        GeneratedMock.difficulty == pool_core.DUEL_DIFFICULTY,
+        GeneratedMock.student_id == 0).first().id
     # The shelf row is untouched (still pending, still unclaimed).
     assert db.query(GeneratedMock).filter(
-        GeneratedMock.difficulty == pool_core.DUEL_DIFFICULTY
+        GeneratedMock.difficulty == pool_core.DUEL_DIFFICULTY,
+        GeneratedMock.student_id == 0
     ).one().status == "pending_use"
 
 

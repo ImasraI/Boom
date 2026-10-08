@@ -119,3 +119,19 @@ def plan_totals(plan: List[dict]) -> dict:
         "questions": sum(s["questions"] for s in plan),
         "minutes": sum(s["minutes"] for s in plan),
     }
+
+
+def resize_plan(plan: List[dict], total: int) -> List[dict]:
+    """Keep the official subject proportions for a shorter exam."""
+    plan = [dict(row) for row in plan]
+    weight = sum(row['questions'] for row in plan)
+    if not weight or not total:
+        return plan
+    total = min(total, weight)
+    shares = [total * row['questions'] / weight for row in plan]
+    counts = [int(value) for value in shares]
+    for i in sorted(range(len(plan)), key=lambda i: -(shares[i] - counts[i]))[:total - sum(counts)]:
+        counts[i] += 1
+    return [{**row, 'questions': count,
+             'minutes': max(1, round(row['minutes'] * count / row['questions']))}
+            for row, count in zip(plan, counts) if count]

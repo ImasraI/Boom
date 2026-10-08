@@ -16,8 +16,8 @@ interface PoolProgress {
   active: boolean; label: string; planned: number; produced: number;
   current: { major_key: string; major: string; difficulty: string } | null;
   elapsed_seconds: number;
-  available: number; capacity: number; percent: number;
-  duel_available: number; duel_capacity: number;
+  available: number; capacity: number | null; percent: number | null;
+  duel_available: number; duel_capacity: number | null;
   // Question bookkeeping: a booklet is ~100 questions over several minutes,
   // so these move long before the booklet counters do.
   phase?: string;
@@ -30,6 +30,10 @@ interface PoolPayload {
   cancel_requested?: boolean; progress?: PoolProgress;
   provider_health?: { blocked: boolean; message?: string; retry_at?: string };
   question_bank?: Record<string, number>;
+  catalog?: { key: string; label: string; subjects: string[]; ranked_subjects: string[]; mock_questions: number; ranked_questions: number }[];
+  inventory?: { major: string; grade: string; difficulty: string; subject: string; verified: number; unused: number; used: number }[];
+  run?: { enabled: boolean; status: string; produced: number; last_error?: string; retry_at?: string;
+    config?: { kind: string; majors: string[]; difficulties: string[]; grade: string; count: number; total_questions: number; subjects: string[]; topics: string[] } };
 }
 interface SmsCredit { credit: number; configured: boolean; detail: string; bypass_active: boolean }
 interface SmsDelivery { message_id: number; send_at: number | null; delivery_at: number | null; delivery_state: number | null }
@@ -50,6 +54,7 @@ const DIFFICULTY_FA: Record<string, string> = {
 };
 const PHASE_FA: Record<string, string> = {
   generating: "تولید سوال", verifying: "راستی‌آزمایی پاسخ‌ها", saving: "ذخیره دفترچه",
+  waiting_for_quota: "منتظر بازنشانی سهمیه", waiting_for_worker: "منتظر پایان تولید قبلی",
 };
 
 export default function Admin({ nav }: { nav: NavFn }) {
@@ -69,11 +74,18 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [busy, setBusy] = useState(false);
   const [restocking, setRestocking] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
-  const [poolKind, setPoolKind] = useState("mock");
+  const [poolKind, setPoolKind] = useState("both");
   const [poolMajor, setPoolMajor] = useState("riazi");
   const [poolDifficulty, setPoolDifficulty] = useState("konkur");
   const [poolGrade, setPoolGrade] = useState("دوازدهم");
   const [poolCount, setPoolCount] = useState(0);
+  const [poolQuestions, setPoolQuestions] = useState(10);
+  const [poolSubjects, setPoolSubjects] = useState<string[]>([]);
+  const [poolTopics, setPoolTopics] = useState("");
+  const selectedMajor = pool?.catalog?.find(m => m.key === poolMajor);
+  const offeredSubjects = (poolKind === "mock" ? selectedMajor?.subjects : selectedMajor?.ranked_subjects) ?? [];
+  const stockQuestions = pool?.inventory?.reduce((sum, row) => sum + row.verified, 0) ?? 0;
+  const unusedQuestions = pool?.inventory?.reduce((sum, row) => sum + row.unused, 0) ?? 0;
   const poolTimer = useRef<number | null>(null);
   async function checkDelivery() {
     setCheckingDelivery(true); setDelivery(null); setDeliveryError("");
@@ -103,6 +115,15 @@ export default function Admin({ nav }: { nav: NavFn }) {
   }, [nav]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const run = pool?.run;
+    if (!run?.enabled || !run.config) return;
+    const cfg = run.config;
+    setPoolKind(cfg.kind); setPoolMajor(cfg.majors.length === 1 ? cfg.majors[0] : "all");
+    setPoolGrade(cfg.grade); setPoolDifficulty(cfg.difficulties[0]);
+    setPoolCount(cfg.count); setPoolQuestions(cfg.total_questions);
+    setPoolSubjects(cfg.subjects ?? []); setPoolTopics((cfg.topics ?? []).join("\n"));
+  }, [pool?.run?.enabled, pool?.run?.config]);
 
   // While a restock is running, poll the shelves so the numbers move live.
   // The payload also carries the server's run state, so a cancel (or a
@@ -182,12 +203,14 @@ export default function Admin({ nav }: { nav: NavFn }) {
     try {
       const res = await fetch(apiUrl("/api/admin/pool/restock"), {
         method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ kind: poolKind, major: poolMajor, difficulty: poolDifficulty, grade: poolGrade, count: poolCount }),
+        body: JSON.stringify({ kind: poolKind, major: poolMajor, difficulty: poolDifficulty, grade: poolGrade, count: poolCount,
+          total_questions: poolQuestions, subjects: poolSubjects,
+          topics: poolTopics.split("\n").map(t => t.trim()).filter(Boolean) }),
       });
       if (!res.ok) throw new Error(await readApiError(res, "شروع restock ناموفق بود"));
       setRestocking(true);
       setCancelRequested(false);
-      setMsg("restock شروع شد؛ قفسه‌ها همین‌جا پر می‌شوند...");
+      setMsg("تولید ثبت شد؛ هنگام پایان سهمیه، تا بازنشانی منتظر می‌ماند و سپس ادامه می‌دهد.");
     } catch (e) { setErr(e instanceof Error ? e.message : "خطا"); }
     finally { setBusy(false); }
   }
@@ -227,7 +250,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
   }
 
   const progress = pool?.progress;
-  const poolPercent = Math.min(100, Math.max(0, progress?.percent ?? 0));
+  const poolPercent = progress?.current_target ? Math.min(100, Math.round(100 * progress.current_verified / progress.current_target)) : 0;
 
   const limits = payload?.limits ?? {};
 
@@ -372,9 +395,9 @@ export default function Admin({ nav }: { nav: NavFn }) {
           <span className="text-[10px] text-[var(--muted-2)] ms-auto">
             ذخیره بدون سقف
           </span>
-          <button onClick={restock} disabled={busy || generating || pool?.provider_health?.blocked}
+          <button onClick={restock} disabled={busy || generating || !pool?.catalog?.length}
             className="text-[11px] px-3 py-1.5 rounded-xl bg-[var(--accent)] text-[var(--surface)] font-bold disabled:opacity-40">
-            {generating ? "در حال تولید..." : "تولید فوری"}
+            {generating ? (pool?.run?.status === "waiting_for_quota" ? "منتظر سهمیه" : "تولید فعال") : "شروع تولید"}
           </button>
           {generating && !cancelRequested && (
             <button onClick={cancelRestock}
@@ -389,13 +412,18 @@ export default function Admin({ nav }: { nav: NavFn }) {
           )}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border-y border-[var(--border)] py-4 mb-4 text-xs text-[var(--muted)]">
-          <label>نوع دفترچه<select aria-label="نوع دفترچه برای تولید" value={poolKind} onChange={e => setPoolKind(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]"><option value="mock">آزمون و تمرین</option><option value="ranked">دوئل رنکینگ</option><option value="both">هر دو</option></select></label>
-          <label>رشته<select aria-label="رشته برای تولید" value={poolMajor} onChange={e => setPoolMajor(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{Object.entries({ riazi: "ریاضی", tajrobi: "تجربی", insani: "انسانی", honar: "هنر", zaban: "زبان", all: "همه رشته‌ها" }).map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
+          <label>مصرف دفترچه<select aria-label="نوع دفترچه برای تولید" value={poolKind} onChange={e => { setPoolKind(e.target.value); setPoolSubjects([]); }} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]"><option value="mock">آزمون آزمایشی و تمرین</option><option value="ranked">دوئل رنکینگ</option><option value="both">رنکینگ + آزمون آزمایشی و تمرین</option></select></label>
+          <label>رشته<select aria-label="رشته برای تولید" value={poolMajor} onChange={e => { setPoolMajor(e.target.value); setPoolSubjects([]); }} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{pool?.catalog?.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}<option value="all">همه رشته‌ها</option></select></label>
           <label>دشواری<select aria-label="دشواری برای تولید" value={poolDifficulty} onChange={e => setPoolDifficulty(e.target.value)} disabled={generating || poolKind === "ranked"} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{Object.entries(DIFFICULTY_FA).map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
           <label>پایه<select value={poolGrade} onChange={e => setPoolGrade(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{["دهم", "یازدهم", "دوازدهم"].map(g => <option key={g}>{g}</option>)}</select></label>
           <label>تعداد دفترچه؛ صفر = پیوسته<input aria-label="تعداد دفترچه" type="number" min={0} step={1} value={poolCount} onChange={e => setPoolCount(Math.max(0, Math.floor(Number(e.target.value))))} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]" /></label>
+          {poolKind !== "ranked" && <label>تعداد کل سوال‌های آزمون آزمایشی<select aria-label="تعداد سوال برای تولید" value={poolQuestions} onChange={e => setPoolQuestions(Number(e.target.value))} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]"><option value={5}>۵ سوال</option><option value={10}>۱۰ سوال</option><option value={0}>دفترچه کامل</option></select></label>}
         </div>
-        <p className="text-xs text-[var(--muted)] mb-4">فقط انتخاب‌های بالا تولید می‌شوند. حالت پیوسته تا لغو یا توقف سرویس ادامه دارد. بانک سوال: {(pool?.question_bank?.active ?? 0).toLocaleString("fa-IR")} فعال · {(pool?.question_bank?.corrupt ?? 0).toLocaleString("fa-IR")} گزارش‌شده</p>
+        {offeredSubjects.length > 0 && <fieldset className="border-b border-[var(--border)] pb-4 mb-4"><legend className="text-xs text-[var(--muted)] mb-2">درس‌ها؛ انتخاب خالی یعنی همه درس‌های آزمون</legend><div className="flex flex-wrap gap-4">{offeredSubjects.map(subject => <label key={subject} className="text-xs flex gap-2 items-center"><input type="checkbox" checked={poolSubjects.includes(subject)} disabled={generating} onChange={e => setPoolSubjects(previous => e.target.checked ? [...previous, subject] : previous.filter(s => s !== subject))} />{subject}</label>)}</div></fieldset>}
+        <label className="block text-xs text-[var(--muted)] mb-4">مباحث هدف؛ هر مبحث در یک خط، خالی یعنی همه مباحث<textarea aria-label="مباحث برای تولید" value={poolTopics} disabled={generating} onChange={e => setPoolTopics(e.target.value)} rows={2} className="block w-full bg-transparent border-b border-[var(--border-strong)] py-2 text-[var(--text)]" /></label>
+        <p className="text-xs text-[var(--muted)] mb-4">حالت پیوسته سقف موجودی ندارد؛ پس از بازنشانی سهمیه و راه‌اندازی مجدد سرور ادامه می‌دهد. تمرین قبلی و تمرین نقاط ضعف از همین بانک با انتخاب مناسب هر دانش‌آموز ساخته می‌شوند.</p>
+        {poolKind !== "mock" && <p className="text-xs text-[var(--muted)] mb-4">رنکینگ با استاندارد کنکور و اندازهٔ کوتاه همان صفحه ساخته می‌شود{selectedMajor ? `: ${selectedMajor.ranked_questions} سوال در حالت همه درس‌ها` : ""}. تعداد بالا فقط برای آزمون آزمایشی است.</p>}
+        <p className="text-sm text-[var(--text)] mb-4">{stockQuestions.toLocaleString("fa-IR")} سوال مشترک تاییدشده · {unusedQuestions.toLocaleString("fa-IR")} استفاده‌نشده · {(pool?.question_bank?.corrupt ?? 0).toLocaleString("fa-IR")} گزارش‌شده</p>
         {poolPollError && <p role="alert" className="text-xs text-red-400 mb-4">{poolPollError}</p>}
         {/* Aggregate fill across every shelf. While a sweep is producing, the
             bar shimmers and the live run state (booklets done, shelf in
@@ -403,7 +431,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
         <div className="mb-4">
           <div className="flex items-baseline justify-between text-[11px] text-[var(--muted)] mb-1.5">
             <span>
-              {generating ? "در حال تولید دفترچه‌ها..." : "موجودی کل قفسه‌ها"}
+              {generating ? (pool?.run?.status === "waiting_for_quota" ? "منتظر بازنشانی سهمیه؛ ادامه خودکار" : "راستی‌آزمایی دفترچه فعلی") : "موجودی دفترچه‌ها"}
             </span>
             <span className="font-bold text-[var(--text)]">
               {progress?.available ?? 0} دفترچه آماده
@@ -422,7 +450,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
             <span>
               {generating && progress ? (
                 <>
-                  {progress.produced} دفترچه · {progress.questions} سوال ساخته شد
+                  {pool?.run?.produced ?? progress.produced} دفترچه در این تولید · {progress.questions} سوال ذخیره شد
                   {progress.current
                     ? ` — قفسه فعلی: ${progress.current.major} · ${DIFFICULTY_FA[progress.current.difficulty] ?? progress.current.difficulty}`
                     : " — در حال بررسی قفسه‌ها"}
@@ -443,11 +471,11 @@ export default function Admin({ nav }: { nav: NavFn }) {
               {progress.phase ? ` · مرحله: ${PHASE_FA[progress.phase] ?? progress.phase}` : ""}
             </p>
           )}
-          {(pool?.provider_health?.blocked || progress?.last_error) && (
+          {(pool?.provider_health?.blocked || progress?.last_error || pool?.run?.last_error) && (
             <p role="alert" className="text-[12px] text-red-400 mt-1.5 leading-relaxed">
               {pool?.provider_health?.blocked
                 ? pool.provider_health.message
-                : `تولید متوقف شد: ${progress?.last_error}`}
+                : `وضعیت تولید: ${pool?.run?.last_error || progress?.last_error}`}
               {pool?.provider_health?.retry_at && (
                 <> بازنشانی بعدی: {new Date(pool.provider_health.retry_at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" })}</>
               )}
@@ -456,16 +484,15 @@ export default function Admin({ nav }: { nav: NavFn }) {
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {pool?.shelves.map(s => {
-            const full = s.available >= (pool.target ?? 0);
             return (
               <div key={`${s.major_key}/${s.difficulty}`}
                 className="px-3 py-2.5 rounded-2xl bg-[var(--surface-2)] border border-[var(--border)]">
                 <div className="flex items-baseline gap-1.5">
-                  <span className={`text-lg font-bold ${full ? "text-emerald-400" : s.available === 0 ? "text-red-400" : "text-[var(--text)]"}`}>
+                  <span className={`text-lg font-bold ${s.available > 0 ? "text-emerald-400" : "text-[var(--muted)]"}`}>
                     {s.available}
                   </span>
                   {!!s.needs_review && <span className="text-[10px] text-amber-500">{s.needs_review} دفترچه نیازمند بررسی</span>}
-                  <span className="text-[10px] text-[var(--muted-2)]">/ {pool.target}</span>
+                  <span className="text-[10px] text-[var(--muted-2)]">دفترچه</span>
                 </div>
                 <div className="text-[10px] text-[var(--muted)] mt-0.5">
                   {s.major} · {DIFFICULTY_FA[s.difficulty] ?? s.difficulty}
@@ -474,11 +501,10 @@ export default function Admin({ nav }: { nav: NavFn }) {
             );
           })}
         </div>
+        <div className="mt-5 overflow-x-auto"><table className="w-full text-xs text-start"><caption className="text-start text-[var(--muted)] mb-3">موجودی سوال‌های قابل استفاده به تفکیک رشته، پایه و درس</caption><thead><tr>{["رشته / پایه", "درس / سطح", "تاییدشده", "جدید", "استفاده‌شده"].map(label => <th key={label} className="text-start border-b border-[var(--border)] py-2 px-2 font-medium">{label}</th>)}</tr></thead><tbody>{pool?.inventory?.map(row => <tr key={`${row.major}/${row.grade}/${row.difficulty}/${row.subject}`}><td className="border-b border-[var(--border)] py-2 px-2">{row.major} · {row.grade || "همه پایه‌ها"}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.subject} · {DIFFICULTY_FA[row.difficulty] ?? row.difficulty}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.verified}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.unused}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.used}</td></tr>)}</tbody></table>{!stockQuestions && <p className="text-xs text-[var(--muted)] py-3">هنوز سوال مشترک تاییدشده آماده نشده است.</p>}</div>
         {generating && (
           <p className="text-[11px] text-[var(--muted-2)] mt-3">
-            تولید هر دفترچه چند دقیقه طول می‌کشد (یک فراخوان LLM برای هر درس + یک
-            فراخوان راستی‌آزمایی برای هر سوال). صفحه را ببندید و برگردید - عدد‌ها
-            همین‌جا بالا می‌روند.
+            تولید و راستی‌آزمایی در پس‌زمینه انجام می‌شود. بستن صفحه آن را متوقف نمی‌کند؛ سوال‌های سالمِ دفترچه ناقص هم حفظ می‌شوند.
           </p>
         )}
       </section>

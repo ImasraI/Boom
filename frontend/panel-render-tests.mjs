@@ -26,3 +26,14 @@ test('Ranked page loads its controls before account and filter requests finish',
   assert.match(html, /تلاش دوباره برای دریافت آرنا|در حال بارگذاری دروس/);
   assert.doesNotMatch(html, /صفحه آماده نشد/);
 });
+
+test('Admin pool renders unlimited and targeted production controls', async () => {
+  const {default:Admin} = await vite.ssrLoadModule('/src/pages/Admin.tsx');
+  const html = renderToStaticMarkup(React.createElement(Admin, {nav(){}}));
+  assert.match(html, /ذخیره بدون سقف/);
+  assert.match(html, /رنکینگ \+ آزمون آزمایشی و تمرین/);
+  assert.match(html, /تعداد کل سوال‌های آزمون آزمایشی/);
+  assert.match(html, /مباحث هدف/);
+  assert.match(html, /راه‌اندازی مجدد سرور ادامه می‌دهد/);
+  assert.match(html, /موجودی سوال‌های قابل استفاده/);
+});

@@ -8,6 +8,8 @@ _test_db_dir = tempfile.TemporaryDirectory(prefix="boom-pytest-", ignore_cleanup
 os.environ["BOOM_DATABASE_URL"] = "sqlite:///" + (Path(_test_db_dir.name) / "tests.db").as_posix()
 # Tests stub provider requests; a developer's production pacing must not sleep.
 os.environ["POOL_GENERATION_REQUESTS_PER_MINUTE"] = "0"
+# Legacy generation tests explicitly exercise the optional live branch.
+os.environ["POOL_ALLOW_LIVE_GENERATION"] = "true"
 
 
 @pytest.fixture(autouse=True)
@@ -19,6 +21,18 @@ def isolate_access_health(monkeypatch):
     for state in states: state.clear()
     yield
     for state in states: state.clear()
+
+
+@pytest.fixture(autouse=True)
+def isolate_selected_pool_state(monkeypatch, tmp_path):
+    from app.rag import pool_service
+    monkeypatch.setattr(pool_service, '_path', lambda: tmp_path / 'pool-run.json')
+    monkeypatch.setattr(pool_service, '_thread', None)
+    pool_service._shutdown.clear()
+    pool_service._wake.clear()
+    yield
+    pool_service._shutdown.set()
+    pool_service._wake.set()
 
 
 def pytest_sessionfinish(session, exitstatus):

@@ -46,6 +46,7 @@ from app.auth.limits import consume_ai_use, feature_quota, release_ai_use
 from app.rag import knowledge_base as kb, mock_generation, pool_core
 from app.rag.konkur_format import major_key
 from app.rag.provider_quota import DAILY_QUOTA_MESSAGE, pool_quota_status, require_pool_available
+from app.config import get_settings
 from app.routers.mocks import _score
 from app.utils.logger import get_logger
 
@@ -294,7 +295,7 @@ def _reserve_match(db: Session, entry: ArenaQueueEntry, other: ArenaQueueEntry,
     if same_major and unfiltered:
         pooled = pool_core.claim_duel_booklet(
             db, entry.student_id, other.student_id,
-            _major_key_of(entry.major or ""), grade=grade)
+            _major_key_of(entry.major or ""), grade=grade, plan=plan)
     if pooled is None:
         pooled = pool_core.reused_duel(db, entry.student_id, _major_key_of(entry.major or ""),
             grade=grade, plan=plan, topics=pair.get("topics"))
@@ -302,6 +303,9 @@ def _reserve_match(db: Session, entry: ArenaQueueEntry, other: ArenaQueueEntry,
         mock = pooled
         logger.info("Arena match served from duel pool (mock %d).", mock.id)
     else:
+        if not get_settings().POOL_ALLOW_LIVE_GENERATION:
+            raise HTTPException(409, detail={"code":"pool_empty", "message":
+                "برای درس‌ها و پایه مشترک شما هنوز دفترچه رنکینگ آماده نیست. پس از تکمیل بانک سوال دوباره وارد شو."})
         require_pool_available()  # No network call; never reserve an unplayable daily-quota match.
         questions = []
         i = 0
@@ -432,6 +436,17 @@ def join_queue(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    major, grade = _knowledge_base(db, current_user.id, payload.student)
+    wanted = kb.clean_wanted(major, payload.wanted)
+    if not get_settings().POOL_ALLOW_LIVE_GENERATION:
+        from app.rag import question_bank
+        pair = kb.pair_plan(major, major, wanted, wanted)
+        ready = question_bank.assemble(db, current_user.id, pair['plan'],
+            [pool_core.CANONICAL_MAJOR[_major_key_of(major)]], grade=grade,
+            topics=pair.get('topics'), shared_only=True)
+        if not ready:
+            raise HTTPException(409, detail={"code":"pool_empty", "message":
+                "برای این رشته، پایه و درس‌های انتخابی هنوز سوال رنکینگ کافی آماده نیست. انتخاب درس‌ها را تغییر بده یا پس از تکمیل بانک سوال برگرد."})
     if pool_quota_status()["blocked"]:
         # Do not queue a player when neither generation nor any verified
         # shared stock can supply a match. Legacy indexed/not-yet-indexed
@@ -616,10 +631,13 @@ def create_ai_rival_match(
         # opponent_b = None is fine - the pool only needs both ids for the
         # seen-before filter, and an exhibition has no second player yet).
         pooled = pool_core.claim_duel_booklet(
-            db, current_user.id, 0, major_key, grade=grade, prefer_used=True)
+            db, current_user.id, 0, major_key, grade=grade, prefer_used=True, plan=plan)
         if pooled is not None:
             mock = pooled
         else:
+            if not get_settings().POOL_ALLOW_LIVE_GENERATION:
+                _refund_and_raise(current_user.id, 409, {"code":"pool_empty", "message":
+                    "برای این رشته و پایه هنوز سوال تمرین کافی آماده نیست. پس از تکمیل بانک سوال برگرد."})
             questions = []
             i = 0
             for s in plan:
@@ -942,11 +960,14 @@ def accept_scheduled(
         mock = None
         if same_major and unfiltered:
             mock = pool_core.claim_duel_booklet(
-                db, invite.host_id, current_user.id, _major_key_of(major), grade=grade)
+                db, invite.host_id, current_user.id, _major_key_of(major), grade=grade, plan=pair['plan'])
         if mock is None:
             mock = pool_core.reused_duel(db, invite.host_id, _major_key_of(major),
                 grade=grade, plan=pair["plan"], topics=pair.get("topics"))
         if mock is None:
+            if not get_settings().POOL_ALLOW_LIVE_GENERATION:
+                _refund_and_raise(current_user.id, 409, {"code":"pool_empty", "message":
+                    "برای درس‌ها و پایه مشترک شما هنوز دفترچه آماده نیست. پس از تکمیل بانک سوال مسابقه را رزرو کن."})
             shared = "، ".join(pair["booklet_subjects"])
             mock = _new_duel_placeholder(
                 db, invite.host_id, pair["plan"], invite.major or major, grade,

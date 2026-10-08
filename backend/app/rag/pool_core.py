@@ -312,16 +312,18 @@ def _harvest_questions(db, questions, major_key, difficulty, grade=""):
     db.commit()
 
 
-def generate_one(db, major_key: str, difficulty: str, *, grade="") -> bool:
+def generate_one(db, major_key: str, difficulty: str, *, grade="", total_questions=0,
+                 subjects=None, topics=None) -> bool:
     """Generate one standard booklet and insert it as a pending_use pool row.
 
     Returns True when a row was added. Generation failures are logged and
     swallowed: one broken booklet must never kill a sweep.
     """
     try:
+        plan = generation_plan(major_key, subjects=subjects, total_questions=total_questions)
         questions, _plan, duration = mock_generation.build_pool_booklet(
             major_key, difficulty, user_id=POOL_OWNER_ID,
-            report=_progress_reporter(), grade=grade,
+            report=_progress_reporter(), grade=grade, plan=plan, topics=topics,
             on_verified=lambda questions: _harvest_questions(db, questions, major_key, difficulty, grade))
     except Exception:
         logger.exception("Pool generation failed for %s/%s.",
@@ -448,20 +450,19 @@ def duel_pool_deficit(db, major_key: str, target: int) -> int:
     return max(0, target - ready_count(db, difficulty=DUEL_DIFFICULTY, major=CANONICAL_MAJOR[major_key]))
 
 
-def generate_one_duel(db, major_key: str, *, grade="") -> bool:
+def generate_one_duel(db, major_key: str, *, grade="", subjects=None, topics=None) -> bool:
     """Generate one scaled + verified duel booklet into the duel shelf.
 
     Same shared generation path as standard pool rows (build_pool_booklet),
     on the scaled plan; verification included, because a wrong key in a
     ranked duel moves Elo. Failures are logged and swallowed like the others.
     """
-    plan = mock_generation.scale_plan(
-        mock_generation.default_plan(major_key), divisor=3, minimum=3)
+    plan = generation_plan(major_key, ranked=True, subjects=subjects)
     duration = max(10, sum(s["minutes"] for s in plan) // 3)
     try:
         questions, _plan, _ = mock_generation.build_pool_booklet(
             major_key, "konkur", user_id=POOL_OWNER_ID, plan=plan,
-            report=_progress_reporter(), grade=grade,
+            report=_progress_reporter(), grade=grade, topics=topics,
             on_verified=lambda questions: _harvest_questions(db, questions, major_key, DUEL_DIFFICULTY, grade))
     except Exception:
         logger.exception("Duel pool generation failed for %s.", major_key)
@@ -546,7 +547,7 @@ def _sweep_duel_shelves(db, target: int, majors=None, dry_run: bool = False,
     return produced
 
 
-def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str, *, grade="", prefer_used=False):
+def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str, *, grade="", prefer_used=False, plan=None):
     """Atomically claim the oldest pending_use duel row for this major that
     NEITHER player has attempted before. Marks it claimed + assigns it to
     player A (the match row's owner convention). Returns the row or None.
@@ -568,9 +569,9 @@ def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str, *, grade=""
         .order_by(GeneratedMock.created_at.asc())
     ).scalars().all()
     if prefer_used:
-        reused = reused_duel(db, user_a, major_key, grade=grade, used_only=True, prefer_used=True)
+        reused = reused_duel(db, user_a, major_key, grade=grade, plan=plan, used_only=True, prefer_used=True)
         if reused is None:
-            reused = reused_duel(db, user_a, major_key, grade=grade, prefer_used=True)
+            reused = reused_duel(db, user_a, major_key, grade=grade, plan=plan, prefer_used=True)
         if reused is not None:
             return reused
     for row in rows:
@@ -580,6 +581,9 @@ def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str, *, grade=""
             db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
                 GeneratedMock.status == "pending_use").values(status="quarantined"))
             continue
+        content = json.loads(row.questions)
+        if plan and (any(sum(q.get('subject') == s['name'] for q in content) != s['questions'] for s in plan) or len(content) != sum(s['questions'] for s in plan)):
+            continue  # A subject-specific template is bank stock, not a full duel.
         questions = question_bank.active_questions(db, row)
         if len(questions) != len(json.loads(row.questions)):
             row.status = "quarantined"
@@ -597,20 +601,54 @@ def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str, *, grade=""
             db.flush()
             db.refresh(row)
             return row
-    return reused_duel(db, user_a, major_key, grade=grade)
+    return reused_duel(db, user_a, major_key, grade=grade, plan=plan)
 
 
 def reused_duel(db, user_id, major_key, *, grade="", plan=None, topics=None, used_only=False, prefer_used=False):
     label = CANONICAL_MAJOR.get(major_key)
     if not label:
         return None
-    plan = plan or mock_generation.scale_plan(mock_generation.default_plan(major_key), divisor=3, minimum=3)
+    plan = plan or generation_plan(major_key, ranked=True)
     questions = question_bank.assemble(db, user_id, plan, [label], grade=grade,
         topics=topics, prefer_used=prefer_used, used_only=used_only, shared_only=not prefer_used)
     if not questions:
         return None
     return question_bank.create_reused_mock(db, user_id, questions, label, grade,
         DUEL_DIFFICULTY, max(10, sum(s["minutes"] for s in plan) // 3), ranked=True)
+
+
+def generation_plan(major_key, *, ranked=False, subjects=None, total_questions=0):
+    """The same formats used by the student mock form and ranked matching."""
+    from app.rag import knowledge_base
+    from app.rag.konkur_format import resize_plan
+    plan = (knowledge_base.pair_plan(CANONICAL_MAJOR[major_key], CANONICAL_MAJOR[major_key])['plan']
+            if ranked else mock_generation.default_plan(major_key))
+    plan = [dict(row) for row in plan if not subjects or row['name'] in subjects]
+    if not plan:
+        raise ValueError('No exam subjects match the selected major')
+    return plan if ranked else resize_plan(plan, total_questions)
+
+
+def catalog():
+    return [{'key':key, 'label':CANONICAL_MAJOR[key],
+             'subjects':[s['name'] for s in generation_plan(key)],
+             'ranked_subjects':[s['name'] for s in generation_plan(key, ranked=True)],
+             'mock_questions':sum(s['questions'] for s in generation_plan(key)),
+             'ranked_questions':sum(s['questions'] for s in generation_plan(key, ranked=True))}
+            for key in POOL_MAJORS]
+
+
+def stock_inventory(db):
+    """Only shared, verified, active questions count as usable inventory."""
+    from sqlalchemy import func, case
+    from app.auth.database import BankQuestion
+    rows = db.execute(select(BankQuestion.major, BankQuestion.grade, BankQuestion.difficulty,
+        BankQuestion.subject, func.count(BankQuestion.id),
+        func.sum(case((BankQuestion.uses == 0, 1), else_=0))).where(
+            BankQuestion.owner_id == 0, BankQuestion.status == 'active', BankQuestion.verified == True)
+        .group_by(BankQuestion.major, BankQuestion.grade, BankQuestion.difficulty, BankQuestion.subject)).all()
+    return [{'major':m,'grade':g,'difficulty':d,'subject':s,'verified':n,'unused':fresh,'used':n-fresh}
+            for m,g,d,s,n,fresh in rows]
 
 
 def generate_selected(db, *, kind="mock", majors=None, difficulties=None, count=0, grade=""):

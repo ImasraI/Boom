@@ -85,6 +85,7 @@ _CANONICAL_MAJOR = {k: v[0] for k, v in _MAJOR_LABELS.items()}
 
 
 class MockConfig(BaseModel):
+    stock_only: bool = False
     subjects: Optional[List[str]] = None  # default: all major subjects
     questions_per_subject: Optional[int] = Field(default=None, ge=1)  # default: konkur counts
     total_questions: Optional[int] = Field(default=None, ge=1, le=200)
@@ -132,19 +133,13 @@ def _resolve_plan(config: "MockConfig") -> Tuple[bool, List[dict], str]:
         plan = [{**s, "questions": min(config.questions_per_subject, s["questions"])}
                 for s in plan]
     if config.total_questions:
-        total = min(config.total_questions, sum(s["questions"] for s in plan))
-        weight = sum(s["questions"] for s in plan)
-        shares = [total * s["questions"] / weight for s in plan]
-        counts = [int(n) for n in shares]
-        for i in sorted(range(len(plan)), key=lambda i: -(shares[i] - counts[i]))[:total - sum(counts)]:
-            counts[i] += 1
-        plan = [{**s, "questions": n, "minutes": max(1, round(s["minutes"] * n / s["questions"]))}
-                for s, n in zip(plan, counts) if n]
+        from app.rag.konkur_format import resize_plan
+        plan = resize_plan(plan, config.total_questions)
     return poolable, plan, major
 
 
 def _claim_pool_mock(db: Session, user_id: int, major_key_str: str,
-                     difficulty: str, grade: str) -> Optional[GeneratedMock]:
+                     difficulty: str, grade: str, plan=None) -> Optional[GeneratedMock]:
     """Atomically claim the oldest pending_use pool row matching
     (major, difficulty): mark it claimed and assign it to the student.
 
@@ -180,6 +175,9 @@ def _claim_pool_mock(db: Session, user_id: int, major_key_str: str,
             if len(questions) != len(json.loads(row.questions)):
                 row.status = "quarantined"
                 continue
+            if plan and (len(questions) != sum(s['questions'] for s in plan) or
+                    any(sum(q.get('subject') == s['name'] for q in questions) != s['questions'] for s in plan)):
+                continue  # A five-question template cannot satisfy a full booklet.
             claimed = db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
                 GeneratedMock.status == "pending_use").values(
                     status="claimed", student_id=user_id, grade=grade or row.grade))
@@ -308,7 +306,7 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
     # 1) Fast path: claim a pre-generated booklet from the pool.
     if poolable:
         claimed = _claim_pool_mock(db, current_user.id,
-                                   _major_key(major), config.difficulty, grade)
+                                   _major_key(major), config.difficulty, grade, plan)
         if claimed is not None:
             # Quota already reserved atomically at entry - nothing more to record.
             logger.info("Served mock %d from the pre-generated pool for user %d.",
@@ -321,6 +319,11 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
                 "subjects": plan,
                 "source": "pool",
             }
+
+    from app.config import get_settings
+    if config.stock_only or not get_settings().POOL_ALLOW_LIVE_GENERATION:
+        raise HTTPException(409, detail={"code": "pool_empty", "message":
+            "برای این رشته، پایه و مباحث هنوز سوال تاییدشده کافی آماده نیست. تعداد یا مباحث را تغییر بده، یا پس از تکمیل بانک سوال برگرد."})
 
     # 2) Slow path: live generation (pool empty for this combination, or a
        # customized request the pool can never satisfy).

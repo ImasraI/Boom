@@ -141,7 +141,7 @@ function ConfigView({ onStart, onBack, error }: {
           <p className="text-[10px] text-[var(--muted-2)] mt-1.5">خالی بگذاری، سوالات از کل مباحث کنکوری می‌آید. برای تمرکز بر آزمون پیش رو، مباحث آن را وارد کن.</p>
         </div>
 
-        <button onClick={() => onStart({ mode, difficulty, total_questions: count || undefined, topics: topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
+        <button onClick={() => onStart({ mode, difficulty, stock_only: true, total_questions: count || undefined, topics: topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
           className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all">
           ساخت دفترچه آزمون
         </button>
@@ -476,8 +476,8 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
       {phase === "loading" && (
       <div className="min-h-screen bg-[var(--surface)] flex flex-col items-center justify-center gap-4">
         <div className="w-10 h-10 border-3 border-[var(--accent)] border-t-transparent rounded-full animate-spin" style={{ borderWidth: 3 }} />
-        <p className="text-[13px] font-bold text-[var(--muted)]">در حال ساخت دفترچه از کتاب‌های تو...</p>
-        <p className="text-[11px] text-[var(--muted-2)]">ساخت و بررسی پاسخ‌های دفترچه ممکن است چند دقیقه طول بکشد. بازگشت به تنظیمات تولید را متوقف نمی‌کند.</p>
+        <p className="text-[13px] font-bold text-[var(--muted)]">در حال آماده‌سازی دفترچه از بانک سوال...</p>
+        <p className="text-[11px] text-[var(--muted-2)]">فقط سوال‌های آماده و تاییدشده انتخاب می‌شوند.</p>
         <button onClick={() => { generationRef.current?.abort(); setPhase("config") }} className="text-sm text-[var(--accent)]">بازگشت به تنظیمات</button>
       </div>
       )}

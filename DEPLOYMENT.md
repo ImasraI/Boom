@@ -521,3 +521,20 @@ journalctl --vacuum-time=7d
 
 *Last updated: September 2026*  
 *Boom — Deployable AI Study Planner*
+# Continuous question pool
+
+Admin → pool can select ranked, mock/practice, or both; major, grade,
+difficulty, subjects, topics and mock size (5, 10 or full). Ranked uses the
+same short subject plan as matchmaking. Zero booklets means continuous
+production without an inventory ceiling. Saved selections in ignored
+`backend/data/pool-run.json` resume on API startup and wait until a saved
+provider quota reset without probing exhausted keys. Stop from the admin
+panel to disable the saved run. Storage and provider quotas still apply.
+
+Use `POOL_ALLOW_LIVE_GENERATION=false` in production to return a readable
+409 `pool_empty` when compatible verified stock is insufficient. Practice
+prefers used questions; ranked prefers unused shared questions, then reuses
+shared stock. No student-facing LLM generation is launched in this mode.
+`MOCK_POOL_TARGET` remains a minimum for the optional legacy top-up worker,
+not a maximum capacity. Disable `POOL_WORKER_INPROCESS` when using a
+continuous admin run to keep one generation worker in charge.

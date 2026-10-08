@@ -136,10 +136,9 @@ def test_admin_pool_endpoint_exposes_the_progress_bar(db):
     assert len(payload["shelves"]) == len(pool_core.POOL_MAJORS) * len(
         pool_core.POOL_DIFFICULTIES)
     assert progress["active"] is False
-    assert progress["capacity"] == payload["target"] * len(payload["shelves"])
-    assert progress["duel_capacity"] == payload["target"] * len(
-        pool_core.POOL_MAJORS)
-    # An empty (or full) pool must still report a sane 0..100 headline.
+    assert progress["capacity"] is None
+    assert progress['duel_capacity'] is None
+    # Unlimited inventory has no percentage of an invented capacity.
     assert progress["available"] == 0
-    assert progress["percent"] == 0
+    assert progress["percent"] is None
     assert progress["duel_available"] == 0

@@ -142,7 +142,8 @@ def default_plan(major: str) -> List[dict]:
 def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
                        user_id: int = 0, verify: bool = True,
                        plan: Optional[List[dict]] = None,
-                       report: Reporter = None, on_verified=None, grade: str = "") -> tuple:
+                       report: Reporter = None, on_verified=None, grade: str = "",
+                       topics: Optional[List[str]] = None) -> tuple:
     """One STANDARD booklet for a (major, difficulty) combination.
 
     The single generation path shared by /api/mocks/generate's live
@@ -167,7 +168,7 @@ def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
     plan = [dict(s) for s in (plan or KONKUR_SUBJECTS[major_key_str])]
     planned = sum(int(s.get("questions") or 0) for s in plan)
     duration = sum(s["minutes"] for s in plan)
-    questions = generate_booklet(user_id, plan, topics=[], difficulty=difficulty,
+    questions = generate_booklet(user_id, plan, topics=topics or [], difficulty=difficulty,
                                  report=report, grade=grade)
     if questions and verify:
         questions = verify_and_repair_booklet(questions, user_id,

@@ -147,6 +147,9 @@ class Settings(BaseSettings):
     # Pre-generated mock pool: pending_use booklets kept per (major,
     # difficulty) shelf by the pool worker (and the admin restock button).
     MOCK_POOL_TARGET: int = 5
+    # Operators can disable live student-facing generation while building stock.
+    POOL_ALLOW_LIVE_GENERATION: bool = True
+    POOL_RUN_STATE_FILE: str = "data/pool-run.json"
     # Run the pool top-up INSIDE the API process (a background thread sweeps
     # every POOL_SWEEP_INTERVAL_SECONDS and refills low shelves through the
     # same pool_core.sweep the dedicated worker uses). Set false when you

@@ -110,9 +110,12 @@ def _start_pool_worker() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.rag import pool_service
     _start_raw_ingestion()
+    pool_service.resume()
     _start_pool_worker()
     yield
+    pool_service.shutdown()
 
 
 ensure_schema()
