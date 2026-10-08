@@ -4,11 +4,14 @@ import { apiUrl, authHeaders } from "../api";
 import { NavFn, SignupData } from "../types";
 import { weeklyScheduleContext, loadWeekBlocks, saveWeekBlocks, getWeekISO, hasScheduleOverlap, StoredBlock } from "../scheduleStore";
 import ChatMarkdown from "../components/ChatMarkdown";
+import HomeworkIntake, { type HomeworkDraft } from "../components/HomeworkIntake";
+import { flushCalendar, pullCalendar, calendarSyncError } from "../calendarSync";
 
 interface Msg {
   role: "user" | "ai";
   text: string;
   confidence?: { level: string; label: string; score: number };
+  homework_draft?: HomeworkDraft;
 }
 const NEW_CHAT_NAME = "گفتگوی جدید";
 
@@ -79,7 +82,7 @@ function loadActiveId(userData: SignupData | null, sessions: Record<string, Chat
 }
 
 function isPlanRequest(t: string) {
-  return /(برنامه|پلن).*(ماه|ماهه|هفته|کنکور)|\d+\s*ماه/.test(t);
+  return !/تکلیف|تکالیف|homework/i.test(t) && /(برنامه|پلن).*(ماه|ماهه|هفته|کنکور)|\d+\s*ماه/.test(t);
 }
 
 export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupData | null }) {
@@ -146,8 +149,10 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
       .slice(-8)
       .map(m => ({ role: m.role === "ai" ? "assistant" : "user" as const, content: m.text }));
     const query = lastUserMsg.text;
-    const endpoint = isPlanRequest(query) ? "/api/boom/study-plan" : "/api/boom/chat";
-    const body = isPlanRequest(query) ? {
+    const pendingHomework = [...session.msgs].reverse().find(m => m.homework_draft)?.homework_draft;
+    const planRequest = isPlanRequest(query) && pendingHomework?.status !== "draft";
+    const endpoint = planRequest ? "/api/boom/study-plan" : "/api/boom/chat";
+    const body = planRequest ? {
       months: Number(query.match(/(\d+)\s*ماه/)?.[1] || 6),
       daily_hours: Number((currentUser?.studyHours || "4").match(/[0-9]+/)?.[0] || 4),
       major: currentUser?.major || "ریاضی فیزیک",
@@ -155,15 +160,23 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
       target_rank: currentUser?.targetRank || "زیر ۵٬۰۰۰",
       student: currentUser || {},
       weak_subjects: [], strong_subjects: [], notes: query,
-    } : { question: query, history, student: currentUser || {}, schedule: weeklyScheduleContext() };
+    } : { question: query, history, student: currentUser || {}, schedule: weeklyScheduleContext(),
+      conversation_id: sessionId, homework_id: pendingHomework?.status === "draft" ? pendingHomework.id : null };
 
     const requestToken = localStorage.getItem("boom-token");
-    fetch(apiUrl(endpoint), {
+    (async () => {
+      if (!await flushCalendar(requestToken) || !await pullCalendar(requestToken)) throw new Error(calendarSyncError() || "برنامه همگام نشد.");
+      if (localStorage.getItem("boom-token") !== requestToken) throw new Error("حساب تغییر کرده است.");
+      if ("schedule" in body) body.schedule = weeklyScheduleContext();
+      const response = await fetch(apiUrl(endpoint), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
-    })
-      .then(r => r.json())
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "دریافت پاسخ انجام نشد.");
+      return data;
+    })()
       .then(data => {
         if (localStorage.getItem("boom-token") !== requestToken) return;
         let updateNotice = "";
@@ -225,20 +238,22 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
               role: "ai",
               text: answer,
               confidence: data.answer_confidence,
+              homework_draft: data.homework_draft,
             }],
             pending: false,
             updatedAt: Date.now(),
           },
         });
       })
-      .catch(() => {
+      .catch((cause) => {
+        if (localStorage.getItem("boom-token") !== requestToken) return;
         const current = sessionsRef.current;
         if (!current[sessionId]) return;
         commit({
           ...current,
           [sessionId]: {
             ...current[sessionId],
-            msgs: [...current[sessionId].msgs, { role: "ai", text: "خطا در ارتباط با سرور." }],
+            msgs: [...current[sessionId].msgs, { role: "ai", text: cause instanceof Error ? cause.message : "خطا در ارتباط با سرور." }],
             pending: false,
             updatedAt: Date.now(),
           },
@@ -319,6 +334,15 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
     setInput("");
   }
 
+  function finishHomework(id: string, status: string, answer?: string) {
+    const current = sessionsRef.current, session = current[activeId];
+    if (!session) return;
+    const updated = session.msgs.map(m => m.homework_draft?.id === id
+      ? { ...m, homework_draft: { ...m.homework_draft, status } } : m);
+    if (answer) updated.push({ role: "ai", text: answer });
+    commit({ ...current, [activeId]: { ...session, msgs: updated, updatedAt: Date.now() } });
+  }
+
   return (
     <div className="h-screen flex bg-[var(--surface)]">
       {/* Main chat — first in RTL so it sits on the right */}
@@ -349,6 +373,10 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
                   <div className="w-full max-w-[920px] min-w-0 text-[13px] leading-relaxed text-[var(--text)] break-words [overflow-wrap:anywhere]">
                     {m.confidence && <div className="mb-2 text-[10px] font-semibold text-[var(--muted-2)]">{m.confidence.label}</div>}
                     <ChatMarkdown text={m.text} />
+                    {m.homework_draft?.status === "draft" && !msgs.slice(i + 1).some(later => later.homework_draft?.id === m.homework_draft?.id) &&
+                      <HomeworkIntake key={JSON.stringify(m.homework_draft)} draft={m.homework_draft}
+                        onScheduled={answer => finishHomework(m.homework_draft!.id, "scheduled", answer)}
+                        onDismiss={() => finishHomework(m.homework_draft!.id, "dismissed")} />}
                   </div>
                 )}
               </div>

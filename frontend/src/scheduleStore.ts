@@ -132,12 +132,19 @@ export function loadWeekBlocks(weekISO: string): StoredBlock[] {
 }
 
 export function saveWeekBlocks(weekISO: string, blocks: StoredBlock[]) {
-  if (hasScheduleOverlap(blocks, staticBlocksForWeek(weekISO))) {
-    throw new Error("این زمان با فعالیت دیگری تداخل دارد؛ ساعت یا مدت را تغییر دهید.");
+  saveWeekChanges({ [weekISO]: blocks });
+}
+
+/** Moving a task across a week boundary changes both weeks in one API write. */
+export function saveWeekChanges(weeks: Record<string, StoredBlock[]>) {
+  for (const [iso, blocks] of Object.entries(weeks)) {
+    if (hasScheduleOverlap(blocks, staticBlocksForWeek(iso))) {
+      throw new Error("این زمان با فعالیت دیگری تداخل دارد؛ ساعت یا مدت را تغییر دهید.");
+    }
   }
-  accountStorage.setItem(STORAGE_PREFIX + weekISO, JSON.stringify(blocks))
-  queueCalendar({ weeks: { [weekISO]: blocks } });
-  notifyScheduleChanged()
+  for (const [iso, blocks] of Object.entries(weeks)) accountStorage.setItem(STORAGE_PREFIX + iso, JSON.stringify(blocks));
+  queueCalendar({ weeks });
+  notifyScheduleChanged();
 }
 
 export function loadStaticTemplates(): StoredStatic[] {

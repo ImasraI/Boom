@@ -18,6 +18,7 @@ from app.auth.limits import (check_ai_quota, record_ai_use,
                              check_token_budget)
 from app.config import get_settings
 from app.schemas import ChatMessage
+from app.planner.homework import HomeworkIn
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/api/boom", tags=["boom-ai"])
@@ -157,6 +158,8 @@ class BoomChatRequest(BaseModel):
     top_k: int = 5
     student: Optional[dict] = None
     schedule: Optional[dict] = None
+    conversation_id: str = Field(default="default", max_length=100)
+    homework_id: Optional[str] = Field(default=None, max_length=100)
 
 
 class StudyPlanRequest(BaseModel):
@@ -637,10 +640,16 @@ def _chat_plan_update_is_safe(update, schedule, student):
 def boom_chat(
     request: BoomChatRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Authenticated Boom chat (RAG + LLM) for the signed-in user."""
     check_ai_quota(current_user.id, "chat")
     check_token_budget(current_user.id)  # reject over-budget users pre-call
+    from app.planner.homework import intake, is_homework_request
+    if request.homework_id or is_homework_request(request.question):
+        result = intake(db, current_user.id, request.conversation_id, request.question, request.homework_id)
+        record_ai_use(current_user.id, "chat")
+        return result
     history = [ChatMessage(**h) for h in (request.history or [])]
     result = answer_question(
         question=request.question,
@@ -667,6 +676,13 @@ def boom_chat(
         result["answer"] += "\n\nتغییر پیشنهادی با زمان آزاد یا فعالیت‌های فعلی تداخل داشت؛ برنامه تغییر نکرد. زمان دیگری انتخاب کنید."
     record_ai_use(current_user.id, "chat")
     return result
+
+
+@router.post("/homework/{homework_id}/schedule")
+def add_homework(homework_id: str, request: HomeworkIn,
+                 current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.planner.homework import schedule_homework
+    return schedule_homework(db, current_user.id, homework_id, request)
 
 
 @router.post("/study-plan")

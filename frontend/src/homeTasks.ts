@@ -18,17 +18,15 @@ import {
   addDays,
   blocksOverlap,
   fromISO,
-  loadStaticTemplates,
   loadWeekBlocks,
   saveWeekBlocks,
+  saveWeekChanges,
   SCHEDULE_CHANGED_EVENT,
   startOfWeek,
-  staticWeekday,
   staticBlocksForWeek,
   toISO,
   weekdayOf,
   type StoredBlock,
-  type StoredStatic,
 } from "./scheduleStore";
 import type { Task } from "./types";
 
@@ -122,7 +120,7 @@ function blockToHomeTask(block: StoredBlock): HomeTask {
     title: block.title,
     description: block.description ?? "",
     subject: block.subject || subjectOf(block.title),
-    type: isTest ? "test" : "study",
+    type: block.task_type === "practice" ? "practice" : block.task_type === "review" ? "review" : isTest ? "test" : "study",
     duration: fmtDuration(block.duration),
     scheduledTime: fmtHour(block.startHour),
     done: false,
@@ -144,31 +142,20 @@ export function homeTasksForDate(
   const date = fromISO(dateISO);
   const dayOfWeek = weekdayOf(date);
   const blocks = loadWeekBlocks(weekOf(date));
-  const statics = loadStaticTemplates();
 
   const dayBlocks: StoredBlock[] = blocks
     .filter((b) => b.day === dayOfWeek && TODO_TYPES.has(b.type))
     .sort((a, b) => a.startHour - b.startHour);
 
-  for (const t of statics) {
-    if (staticWeekday(t) === dayOfWeek && TODO_TYPES.has(t.type)) {
-      dayBlocks.push({
-        day: dayOfWeek,
-        startHour: t.startHour,
-        duration: t.duration,
-        title: t.title,
-        type: t.type,
-        color: t.color,
-        description: t.description,
-      });
-    }
-  }
+  // Use exactly the same date-aware expansion as the weekly calendar. Raw
+  // templates ignore daily/monthly rules, end dates and the assigned subject.
+  dayBlocks.push(...staticBlocksForWeek(weekOf(date))
+    .filter(b => b.day === dayOfWeek && TODO_TYPES.has(b.type)));
   dayBlocks.sort((a, b) => a.startHour - b.startHour);
-  // A static template can duplicate a generated block (same title+hour):
-  // keep one card per (title, startHour).
+  // Preserve the calendar's task identities, including repeated occurrences.
   const seen = new Set<string>();
   const unique = dayBlocks.filter((b) => {
-    const k = `${b.title}@${b.startHour}`;
+    const k = b.id || `${b.title}@${b.startHour}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -250,6 +237,10 @@ export function postponeToTomorrow(dateISO: string, task: HomeTask) {
   const tomorrow = addDays(fromISO(dateISO), 1);
   const tomorrowISO = toISO(tomorrow);
   const block = task.planBlock;
+  const sourceWeek = weekOf(fromISO(dateISO));
+  const sourceBlocks = loadWeekBlocks(sourceWeek);
+  const original = sourceBlocks.find(b => block.id ? b.id === block.id : b.day === block.day && b.startHour === block.startHour && b.title === block.title);
+  if (!original) throw new Error("این فعالیت تکرارشونده است؛ زمان آن را از برنامهٔ هفتگی ویرایش کن.");
   const moved: StoredBlock = {
     ...block,
     id: crypto.randomUUID(),
@@ -257,7 +248,9 @@ export function postponeToTomorrow(dateISO: string, task: HomeTask) {
     day: weekdayOf(tomorrow),
   };
   const weekISO = weekOf(tomorrow);
-  const blocks = loadWeekBlocks(weekISO);
+  const sameOriginal = (b: StoredBlock) => original.id ? b.id === original.id
+    : b.day === original.day && b.startHour === original.startHour && b.title === original.title;
+  const blocks = loadWeekBlocks(weekISO).filter(b => weekISO !== sourceWeek || !sameOriginal(b));
   const exists = blocks.some(
     (b) =>
       b.day === moved.day &&
@@ -273,10 +266,10 @@ export function postponeToTomorrow(dateISO: string, task: HomeTask) {
     if (free === undefined) throw new Error("فردا زمان آزاد کافی برای این فعالیت وجود ندارد.");
     moved.startHour = free;
     blocks.push(moved);
-    saveWeekBlocks(weekISO, blocks); // fires SCHEDULE_CHANGED_EVENT
-  } else {
-    notifyChanged();
   }
+  const changed = { [weekISO]: blocks };
+  if (sourceWeek !== weekISO) changed[sourceWeek] = sourceBlocks.filter(b => b !== original);
+  saveWeekChanges(changed);
 
   // Hide it from today's list from now on.
   const state = loadDoneSkipped(dateISO);
@@ -327,7 +320,7 @@ export function saveTaskEdit(
     if (dur !== null) next.duration = dur;
     blocks[idx] = next;
     saveWeekBlocks(weekISO, blocks);
-  }
+  } else throw new Error("این فعالیت تکرارشونده است؛ آن را از برنامهٔ هفتگی ویرایش کن.");
 }
 
 function toLatinDigits(s: string): string {

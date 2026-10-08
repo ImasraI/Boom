@@ -479,6 +479,17 @@ class StudentCalendar(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class Homework(Base):
+    """Student-reviewed homework; drafts never become calendar activities."""
+    __tablename__ = "homework"
+    id = Column(String, primary_key=True)
+    student_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    conversation_id = Column(String, nullable=False)
+    details = Column(Text, nullable=False, default="{}")
+    status = Column(String, nullable=False, default="draft")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class TaskProgress(Base):
     """One latest outcome per student and calendar task; retries replace, not duplicate."""
     __tablename__ = "task_progress"

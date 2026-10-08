@@ -245,6 +245,7 @@ test('postponing practice finds a free slot and keeps its book assignment', () =
   assert.ok(moved.id && moved.id !== block.id);
   assert.equal(moved.startHour,12);
   assert.equal(moved.question_start,30);
+  assert.equal(schedule.loadWeekBlocks(week).some(row=>row.id === 'chem'), false);
   assert.equal(schedule.hasScheduleOverlap(schedule.loadWeekBlocks(week),schedule.staticBlocksForWeek(week)),false);
 });
 
@@ -261,4 +262,62 @@ test('completion reports preserve practice ranges and update the same task recor
   assert.equal(requests[0].client_ref,requests[1].client_ref);
   assert.equal(requests[0].resource,'book');
   assert.equal(requests[1].question_start,30);
+});
+
+test('homework list uses calendar recurrence dates, end conditions and explicit subjects', () => {
+  const h=harness(); h.login('one');
+  const cache=h.load('./accountStorage').accountStorageFor();
+  cache.setItem('boom-weekly-static',JSON.stringify([
+    {id:'daily',date:'2026-10-03',startHour:9,duration:1,title:'تمرین معلم',type:'test',task_type:'practice',subject:'شیمی',topic:'تعادل',recurrence:{frequency:'daily',interval:1,count:2}},
+    {id:'monthly',date:'2026-09-05',startHour:11,duration:1,title:'مطالعه',type:'study',subject:'فیزیک',recurrence:{frequency:'monthly',interval:1}},
+  ]));
+  const tasks=h.load('./homeTasks');
+  assert.equal(tasks.homeTasksForDate('2026-10-04')[0].subject,'شیمی');
+  assert.equal(tasks.homeTasksForDate('2026-10-04')[0].type,'practice');
+  assert.equal(tasks.homeTasksForDate('2026-10-05')[0].subject,'فیزیک');
+  assert.equal(tasks.homeTasksForDate('2026-10-06').length,0);
+});
+
+test('confirmed homework appears identically in Home and the saved weekly calendar', () => {
+  const h=harness(); h.login('one');
+  const block={id:'homework-one-0',origin:'manual',day:0,startHour:12,duration:1,title:'تکلیف معلم',type:'test',task_type:'practice',subject:'فیزیک',topic:'میدان',description:'۲۰ سؤال کتاب'};
+  h.load('./calendarSync').acceptServerCalendar(h.token('one'),{weeks:{'2026-10-03':[block]},statics:[],version:4});
+  const task=h.load('./homeTasks').homeTasksForDate('2026-10-03')[0];
+  assert.equal(task.planBlock.id,block.id);
+  assert.equal(task.subject,'فیزیک');
+  assert.equal(task.description,block.description);
+  assert.deepEqual(JSON.parse(JSON.stringify(h.load('./scheduleStore').loadWeekBlocks('2026-10-03')[0])),block);
+  h.login('two');
+  assert.equal(h.load('./homeTasks').homeTasksForDate('2026-10-03').length,0);
+});
+
+test('server refresh removes unindexed stale plan weeks without clearing another account', async () => {
+  const h=harness(async()=>({ok:true,json:async()=>({weeks:{},statics:[],version:4})}));
+  h.login('one'); const account=h.load('./accountStorage');
+  account.accountStorage.setItem('boom-calendar-version','3');
+  account.accountStorage.setItem('boom-weekly-schedule:2026-10-03','[{"id":"stale"}]');
+  h.login('two'); account.accountStorage.setItem('boom-weekly-schedule:2026-10-03','[{"id":"other"}]');
+  h.login('one');
+  assert.equal(await h.load('./calendarSync').pullCalendar(),true);
+  assert.equal(account.accountStorage.getItem('boom-weekly-schedule:2026-10-03'),null);
+  h.login('two'); assert.match(account.accountStorage.getItem('boom-weekly-schedule:2026-10-03'),/other/);
+});
+
+test('a homework response cannot overwrite edits made while scheduling', () => {
+  const h=harness(); h.login('one'); const account=h.load('./accountStorage').accountStorageFor();
+  account.setItem('boom-calendar-outbox',JSON.stringify({weeks:{'2026-10-03':[{id:'local-edit'}]}}));
+  assert.throws(()=>h.load('./calendarSync').acceptServerCalendar(h.token('one'),{weeks:{},statics:[],version:4}),/تغییرات این دستگاه حفظ/);
+  assert.match(account.getItem('boom-calendar-outbox'),/local-edit/);
+});
+
+test('postponing Friday homework removes it from the original week and adds it to Saturday', () => {
+  const h=harness(); h.login('one'); const account=h.load('./accountStorage').accountStorageFor();
+  account.setItem('boom-weekly-schedule:2026-10-03',JSON.stringify([{id:'friday-homework',day:6,startHour:10,duration:1,title:'تکلیف',type:'test',origin:'manual'}]));
+  const tasks=h.load('./homeTasks');
+  tasks.postponeToTomorrow('2026-10-09',tasks.homeTasksForDate('2026-10-09')[0]);
+  assert.equal(tasks.homeTasksForDate('2026-10-09').length,0);
+  assert.equal(tasks.homeTasksForDate('2026-10-10').length,1);
+  const pending=JSON.parse(account.getItem('boom-calendar-outbox'));
+  assert.equal(pending.weeks['2026-10-03'].length,0);
+  assert.equal(pending.weeks['2026-10-10'].length,1);
 });

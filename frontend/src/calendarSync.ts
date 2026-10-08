@@ -20,6 +20,13 @@ function cacheCalendar(token: string, data: Calendar, pending: Changes = { weeks
   let previous: string[] = [];
   try { previous = JSON.parse(cache.getItem("boom-calendar-weeks") || "[]"); } catch { /* cache */ }
   const weeks = { ...data.weeks, ...pending.weeks };
+  // Older generated responses did not register their week in the index.
+  // Remove those stale caches too when the official server calendar is empty.
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    const iso = key?.match(/:boom-weekly-schedule:(\d{4}-\d{2}-\d{2})$/)?.[1];
+    if (iso && cache.getItem("boom-weekly-schedule:" + iso) !== null) previous.push(iso);
+  }
   for (const iso of previous) if (!(iso in weeks)) cache.removeItem("boom-weekly-schedule:" + iso);
   for (const [iso, blocks] of Object.entries(weeks)) cache.setItem("boom-weekly-schedule:" + iso, JSON.stringify(blocks));
   cache.setItem("boom-calendar-weeks", JSON.stringify(Object.keys(weeks)));
@@ -37,6 +44,13 @@ export function acceptGeneratedCalendar(week: string, blocks: StoredBlock[], ver
   cache.setItem("boom-weekly-schedule:" + week, JSON.stringify(blocks));
   cache.setItem(VERSION, String(version));
   signal(localStorage.getItem("boom-token") || "");
+}
+export function acceptServerCalendar(token: string, data: Calendar) {
+  const cache = accountStorageFor(token), pending = readChanges(cache);
+  if (Object.keys(pending.weeks).length || pending.statics !== undefined) {
+    throw new Error("تکلیف روی سرور ثبت شد، اما برنامه هنگام ثبت تغییر کرد. تغییرات این دستگاه حفظ شدند؛ برنامه را دوباره همگام‌سازی کنید.");
+  }
+  cacheCalendar(token, data);
 }
 export function queueCalendar(changes: Partial<Changes>) {
   const token = localStorage.getItem("boom-token");

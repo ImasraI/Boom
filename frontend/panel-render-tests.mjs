@@ -45,3 +45,18 @@ test('Knowledge graph loads without a profile and describes book-sourced titles'
   assert.match(html, /در حال دریافت نقشه کتاب‌ها/);
   assert.doesNotMatch(html, /پیش‌نیازهای واقعی|صفحه آماده نشد/);
 });
+
+test('homework intake asks for workload, learning purpose and prerequisite time before scheduling', async () => {
+  const {default:HomeworkIntake} = await vite.ssrLoadModule('/src/components/HomeworkIntake.tsx');
+  const html = renderToStaticMarkup(React.createElement(HomeworkIntake, {
+    draft:{id:'one',status:'draft',details:{subject:'فیزیک',activity:'practice',familiarity:'new',minutes:120}},
+    onScheduled(){},onDismiss(){},
+  }));
+  assert.match(html,/حجم دقیق و منبع/);
+  assert.match(html,/این مبحث را چقدر بلدی/);
+  assert.match(html,/مطالعهٔ پیش‌نیاز/);
+  assert.match(html,/ثبت در برنامه/);
+  assert.match(html,/فقط در زمان آزاد اضافه کن/);
+  assert.match(html,/جلسهٔ تولیدشدهٔ هم‌درس و هم‌مبحث/);
+  assert.doesNotMatch(html,/صفحه آماده نشد/);
+});

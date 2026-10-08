@@ -16,6 +16,7 @@ import WeaknessMap from "../components/WeaknessMap";
 
 import { currentStreak } from "../studyStats";
 import { apiUrl, authHeaders } from "../api";
+import { calendarSyncError, flushCalendar, pullCalendar } from "../calendarSync";
 
 function daysUntil(d: string) {
   const diff = new Date(d + "T00:00:00").getTime() - new Date().setHours(0, 0, 0, 0);
@@ -293,7 +294,8 @@ function QuizResultModal({ task, onClose, onSubmit }: { task: HomeTask; onClose:
 }
 
 export default function Home({ userData, nav, logout }: { userData: SignupData; nav: NavFn; logout: () => void }) {
-  const todayISO = toISO(new Date());
+  const [todayISO, setTodayISO] = useState(() => toISO(new Date()));
+  const [syncError, setSyncError] = useState("");
   const [tasks, setTasks] = useState<HomeTask[]>(() => homeTasksForDate(todayISO));
   const done = tasks.filter(t => t.done).length;
   const STREAK = currentStreak();
@@ -329,8 +331,18 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
 
   useEffect(() => {
     refreshTasks();
+    let active = true;
+    const token = localStorage.getItem("boom-token");
+    const sync = async () => {
+      setTodayISO(toISO(new Date()));
+      const ok = await flushCalendar(token) && await pullCalendar(token);
+      if (active && localStorage.getItem("boom-token") === token) setSyncError(ok ? "" : calendarSyncError());
+    };
+    void sync();
+    window.addEventListener("focus", sync);
+    const timer = window.setInterval(() => setTodayISO(toISO(new Date())), 60000);
     window.addEventListener(SCHEDULE_CHANGED_EVENT, refreshTasks);
-    return () => window.removeEventListener(SCHEDULE_CHANGED_EVENT, refreshTasks);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", sync); window.removeEventListener(SCHEDULE_CHANGED_EVENT, refreshTasks); };
   }, [refreshTasks]);
 
   function handleCheckbox(task: HomeTask) {
@@ -489,6 +501,11 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
           </button>
           <h2 className="font-display text-[18px] text-[var(--text)]">تکالیف امروز</h2>
         </div>
+        <div className="flex items-center justify-between gap-3 py-3 text-[11px] text-[var(--muted)]">
+          <p>فعالیت‌های امروز از برنامهٔ هفتگی خودت؛ مطالعه، تمرین و تکلیف.</p>
+          <button onClick={() => nav("chat")} className="shrink-0 font-bold text-[var(--accent)]">ثبت تکلیف در گفتگو</button>
+        </div>
+        {syncError && <p role="alert" className="text-xs text-[var(--danger)] pb-3">{syncError}</p>}
 
         <div className="flex flex-col">
           {tasks.filter(t => !t.skipped).length === 0 && (
