@@ -93,6 +93,27 @@ def test_admin_reports_unlimited_capacity_and_actual_verified_stock(db):
     assert next(s for s in result['catalog'] if s['key']=='riazi')['ranked_questions']==34
 
 
+def test_ranked_subject_filter_does_not_search_for_subject_name_inside_lesson(db):
+    make_mock(db,count=3)
+    plan=[{'name':'ریاضی','questions':2,'minutes':10,'topics':['ریاضی']}]
+    questions=bank.assemble(db,1,plan,MAJORS,topics=['ریاضی'],shared_only=True)
+    assert len(questions)==2 and all(q['topic']=='تابع' for q in questions)
+
+
+def test_ranked_geometry_filter_applies_only_to_math_not_other_subjects(db):
+    source=make_mock(db,count=2)
+    questions=json.loads(source.questions)
+    for q in questions:
+        q.pop('bank_id',None); q['topic']='هندسه'; q['text']+=' geometry'
+    questions += [{**q,'subject':'فیزیک','topic':'حرکت','text':'physics '+q['text']} for q in questions[:]]
+    source.questions=json.dumps(questions); source.bank_indexed=False; bank.index_mock(db,source); db.commit()
+    plan=[{'name':'ریاضی','questions':2,'minutes':10,'topics':['هندسه']},
+          {'name':'فیزیک','questions':2,'minutes':10,'topics':['فیزیک']}]
+    selected=bank.assemble(db,1,plan,MAJORS,topics=['هندسه','فیزیک'],shared_only=True)
+    assert len(selected)==4
+    assert all(q['topic']=='هندسه' for q in selected if q['subject']=='ریاضی')
+
+
 def test_five_konkur_style_questions_are_assembled_from_shared_pool(db, monkeypatch):
     source = make_mock(db, count=5, label='pool math')
     questions = json.loads(source.questions)

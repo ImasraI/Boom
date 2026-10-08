@@ -114,12 +114,18 @@ def assemble(db, user_id, plan, majors, difficulty="konkur", grade="", topics=No
         query = query.where(BankQuestion.uses > 0)
     order = (BankQuestion.uses > 0).desc() if prefer_used else (BankQuestion.uses == 0).desc()
     wanted_topics = [str(t).strip().casefold() for t in (topics or []) if str(t).strip()]
-    if wanted_topics:
-        query = query.where(or_(*(BankQuestion.topic.contains(t, autoescape=True) for t in wanted_topics)))
     out = []
     selected = set()
     for row in plan:
         selection = query.where(BankQuestion.subject == row["name"])
+        # Ranked plans carry subject-specific study filters. A physics tick
+        # selects physics questions, not lessons literally named "physics".
+        # A geometry tick still restricts the math row, never the physics row.
+        row_topics = ([str(t).strip().casefold() for t in row['topics']
+                       if str(t).strip() and str(t).strip() != row['name']]
+                      if 'topics' in row else wanted_topics)
+        if row_topics:
+            selection = selection.where(or_(*(BankQuestion.topic.contains(t, autoescape=True) for t in row_topics)))
         if selected:
             selection = selection.where(BankQuestion.id.not_in(selected))
         chosen = db.execute(selection.order_by(order, BankQuestion.uses.asc(), BankQuestion.id.desc())
