@@ -13,7 +13,14 @@ from app.auth.database import Base, GeneratedMock, MockAttempt, StudentProfile, 
 from app.routers.insights import knowledge_graph
 
 
-def test_user_graph_opens_read_nodes_and_keeps_prerequisites_locked():
+def test_user_graph_opens_read_nodes_and_keeps_prerequisites_locked(monkeypatch):
+    from app.rag import knowledge_graph as graph_module
+    nodes=[{'id':name,'title':title,'subject':'حسابان','year':11,'importance':4,'majors':['riazi'],
+            'sources':[{'book':'حسابان 1 خیلی سبز','page':7,'quote':title}]}
+           for name,title in [('functions','تابع‌ها'),('algebra','معادلات درجه دوم'),('limits','حد و پیوستگی')]]
+    monkeypatch.setattr(graph_module,'load_catalog',lambda:{'nodes':nodes,'edges':[
+        {'source':'functions','target':'limits','kind':'prerequisite'},
+        {'source':'algebra','target':'limits','kind':'prerequisite'}],'complete':True})
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     with Session(engine) as db:
@@ -50,3 +57,6 @@ def test_user_graph_opens_read_nodes_and_keeps_prerequisites_locked():
         assert limits["opened"] is False
         assert limits["available"] is False
         assert any(edge["kind"] == "prerequisite" for edge in graph["edges"])
+        assert functions['sources'][0]['page']==7
+        stranger=knowledge_graph(SimpleNamespace(id=2),db)
+        assert all(not n['opened'] and n['attempted']==0 for n in stranger['nodes'])

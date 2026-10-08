@@ -37,3 +37,11 @@ test('Admin pool renders unlimited and targeted production controls', async () =
   assert.match(html, /راه‌اندازی مجدد سرور ادامه می‌دهد/);
   assert.match(html, /موجودی سوال‌های قابل استفاده/);
 });
+
+test('Knowledge graph loads without a profile and describes book-sourced titles', async () => {
+  const {default:KnowledgeGraph} = await vite.ssrLoadModule('/src/pages/KnowledgeGraph.tsx');
+  const html = renderToStaticMarkup(React.createElement(KnowledgeGraph, {nav(){},userData:null}));
+  assert.match(html, /مباحث استخراج‌شده از کتاب‌ها/);
+  assert.match(html, /در حال دریافت نقشه کتاب‌ها/);
+  assert.doesNotMatch(html, /پیش‌نیازهای واقعی|صفحه آماده نشد/);
+});

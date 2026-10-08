@@ -15,12 +15,15 @@ interface GraphNode {
   correct: number;
   wrong: number;
   accuracy: number | null;
+  sources?: { book: string; page: number; quote: string; grade_page?: number; grade_quote?: string }[];
 }
 
-interface GraphEdge { source: string; target: string; kind: string }
-interface GraphData { major: string; nodes: GraphNode[]; edges: GraphEdge[] }
+interface GraphEdge { source: string; target: string; kind: string; importance?: number; reason?: string }
+interface GraphData { major: string; nodes: GraphNode[]; edges: GraphEdge[];
+  curriculum?: { books: string[]; book_count: number; lesson_count: number; complete: boolean; status: string } }
 
-const YEAR_LABELS: Record<number, string> = { 10: "دهم", 11: "یازدهم", 12: "دوازدهم" };
+const YEARS = [10, 11, 12, 0];
+const YEAR_LABELS: Record<number, string> = { 10: "دهم", 11: "یازدهم", 12: "دوازدهم", 0: "پایه نامشخص / جامع" };
 const SUBJECT_COLORS: Record<string, string> = {
   "حسابان": "#5C8BA8", "ریاضی": "#5C8BA8", "جبر و گسسته": "#7467A8",
   "هندسه": "#7A9BB8", "فیزیک": "#5D9974", "شیمی": "#A176B5",
@@ -61,6 +64,7 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [activeTab, setActiveTab] = useState<"main" | "other">("main");
+  const [subjectFilter, setSubjectFilter] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -82,11 +86,11 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
   // dropped so the layout never references a position that is not drawn.
   const tabData = useMemo<GraphData | null>(() => {
     if (!data) return null;
-    const nodes = data.nodes.filter(node => (activeTab === "main") === isMainSubject(node.subject));
+    const nodes = data.nodes.filter(node => (activeTab === "main") === isMainSubject(node.subject) && (!subjectFilter || node.subject === subjectFilter));
     const visible = new Set(nodes.map(node => node.id));
     const edges = data.edges.filter(edge => visible.has(edge.source) && visible.has(edge.target));
     return { major: data.major, nodes, edges };
-  }, [data, activeTab]);
+  }, [data, activeTab, subjectFilter]);
 
   const layout = useMemo(() => {
     const empty = {
@@ -118,13 +122,13 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
         byYear.set(lesson.year, list);
       }
       let bandHeight = NODE_H;
-      for (const year of [10, 11, 12]) {
+      for (const year of YEARS) {
         const count = byYear.get(year)?.length ?? 0;
         bandHeight = Math.max(bandHeight, count * (NODE_H + LESSON_GAP) - LESSON_GAP);
       }
-      for (const year of [10, 11, 12]) {
+      for (const year of YEARS) {
         byYear.get(year)?.forEach((lesson, slot) => positions.set(lesson.id, {
-          x: LESSON_X0 + (year - 10) * COL_W,
+          x: LESSON_X0 + YEARS.indexOf(year) * COL_W,
           y: cursor + slot * (NODE_H + LESSON_GAP),
         }));
       }
@@ -132,7 +136,7 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
       cursor += bandHeight + BAND_GAP;
     }
     const maxY = Math.max(cursor - BAND_GAP, 700);
-    return { positions, width: 1050, height: maxY + 60, containsTargets, prerequisitePairs };
+    return { positions, width: 1300, height: maxY + 60, containsTargets, prerequisitePairs };
   }, [tabData]);
 
   const selected = tabData?.nodes.find(node => node.id === selectedId) || tabData?.nodes[0];
@@ -147,16 +151,16 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
         </button>
         <div className="flex-1 text-right">
           <h1 className="font-display text-xl text-[var(--text)]">نقشه مسیر یادگیری</h1>
-          <p className="text-[11px] font-medium text-[var(--muted-2)]">سه سال مسیر تو، با پیش‌نیازهای واقعی</p>
+          <p className="text-[11px] font-medium text-[var(--muted-2)]">مباحث استخراج‌شده از کتاب‌ها، همراه با منبع هر گره</p>
         </div>
         </div>
         <div className="flex gap-1 px-5" role="tablist" aria-label="دسته‌بندی درس‌ها">
-          {([["main", "دروس تخصصی"], ["other", "دروس عمومی"]] as const).map(([key, label]) => {
+          {([["main", "دروس تخصصی"], ["other", "سایر دروس"]] as const).map(([key, label]) => {
             const count = data ? data.nodes.filter(node => node.kind === "subject" && (key === "main") === isMainSubject(node.subject)).length : 0;
             const active = activeTab === key;
             return (
               <button key={key} type="button" role="tab" aria-selected={active} disabled={!data}
-                onClick={() => { setActiveTab(key); setSelectedId(null); }}
+                onClick={() => { setActiveTab(key); setSelectedId(null); setSubjectFilter(""); }}
                 className={`flex items-center gap-1.5 rounded-t-xl border-b-2 px-3.5 pb-2 pt-1.5 text-[13px] font-display transition-colors disabled:opacity-50 ${active ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"}`}>
                 {label}
                 {data && <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-[var(--accent)] text-white" : "bg-[var(--chip)] text-[var(--muted-2)]"}`}>{fa(count)}</span>}
@@ -167,7 +171,7 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
       </header>
 
       {error && <div className="mx-5 mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-right text-[12px] font-semibold text-red-600">نقشه فعلاً بارگذاری نشد. اتصال را بررسی کن.</div>}
-      {!data && !error && <div className="p-8 text-center text-sm text-[var(--muted)]">در حال ساختن مسیر یادگیری...</div>}
+      {!data && !error && <div className="p-8 text-center text-sm text-[var(--muted)]">در حال دریافت نقشه کتاب‌ها...</div>}
       {data && tabData && (
         <>
           <section className="study-section mx-5 mt-5 p-4">
@@ -177,9 +181,25 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
                 <p className="text-[15px] font-bold text-[var(--text)]">{data.major}</p>
               </div>
               <div className="flex gap-1.5" dir="rtl">
-                {[10, 11, 12].map(year => <span key={year} className="rounded-lg bg-[var(--chip)] px-2 py-1 text-[10px] font-bold text-[var(--muted)]">{YEAR_LABELS[year]}</span>)}
+                {YEARS.map(year => <span key={year} className="rounded-lg bg-[var(--chip)] px-2 py-1 text-[10px] font-bold text-[var(--muted)]">{YEAR_LABELS[year]}</span>)}
               </div>
             </div>
+            {data.curriculum && <p className="mb-3 text-right text-[12px] leading-relaxed text-[var(--muted)]" dir="rtl">
+              {fa(data.curriculum.lesson_count)} مبحث از {fa(data.curriculum.book_count)} کتاب اسکن‌شده.
+              {!data.curriculum.complete && " استخراج منابع هنوز کامل نشده است."}
+              {" "}نقشه به کتاب‌های موجود محدود است؛ اهمیت و پیش‌نیازها برآورد مدل هستند. پایهٔ بدون شاهد در ستون «جامع» می‌آید.
+            </p>}
+            {data.curriculum && data.curriculum.books.length > 0 && <details className="mb-3 text-right text-[12px] text-[var(--muted)]" dir="rtl">
+              <summary className="cursor-pointer font-semibold">کتاب‌های این نقشه</summary>
+              <ul className="mt-2 space-y-1">{data.curriculum.books.map(book => <li key={book}>{book}</li>)}</ul>
+            </details>}
+            <label className="mb-3 flex items-center justify-end gap-2 text-[12px] text-[var(--muted)]" dir="rtl">
+              نمایش درس
+              <select value={subjectFilter} onChange={event => { setSubjectFilter(event.target.value); setSelectedId(null); }} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[var(--text)]">
+                <option value="">همهٔ درس‌ها</option>
+                {data.nodes.filter(node => node.kind === "subject" && (activeTab === "main") === isMainSubject(node.subject)).map(node => <option key={node.id} value={node.subject}>{node.subject}</option>)}
+              </select>
+            </label>
             <div className="flex flex-wrap justify-end gap-x-4 gap-y-2 text-[10px] font-semibold text-[var(--muted-2)]">
               <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[#4F9B68]" />دقت بالا</span>
               <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[#C39435]" />نیاز به تمرین</span>
@@ -190,38 +210,37 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
 
           {tabData.nodes.length === 0 && (
             <div className="study-section mx-5 mt-4 p-6 text-center text-[12px] font-semibold text-[var(--muted)]">
-              در این دسته درسی وجود ندارد.
+              هنوز مبحثی از کتاب‌های این دسته استخراج نشده است. پس از اسکن و استخراج فهرست کتاب‌ها، نقشه تکمیل می‌شود.
             </div>
           )}
-          <section className={`study-section mx-5 mt-4 overflow-x-auto p-3 ${tabData.nodes.length === 0 ? "hidden" : ""}`} dir="ltr">
-            <svg width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="tree" aria-label="درخت کامل مباحث درسی">
+          <section className={`study-section mx-5 mt-4 max-h-[65vh] overflow-auto p-3 ${tabData.nodes.length === 0 ? "hidden" : ""}`} dir="ltr">
+            <svg width={layout.width} height={layout.height} viewBox={`0 0 ${layout.width} ${layout.height}`} role="tree" aria-label="نقشه مباحث کتاب‌های اسکن‌شده">
+              <defs><marker id="prerequisite-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" /></marker></defs>
               <g opacity=".45">
-                {[10, 11, 12].map(year => <line key={year} x1={LESSON_X0 + (year - 10) * COL_W} y1="20" x2={LESSON_X0 + (year - 10) * COL_W} y2={layout.height - 20} stroke="var(--border)" strokeDasharray="4 8" />)}
+                {YEARS.map((year, index) => <line key={year} x1={LESSON_X0 + index * COL_W} y1="20" x2={LESSON_X0 + index * COL_W} y2={layout.height - 20} stroke="var(--border)" strokeDasharray="4 8" />)}
               </g>
               <g fontSize="13" fontWeight="700" fill="var(--muted)" textAnchor="middle">
-                {[10, 11, 12].map(year => <text key={year} x={330 + (year - 10) * 260} y="18">{YEAR_LABELS[year]}</text>)}
+                {YEARS.map((year, index) => <text key={year} x={330 + index * COL_W} y="18">{YEAR_LABELS[year]}</text>)}
               </g>
               <g>
                 {tabData.edges.map((edge, index) => {
                   const source = layout.positions.get(edge.source); const target = layout.positions.get(edge.target);
                   if (!source || !target) return null;
-                  // Draw "contains" only to each subject's first lesson; the
-                  // sequence chain carries the rest, so columns stay readable.
-                  if (edge.kind === "contains" && !layout.containsTargets.has(edge.target)) return null;
+                  // Keep membership lines faint; real prerequisite arrows stand out.
                   // A sequence edge duplicated by a prerequisite edge would
                   // draw twice on top of itself - keep the solid one only.
                   if (edge.kind === "sequence" && layout.prerequisitePairs.has(`${edge.source}->${edge.target}`)) return null;
                   const sourceNode = nodeById.get(edge.source);
-                  const stroke = edge.kind === "prerequisite" ? subjectColor(sourceNode?.subject || "") : "var(--border-strong)";
-                  const strokeWidth = edge.kind === "prerequisite" ? 2.5 : 1.2;
+                  const stroke = edge.kind === "prerequisite" ? (edge.importance ?? 3) >= 4 ? "#C4714A" : subjectColor(sourceNode?.subject || "") : "var(--border-strong)";
+                  const strokeWidth = edge.kind === "prerequisite" ? 1 + (edge.importance ?? 3) / 2 : 0.8;
                   const dash = edge.kind === "prerequisite" ? "0" : "5 5";
                   if (edge.kind !== "contains" && Math.abs(source.x - target.x) < 1) {
                     // Same year column: bracket down the left gutter so the
                     // line never crosses the lesson boxes between the slots.
                     const railX = source.x - 10;
-                    return <path key={`${edge.source}-${edge.target}-${index}`} d={`M ${source.x} ${source.y + 25} L ${railX} ${source.y + 25} L ${railX} ${target.y + 25} L ${target.x} ${target.y + 25}`} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} opacity=".7" />;
+                    return <path key={`${edge.source}-${edge.target}-${index}`} d={`M ${source.x} ${source.y + 25} L ${railX} ${source.y + 25} L ${railX} ${target.y + 25} L ${target.x} ${target.y + 25}`} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} opacity=".7" markerEnd="url(#prerequisite-arrow)" />;
                   }
-                  return <path key={`${edge.source}-${edge.target}-${index}`} d={`M ${source.x + NODE_W} ${source.y + 25} C ${source.x + NODE_W + 40} ${source.y + 25}, ${target.x - 35} ${target.y + 25}, ${target.x} ${target.y + 25}`} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} opacity=".7" />;
+                  return <path key={`${edge.source}-${edge.target}-${index}`} d={`M ${source.x + NODE_W} ${source.y + 25} C ${source.x + NODE_W + 40} ${source.y + 25}, ${target.x - 35} ${target.y + 25}, ${target.x} ${target.y + 25}`} fill="none" stroke={stroke} strokeWidth={strokeWidth} strokeDasharray={dash} opacity={edge.kind === "contains" ? .12 : .7} markerEnd={edge.kind === "prerequisite" ? "url(#prerequisite-arrow)" : undefined} />;
                 })}
               </g>
               <g>
@@ -229,11 +248,12 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
                   const position = layout.positions.get(node.id); if (!position) return null;
                   const color = node.kind === "subject" ? subjectColor(node.subject) : masteryColor(node);
                   const selectedNode = selected?.id === node.id;
-                  return <g key={node.id} role="treeitem" aria-label={node.title} tabIndex={0} onClick={() => setSelectedId(node.id)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") setSelectedId(node.id); }} className="cursor-pointer">
+                  return <g key={node.id} role="treeitem" aria-label={node.title} aria-selected={selectedNode} tabIndex={0} onClick={() => setSelectedId(node.id)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedId(node.id); } }} className="cursor-pointer">
+                    <title>{node.title}</title>
                     <rect x={position.x} y={position.y} width="170" height="50" rx="12" fill={node.opened ? `${color}22` : "#9B948D18"} stroke={selectedNode ? color : node.opened ? color : "#9B948D"} strokeWidth={selectedNode ? 3 : Math.max(1.5, node.importance / 2)} />
                     <circle cx={position.x + 18} cy={position.y + 25} r={node.kind === "subject" ? 7 : 5} fill={color} />
                     <text x={position.x + 34} y={position.y + 22} fontSize="12" fontWeight="700" fill="var(--text)" textAnchor="start">{node.title.slice(0, 20)}</text>
-                    <text x={position.x + 34} y={position.y + 39} fontSize="9" fill="var(--muted)" textAnchor="start">{node.kind === "subject" ? "درس" : node.opened ? `${Math.round((node.accuracy ?? 0) * 100)}٪ دقت` : "هنوز باز نشده"}</text>
+                    <text x={position.x + 34} y={position.y + 39} fontSize="9" fill="var(--muted)" textAnchor="start">{node.kind === "subject" ? "درس" : node.opened ? node.accuracy == null ? "مطالعه‌شده؛ بدون تست" : `${Math.round(node.accuracy * 100)}٪ دقت` : "هنوز باز نشده"}</text>
                   </g>;
                 })}
               </g>
@@ -242,10 +262,24 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
 
           {selected && <section className="study-section mx-5 mt-4 p-5 text-right">
             <div className="flex items-start justify-between gap-3">
-              <div><p className="text-[10px] font-bold text-[var(--muted-2)]">اهمیت {selected.importance} از ۵</p><h2 className="mt-1 text-lg font-bold text-[var(--text)]">{selected.title}</h2></div>
-              <span className="rounded-xl px-3 py-1 text-[11px] font-bold" style={{ color: masteryColor(selected), backgroundColor: `${masteryColor(selected)}18` }}>{selected.opened ? "باز شده" : "قفل مسیر"}</span>
+              <div><p className="text-[10px] font-bold text-[var(--muted-2)]">اهمیت {selected.importance} از ۵ (برآورد مدل)</p><h2 className="mt-1 text-lg font-bold text-[var(--text)]">{selected.title}</h2></div>
+              <span className="rounded-xl px-3 py-1 text-[11px] font-bold" style={{ color: masteryColor(selected), backgroundColor: `${masteryColor(selected)}18` }}>{selected.opened ? "باز شده" : selected.available ? "آمادهٔ مطالعه" : "پیش‌نیاز باز نشده"}</span>
             </div>
             <p className="mt-3 text-[12px] leading-relaxed text-[var(--muted)]">{selected.opened ? `${fa(selected.attempted)} پاسخ ثبت شده، ${fa(selected.wrong)} غلط و ${selected.accuracy == null ? "داده کافی نیست" : `${Math.round(selected.accuracy * 100)}٪ دقت`}.` : "بعد از ثبت یک جلسه مطالعه یا پاسخ‌دادن به تست‌های این مبحث، این گره باز و رنگی می‌شود."}</p>
+            {selected.sources?.length && <div className="mt-4 border-t border-[var(--border)] pt-3" dir="rtl">
+              <p className="text-[12px] font-bold text-[var(--text)]">منبع عنوان در کتاب</p>
+              {selected.sources.map((source, index) => <div key={`${source.book}-${source.page}-${index}`} className="mt-2 text-[12px] leading-relaxed text-[var(--muted)]">
+                <p>{source.book} · صفحهٔ PDF {fa(source.page)}</p>
+                <blockquote className="mt-1 border-r-2 border-[var(--accent)] pr-2">{source.quote}</blockquote>
+                {source.grade_quote && source.grade_page && <p className="mt-1 text-[10px]">شاهد پایه: {source.grade_quote} · صفحهٔ PDF {fa(source.grade_page)}</p>}
+              </div>)}
+            </div>}
+            {data.edges.filter(edge => edge.kind === "prerequisite" && edge.target === selected.id).length > 0 && <div className="mt-4 border-t border-[var(--border)] pt-3" dir="rtl">
+              <p className="text-[12px] font-bold text-[var(--text)]">پیش‌نیازهای پیشنهادی مدل</p>
+              {data.edges.filter(edge => edge.kind === "prerequisite" && edge.target === selected.id).map(edge => <p key={edge.source} className="mt-2 text-[12px] text-[var(--muted)]">
+                {data.nodes.find(node => node.id === edge.source)?.title} {edge.reason && `— ${edge.reason}`}
+              </p>)}
+            </div>}
           </section>}
         </>
       )}

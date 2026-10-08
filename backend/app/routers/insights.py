@@ -192,9 +192,9 @@ def knowledge_graph(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Return the authenticated student's full three-year curriculum graph.
+    """Return the authenticated student's cached, book-sourced graph.
 
-    Curriculum structure is shared and deterministic; opened state and
+    Curriculum titles are extracted offline from shared book OCR; opened state and
     mastery evidence are always calculated from this user's records only.
     """
     major = "ریاضی فیزیک"
