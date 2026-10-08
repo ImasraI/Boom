@@ -50,7 +50,7 @@ def assert_code(code, action):
 
 def test_intake_asks_questions_without_creating_calendar_blocks(db, monkeypatch):
     from app.rag import llm
-    monkeypatch.setattr(llm, "get_llm_client", lambda: SimpleNamespace(
+    monkeypatch.setattr(llm, "get_llm_client", lambda **kw: SimpleNamespace(
         generate=lambda *a, **k: '{"subject":"فیزیک","topic":"میدان الکتریکی","workload":"۲۰ سؤال"}',
         last_usage=SimpleNamespace(total_tokens=0)))
     answer = intake(db, 1, "new-chat", "۲۰ سؤال فیزیک میدان دارم")
@@ -64,7 +64,7 @@ def test_provider_failure_leaves_manual_intake_available(db, monkeypatch):
     from app.rag import llm
     def failed(*a, **k):
         raise RuntimeError("quota")
-    monkeypatch.setattr(llm, "get_llm_client", lambda: SimpleNamespace(generate=failed))
+    monkeypatch.setattr(llm, "get_llm_client", lambda **kw: SimpleNamespace(generate=failed))
     answer = intake(db, 1, "chat", "تکلیف دارم")
     assert answer["homework_draft"]["details"] == {"student_message": "تکلیف دارم"}
 
@@ -197,7 +197,7 @@ def test_chat_homework_flow_skips_book_retrieval_and_retains_draft_on_followup(d
     monkeypatch.setattr(boom_ai, "answer_question", lambda **k: pytest.fail("Homework is not a book retrieval query"))
     answers = iter(['{"subject":"فیزیک","topic":"میدان الکتریکی","workload":"۲۰ سؤال"}',
                     '{"minutes":90,"familiarity":"learning"}'])
-    monkeypatch.setattr(llm, "get_llm_client", lambda: SimpleNamespace(generate=lambda *a, **k: next(answers),
+    monkeypatch.setattr(llm, "get_llm_client", lambda **kw: SimpleNamespace(generate=lambda *a, **k: next(answers),
         last_usage=SimpleNamespace(total_tokens=0)))
     first = boom_ai.boom_chat(boom_ai.BoomChatRequest(question="تکلیف فیزیک دارم", conversation_id="chat"), SimpleNamespace(id=1), db)
     draft_id = first["homework_draft"]["id"]
@@ -207,3 +207,20 @@ def test_chat_homework_flow_skips_book_retrieval_and_retains_draft_on_followup(d
     assert second["homework_draft"]["details"]["minutes"] == 90
     assert "plan_update" not in second
     assert payload(calendar_row(db, 1))["weeks"] == {}
+
+
+def test_homework_model_override_does_not_change_chat_or_pool_models(db, monkeypatch):
+    from app.rag import llm
+    from app import config
+    settings = SimpleNamespace(HOMEWORK_LLM_MODEL_NAME="openai/gpt-oss-20b",
+        LLM_MODEL_NAME="openai/gpt-oss-120b", POOL_LLM_MODEL_NAME="original-pool")
+    monkeypatch.setattr(config, "get_settings", lambda: settings)
+    selected = []
+    def client(**kw):
+        selected.append(kw["model"])
+        return SimpleNamespace(generate=lambda *a, **k: '{}',last_usage=SimpleNamespace(total_tokens=0))
+    monkeypatch.setattr(llm, "get_llm_client", client)
+    intake(db, 1, "chat", "تکلیف دارم")
+    assert selected == ["openai/gpt-oss-20b"]
+    assert settings.LLM_MODEL_NAME == "openai/gpt-oss-120b"
+    assert settings.POOL_LLM_MODEL_NAME == "original-pool"

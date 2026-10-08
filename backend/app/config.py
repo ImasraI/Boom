@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     LLM_GROQ_API_KEYS: str = ""  # Explicit chat backups; comma-separated.
     LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
     LLM_MODEL_NAME: str = "llama-3.1-8b-instant"
+    HOMEWORK_LLM_MODEL_NAME: str = ""  # Optional small model on the chat provider; empty inherits chat.
     # Separate key (and optional model) for MOCK GENERATION (the pool worker,
     # admin restock and live booklet builds). Booklet generation makes many
     # large LLM calls and can exhaust a shared key's per-minute limits,

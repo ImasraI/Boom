@@ -31,3 +31,7 @@ for a follow-up draft; its response contains `homework_draft`.
 `POST /api/boom/homework/{id}/schedule` accepts the reviewed details and current
 `calendar_version`. Scheduling is independent of model availability; if extraction
 fails, the student can still fill the form manually.
+
+`HOMEWORK_LLM_MODEL_NAME` optionally selects a smaller model on the existing chat
+provider and credentials. With Groq, use `openai/gpt-oss-20b` for this short,
+student-reviewed extraction; the main chat and mock providers/models stay separate.
