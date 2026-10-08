@@ -58,7 +58,7 @@ def record_wrong_answers(
             question_text=(w.question_text or "").strip() or None,
             correct_answer=(w.correct_answer or "").strip() or None,
             student_answer=(w.student_answer or "").strip() or None,
-            was_blank=bool(w.was_blank),
+            was_blank=bool(w.was_blank or not (w.student_answer or "").strip()),
             source=(w.source or "").strip() or None,
         )
         for w in payload
@@ -114,9 +114,7 @@ class WeakTopicOut(BaseModel):
     topic: str
     wrong_count: int
     blanks: int
-    # Normalized 0..1: wrong_count relative to the user's worst topic within
-    # the same subject (no attempts-per-topic table exists yet, so this is
-    # raw miss-count normalization, not accuracy).
+    # Normalized wrong counts within a subject; blanks are separate.
     wrongness: float
 
 
@@ -132,30 +130,15 @@ def weakness_map(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """The student's weakness heatmap, grouped by (subject, topic).
-
-    Built purely from wrong_answers rows (every miss of any test lands
-    there): counts per (subject, topic) pair plus a simple normalized
-    "wrongness" score per topic - the topic's wrong count relative to the
-    user's worst topic in the same subject (0..1). There is no
-    attempts-per-topic tracking in the schema, so this deliberately uses raw
-    wrong counts rather than inventing a denominator.
-    """
-    since = datetime.utcnow() - timedelta(days=max(1, min(days, 365)))
-    rows = db.execute(
-        select(WrongAnswer.subject, WrongAnswer.topic, WrongAnswer.was_blank)
-        .where(WrongAnswer.student_id == current_user.id)
-        .where(WrongAnswer.created_at >= since)
-    ).all()
-
-    # subject -> topic -> {"wrong": n, "blanks": n}
-    grouped: dict[str, dict[str, dict]] = {}
-    for subject, topic, was_blank in rows:
-        tkey = (topic or "").strip() or "بدون مبحث"
-        stats = grouped.setdefault(subject, {}).setdefault(
-            tkey, {"wrong": 0, "blanks": 0})
-        stats["wrong"] += 1
-        if was_blank:
+    """Actual mistakes from verified answers, matched to this major's books."""
+    from app.rag.learning_evidence import curriculum_events
+    rows = curriculum_events(db, current_user.id, days=max(1, min(days, 365)))
+    grouped = {}
+    for row in rows:
+        stats = grouped.setdefault(row["subject"], {}).setdefault(row["topic"], {"wrong": 0, "blanks": 0})
+        if row["outcome"] == "wrong":
+            stats["wrong"] += 1
+        elif row["outcome"] == "blank":
             stats["blanks"] += 1
 
     subjects: List[WeakSubjectOut] = []
@@ -169,10 +152,12 @@ def weakness_map(
                     blanks=s["blanks"],
                     wrongness=round(s["wrong"] / peak, 2),
                 )
-                for t, s in topics.items()
+                for t, s in topics.items() if s["wrong"]
             ),
             key=lambda t: (-t.wrong_count, t.topic),
         )
+        if not topic_list:
+            continue
         subjects.append(WeakSubjectOut(
             subject=subject,
             wrong_count=sum(t.wrong_count for t in topic_list),
@@ -182,6 +167,8 @@ def weakness_map(
 
     return {
         "days": days,
+        "total_answered": sum(r["outcome"] != "blank" for r in rows),
+        "total_blank": sum(r["outcome"] == "blank" for r in rows),
         "total_wrong": sum(s.wrong_count for s in subjects),
         "subjects": [s.model_dump() for s in subjects],
     }
@@ -202,43 +189,14 @@ def knowledge_graph(
     if profile_row and profile_row.major:
         major = profile_row.major
 
+    from app.rag.learning_evidence import curriculum_events
     evidence = defaultdict(lambda: {"attempted": 0, "correct": 0, "wrong": 0})
-    attempts = db.query(MockAttempt, GeneratedMock).join(
-        GeneratedMock, MockAttempt.mock_id == GeneratedMock.id
-    ).filter(MockAttempt.student_id == current_user.id).all()
-    for attempt, mock in attempts:
-        try:
-            answers = json.loads(attempt.answers or "{}")
-            questions = json.loads(mock.questions or "[]")
-        except (TypeError, ValueError):
+    for event in curriculum_events(db, current_user.id, days=None):
+        if event["outcome"] == "blank":
             continue
-        for question in questions:
-            subject = str(question.get("subject") or "")
-            topic = str(question.get("topic") or "")
-            if not subject:
-                continue
-            answer = answers.get(str(question.get("_id", question.get("id"))))
-            row = evidence[(subject, topic)]
-            row["attempted"] += 1
-            if answer in (None, "", "null"):
-                row["wrong"] += 1
-            elif str(answer) == str(question.get("answer")):
-                row["correct"] += 1
-            else:
-                row["wrong"] += 1
-
-    # Manual practice mistakes fill topic gaps without double-counting mock
-    # mistakes, which are already represented by MockAttempt above.
-    for mistake in db.query(WrongAnswer).filter(
-        WrongAnswer.student_id == current_user.id,
-        WrongAnswer.source.notin_(["mock", "arena"]),
-    ).all():
-        row = evidence[(mistake.subject, mistake.topic or "")]
+        row = evidence[(event["subject"], event["topic"])]
         row["attempted"] += 1
-        row["wrong"] += 1
-
-    for row in evidence.values():
-        row["accuracy"] = round(row["correct"] / row["attempted"], 3) if row["attempted"] else None
+        row[event["outcome"]] += 1
 
     read_keys = set()
     for session in db.query(StudySession).filter(

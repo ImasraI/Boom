@@ -7,6 +7,17 @@ import {createServer} from 'vite';
 const vite = await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
 test.after(async () => {await vite.close();});
 
+test('weakness map distinguishes no answers from no mistakes and explains blanks', async () => {
+  const {WeaknessMapContent} = await vite.ssrLoadModule('/src/components/WeaknessMap.tsx');
+  const render = total_answered => renderToStaticMarkup(React.createElement(WeaknessMapContent, {
+    data:{days:90,total_wrong:0,total_answered,subjects:[]},
+  }));
+  assert.match(render(0), /هنوز پاسخی برای ارزیابی ضعف‌ها ثبت نشده/);
+  assert.match(render(3), /پاسخ غلطی در مباحث کتاب‌ها ثبت نشده/);
+  assert.match(render(0), /سؤال‌های نزده غلط محسوب نمی‌شوند/);
+  assert.doesNotMatch(render(0), /انتگرال|۱۳ غلط/);
+});
+
 test('Mock page and its shared math/report modules load with an empty profile', async () => {
   const {default:Mock} = await vite.ssrLoadModule('/src/pages/Mock.tsx');
   const html = renderToStaticMarkup(React.createElement(Mock, {nav(){},userData:null}));

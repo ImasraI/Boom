@@ -311,6 +311,7 @@ def review_question(question_id: int, payload: QuestionReviewIn, db: Session = D
         if replacement is not None:
             raise HTTPException(409, detail="این نسخه از سوال قبلاً در بانک ثبت شده است")
         content["verification_status"] = "verified"
+        content["replaces_bank_id"] = q.id
         replacement = BankQuestion(fingerprint=fingerprint, owner_id=q.owner_id, major=q.major,
             grade=q.grade, grade_level=q.grade_level, difficulty=q.difficulty, subject=q.subject, topic=q.topic,
             content=json.dumps(content, ensure_ascii=False), verified=True, status="active", uses=0,

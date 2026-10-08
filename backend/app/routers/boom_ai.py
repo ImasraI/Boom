@@ -266,60 +266,14 @@ def get_book_catalog(subject: str) -> List[dict]:
 
 
 def get_recent_wrong_answers(student_id: Optional[int] = None, days: int = 30) -> List[dict]:
-    """Recent wrong/blank answers (the planner's weakness memory).
-
-    Reads the ``wrong_answers`` table that every test surface (generated
-    mock, arena duel, manual practice) writes to via /api/insights.
-    Falls back to legacy Assessment rows when that table is empty so old
-    data still influences the plan.
-    """
+    """Confirmed, book-matched mistakes from this authenticated student only."""
+    if student_id is None:
+        return []
     from app.auth.database import SessionLocal
-    from sqlalchemy import select, func
-    from datetime import datetime, timedelta
-    db = SessionLocal()
-    try:
-        sid = student_id if student_id is not None else get_settings().DEMO_USER_ID
-        since = datetime.utcnow() - timedelta(days=days)
-        from app.auth.database import WrongAnswer
-        rows = db.execute(
-            select(WrongAnswer)
-            .where(WrongAnswer.student_id == sid)
-            .where(WrongAnswer.created_at >= since)
-            .order_by(WrongAnswer.created_at.desc())
-        ).scalars().all()
-        if rows:
-            return [
-                {
-                    "subject": r.subject,
-                    "topic": r.topic or "",
-                    "book": r.book or "",
-                    "page": r.page,
-                    "was_blank": bool(r.was_blank),
-                    "source": r.source or "",
-                    "date": r.created_at.date().isoformat() if r.created_at else "",
-                }
-                for r in rows
-            ]
-        # Legacy fallback: Assessment.results JSON blobs.
-        statement = select(Assessment).where(Assessment.student_id == sid).where(
-            Assessment.date >= since.date()
-        )
-        legacy_rows = db.execute(statement).scalars().all()
-        results = []
-        for r in legacy_rows:
-            try:
-                res = r.results if isinstance(r.results, dict) else {}
-                results.append({
-                    "question_id": res.get("last_wrong_id"),
-                    "subject": res.get("subject"),
-                    "topic": res.get("topic"),
-                    "date": str(r.date),
-                })
-            except Exception:
-                continue
-        return results
-    finally:
-        db.close()
+    from app.rag.learning_evidence import confirmed_mistakes
+    with SessionLocal() as db:
+        return [{**event, "date": event["created_at"].date().isoformat() if event["created_at"] else ""}
+                for event in confirmed_mistakes(db, student_id, days=days)]
 
 
 def _weakness_summary(student: Optional[dict], student_id: Optional[int] = None) -> dict:
@@ -357,7 +311,7 @@ def _weakness_summary(student: Optional[dict], student_id: Optional[int] = None)
     total = sum(agg["count"] for agg in by_subject.values())
     if total:
         line = (
-            f"در ۳۰ روز گذشته {total} تست غلط/نزده ثبت شده؛ "
+            f"در ۳۰ روز گذشته {total} پاسخ غلط ثبت شده؛ "
             f"ضعیف‌ترین درس‌ها: {'، '.join(subjects[:3])}."
         )
     else:

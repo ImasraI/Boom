@@ -287,36 +287,15 @@ def build_booklet_prompt(plan: List[dict], topics: List[str], difficulty: str,
 
 
 def weak_areas(user_id: int, recent_n: int = 40, limit: int = 10) -> List[dict]:
-    """The student's weakest (subject, topic) pairs from WrongAnswer rows.
-
-    Reads the most recent `recent_n` wrong/blank answers, groups them by
-    (subject, topic) and weights each hit with recency decay (newest hit =
-    1.0, each older hit multiplied by ~1/position), so what the student
-    missed THIS WEEK outweighs what they missed last month. Returns at most
-    `limit` entries sorted by weight desc:
-        [{"subject", "topic" (may be ""), "hits", "weight"}, ...]
-    """
-    from app.auth.database import SessionLocal, WrongAnswer  # local: avoids import cycle at load
-    from sqlalchemy import select
-
-    db = SessionLocal()
-    try:
-        rows = (
-            db.execute(
-                select(WrongAnswer)
-                .where(WrongAnswer.student_id == user_id)
-                .order_by(WrongAnswer.created_at.desc())
-                .limit(recent_n)
-            )
-            .scalars()
-            .all()
-        )
-    finally:
-        db.close()
+    """Bias only toward actual mistakes in verified, book-matched topics."""
+    from app.auth.database import SessionLocal
+    from app.rag.learning_evidence import confirmed_mistakes
+    with SessionLocal() as db:
+        rows = confirmed_mistakes(db, user_id)[:recent_n]
 
     agg: dict = {}
     for idx, r in enumerate(rows):
-        key = ((r.subject or "").strip(), (r.topic or "").strip())
+        key = (r["subject"], r["topic"])
         entry = agg.setdefault(key, {"subject": key[0], "topic": key[1],
                                      "hits": 0, "weight": 0.0})
         entry["hits"] += 1

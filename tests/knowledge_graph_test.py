@@ -32,8 +32,8 @@ def test_user_graph_opens_read_nodes_and_keeps_prerequisites_locked(monkeypatch)
             student_id=1,
             title="limits",
             questions=json.dumps([
-                {"_id": 1, "subject": "حسابان", "topic": "تابع‌ها", "answer": 0},
-                {"_id": 2, "subject": "حسابان", "topic": "تابع‌ها", "answer": 0},
+                {"_id": 1, "subject": "حسابان", "topic": "تابع‌ها", "answer": 0, "verification_status": "verified"},
+                {"_id": 2, "subject": "حسابان", "topic": "تابع‌ها", "answer": 0, "verification_status": "verified"},
             ]),
         )
         db.add(mock)

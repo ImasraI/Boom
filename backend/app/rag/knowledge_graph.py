@@ -13,6 +13,22 @@ def _stats(rows):
             'accuracy':round(correct/attempted,3) if attempted else None}
 
 
+def curriculum_lookup(major, catalog=None):
+    """Resolve only exact book titles, allowing unambiguous generic math labels."""
+    catalog = load_catalog() if catalog is None else catalog
+    lessons = [n for n in catalog.get('nodes', []) if major_key(major) in n.get('majors', [])]
+    lookup = {(norm(n['subject']), norm(n['title'])): (n['subject'], n['title']) for n in lessons}
+    math = {'حسابان', 'هندسه', 'ریاضیات گسسته', 'آمار و احتمال', 'گسسته و آمار و احتمال'}
+    candidates = {}
+    for node in lessons:
+        if node['subject'] in math:
+            candidates.setdefault(norm(node['title']), set()).add((node['subject'], node['title']))
+    for title, matches in candidates.items():
+        if len(matches) == 1:
+            lookup.setdefault((norm('ریاضی'), title), next(iter(matches)))
+    return lookup
+
+
 def build_graph(major: str, evidence=None, read_keys=None) -> dict:
     """Opening a graph never calls an LLM or consults another user's records."""
     catalog=load_catalog()
@@ -23,8 +39,12 @@ def build_graph(major: str, evidence=None, read_keys=None) -> dict:
     # Exact normalized titles only: arbitrary mock topic strings are not proof
     # that a particular textbook lesson has been studied or mastered.
     normalized={}
+    lookup = curriculum_lookup(major, catalog)
     for (subject,topic),row in evidence.items():
-        normalized.setdefault((norm(subject),norm(topic)),[]).append(row)
+        canonical = lookup.get((norm(subject), norm(topic)))
+        if canonical:
+            normalized.setdefault(tuple(map(norm, canonical)),[]).append(row)
+    reads.update(tuple(map(norm, lookup[key])) for key in list(reads) if key in lookup)
     nodes=[]; edges=[]
     for subject in subjects:
         key=norm(subject)
@@ -35,12 +55,7 @@ def build_graph(major: str, evidence=None, read_keys=None) -> dict:
                       'year':0,'importance':5,'opened':opened,'available':True,**stat})
     for lesson in lessons:
         subject=norm(lesson['subject']); title=norm(lesson['title'])
-        # Mathematics mocks often use "ریاضی" for a specific calculus topic.
-        # Attribute only a uniquely matched exact lesson, never all math topics.
         keys=[(subject,title)]
-        if lesson['subject'] in ('حسابان','هندسه','ریاضیات گسسته','آمار و احتمال','گسسته و آمار و احتمال'):
-            if sum(norm(n['title'])==title for n in lessons)==1:
-                keys.append((norm('ریاضی'),title))
         stat=_stats([row for key in keys for row in normalized.get(key,[])])
         opened=any(key in reads for key in keys) or stat['attempted']>0
         nodes.append({**lesson,'kind':'lesson','opened':opened,'available':False,**stat})

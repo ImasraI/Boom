@@ -18,6 +18,7 @@ interface WeakSubject {
 interface WeaknessData {
   days: number;
   total_wrong: number;
+  total_answered?: number;
   subjects: WeakSubject[];
 }
 
@@ -76,12 +77,13 @@ export default function WeaknessMap() {
 
   useEffect(() => {
     let cancelled = false;
+    const token = localStorage.getItem("boom-token");
     fetch(apiUrl(`/api/insights/weakness-map?days=${DAYS}`), {
-      headers: authHeaders(),
+      headers: authHeaders(token),
     })
       .then(res => (res.ok ? res.json() : null))
       .then(d => {
-        if (!cancelled && d && Array.isArray(d.subjects)) setData(d as WeaknessData);
+        if (!cancelled && localStorage.getItem("boom-token") === token && d && Array.isArray(d.subjects)) setData(d as WeaknessData);
       })
       .catch(() => {});
     return () => {
@@ -89,8 +91,10 @@ export default function WeaknessMap() {
     };
   }, []);
 
-  if (!data) return null;
+  return data ? <WeaknessMapContent data={data} /> : null;
+}
 
+export function WeaknessMapContent({data}: {data: WeaknessData}) {
   return (
     <div
       id="weakness-map"
@@ -118,9 +122,9 @@ export default function WeaknessMap() {
 
       {data.subjects.length === 0 ? (
         <div className="mt-4 py-3 text-center">
-          <p className="text-[12.5px] font-semibold text-[var(--muted)]">هنوز داده‌ای نیست</p>
+          <p className="text-[12.5px] font-semibold text-[var(--muted)]">{data.total_answered ? "پاسخ غلطی در مباحث کتاب‌ها ثبت نشده" : "هنوز پاسخی برای ارزیابی ضعف‌ها ثبت نشده"}</p>
           <p className="text-[11px] text-[var(--muted-2)] mt-1 leading-relaxed">
-            غلط‌های آزمون‌های هوشمند و دوئل‌ها همین‌جا به شکل نقشه ضعف نشان داده می‌شوند.
+            فقط پاسخ‌های ثبت‌شده به سؤال‌های تأییدشده و مباحث کتاب‌ها بررسی می‌شوند. سؤال‌های نزده غلط محسوب نمی‌شوند.
           </p>
         </div>
       ) : (
@@ -156,7 +160,7 @@ export default function WeaknessMap() {
 
           {/* Legend: intensity = weakness within the subject */}
           <div className="mt-4 pt-3 border-t border-[var(--border)] flex items-center justify-between">
-            <span className="text-[10px] text-[var(--muted-2)] font-medium">شدت رنگ = میزان ضعف در آن مبحث</span>
+            <span className="text-[10px] text-[var(--muted-2)] font-medium">شدت رنگ = تعداد غلط نسبت به مباحث همان درس</span>
             <div
               className="w-20 h-1.5 rounded-full"
               style={{ background: "linear-gradient(to left, rgba(196,113,74,0.10), rgba(196,113,74,0.72))" }}

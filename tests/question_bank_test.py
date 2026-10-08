@@ -467,6 +467,28 @@ def test_authored_assessment_reports_and_corrections_affect_future_sessions(db):
     assert bank.assemble(db, 2, PLAN, MAJORS) == []  # Static answers never enter ranked.
 
 
+def test_calculus_assessment_uses_current_book_topics_instead_of_legacy_integrals(db):
+    from app.rag.assessment_bank import create_assessment
+    from pathlib import Path
+    source = json.loads((Path(__file__).resolve().parents[1] / "frontend/src/assessmentQuestions.json").read_text(encoding="utf-8"))[0]
+    unchanged = source["questions"][0]
+    # An old authored archive remains in history, but cannot join the new source version.
+    old = GeneratedMock(student_id=0, title="old-assessment", major="assessment:calculus",
+        difficulty="assessment", status="bank_only", bank_scope="shared", questions=json.dumps([
+            {"_id":1,"subject":"حسابان","topic":"انتگرال معین","text":"انتگرال قدیمی",
+             "options":["0","1","2","3"],"answer":1,"verification_status":"verified"},
+            {"_id":2,"subject":"حسابان","topic":"calculus","text":unchanged["question"],
+             "options":unchanged["options"],"answer":unchanged["answer"],"verification_status":"verified"}]))
+    db.add(old); db.flush(); bank.index_mock(db, old); db.commit()
+    current = create_assessment(db, 1, "calculus")
+    assert len(current["questions"]) == 10
+    assert all("انتگرال" not in q["question"] and "∫" not in q["question"] for q in current["questions"])
+    assert "abolished" not in json.dumps(current)
+    questions = json.loads(db.get(GeneratedMock, current["mock_id"]).questions)
+    assert all(q["topic"] and q["topic"] != "calculus" for q in questions)
+    assert db.get(GeneratedMock, old.id) is not None
+
+
 def test_upgrade_creates_bank_and_flags_without_replacing_existing_accounts_or_mocks(tmp_path, monkeypatch):
     from app.auth import database
     from sqlalchemy import text

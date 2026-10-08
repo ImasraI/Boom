@@ -47,36 +47,19 @@ def student_state(db, user_id, supplied=None):
     return student
 
 
-def topic_evidence(db, user_id, *, trusted_only=False):
-    """Count correct, wrong and blank outcomes; never infer accuracy from misses alone."""
+def topic_evidence(db, user_id, *, trusted_only=False, days=90):
+    """Accuracy uses actual selections; blanks never establish weakness."""
+    from app.rag.learning_evidence import answer_events
     stats = defaultdict(lambda: {"attempted": 0, "correct": 0, "wrong": 0, "blank": 0})
-    since = datetime.utcnow() - timedelta(days=90)
-    attempts = db.execute(select(MockAttempt, GeneratedMock).join(
-        GeneratedMock, MockAttempt.mock_id == GeneratedMock.id).where(
-        MockAttempt.student_id == user_id, MockAttempt.created_at >= since)).all()
-    bank_ids = {q.get("bank_id") for _, mock in attempts for q in decoded(mock.questions, [])
-                if isinstance(q, dict) and q.get("bank_id")}
-    invalid_bank_ids = set(db.scalars(select(BankQuestion.id).where(
-        BankQuestion.id.in_(bank_ids), (BankQuestion.status != "active") | (BankQuestion.verified.is_(False))))) if bank_ids else set()
-    for attempt, mock in attempts:
-        answers = decoded(attempt.answers, {})
-        for q in decoded(mock.questions, []):
-            if not isinstance(q, dict) or (trusted_only and (
-                    q.get("verification_status") != "verified" or q.get("bank_id") in invalid_bank_ids)):
-                continue
-            key = (q.get("subject") or "عمومی", q.get("topic") or "مرور مباحث")
-            stat = stats[key]
-            value = answers.get(str(q.get("_id", q.get("id"))))
+    for event in answer_events(db, user_id, days=days, trusted_only=trusted_only):
+        stat = stats[(event["subject"], event["topic"])]
+        stat[event["outcome"]] += 1
+        if event["outcome"] != "blank":
             stat["attempted"] += 1
-            if value in (None, "", "null"):
-                stat["blank"] += 1
-            elif str(value) == str(q.get("answer")):
-                stat["correct"] += 1
-            else:
-                stat["wrong"] += 1
     return [{"subject": subject, "topic": topic, **values,
-             "accuracy": round(values["correct"] / values["attempted"], 3)}
-            for (subject, topic), values in sorted(stats.items())]
+             "accuracy": round(values["correct"] / values["attempted"], 3) if values["attempted"] else None}
+            for (subject, topic), values in sorted(stats.items())
+            if not trusted_only or values["attempted"]]
 
 
 # Thin-fragment policy for the default 1.5h block standard: a package whose
@@ -125,13 +108,11 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     topic_scores = {(_subject(e["subject"]), e["topic"]): 1 - e["accuracy"] for e in evidence if _subject(e["subject"]) in subjects}
     topic_reasons = {(_subject(e["subject"]), e["topic"]): f"بر اساس {e['attempted']} پاسخ آزمون شما؛ دقت {round(e['accuracy'] * 100)}٪" for e in evidence if _subject(e["subject"]) in subjects}
     # Manual mistakes identify topics but do not invent an accuracy denominator.
-    for row in db.query(WrongAnswer).filter(WrongAnswer.student_id == user_id,
-            WrongAnswer.created_at >= datetime.utcnow() - timedelta(days=90)).all():
-        if row.source == "mock":
-            continue  # Verified mock answers already own their accuracy denominator.
-        subject = _subject(row.subject)
+    from app.rag.learning_evidence import manual_events
+    for row in manual_events(db, user_id):
+        subject = _subject(row["subject"])
         if subject in subjects:
-            key = (subject, row.topic or "مرور مباحث")
+            key = (subject, row["topic"] or "مرور مباحث")
             topic_scores.setdefault(key, 0.65)
             topic_reasons.setdefault(key, "مبحث پاسخ غلط ثبت‌شدهٔ شما")
     for subject in subjects:
