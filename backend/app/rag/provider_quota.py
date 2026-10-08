@@ -191,9 +191,13 @@ def pool_quota_status() -> dict:
     settings = get_settings()
     generation = _stage_quota_status(settings)
     if generation["blocked"]:
-        return generation
+        return {**generation, "stage": "generation",
+                "provider": (settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER).strip().lower()}
     if (getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "") or "").strip():
-        return _stage_quota_status(settings, verification=True)
+        verification = _stage_quota_status(settings, verification=True)
+        if verification["blocked"]:
+            return {**verification, "provider": settings.POOL_VERIFY_LLM_PROVIDER.strip().lower()}
+        return verification
     return generation
 
 

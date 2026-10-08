@@ -49,6 +49,16 @@ test('Admin pool renders unlimited and targeted production controls', async () =
   assert.match(html, /موجودی سوال‌های قابل استفاده/);
 });
 
+test('old unverified pool booklets are described as unavailable, not awaiting approval', async () => {
+  const {PoolStockNotice} = await vite.ssrLoadModule('/src/pages/Admin.tsx');
+  const html = renderToStaticMarkup(React.createElement(PoolStockNotice, {unavailable:3}));
+  assert.match(html, /۳ دفترچه آماده نیست/);
+  assert.match(html, /این عدد صف تأیید خودکار نیست/);
+  assert.match(html, /بانک برای ساخت آزمون با تعداد دلخواه/);
+  const empty = renderToStaticMarkup(React.createElement(PoolStockNotice, {unavailable:0}));
+  assert.doesNotMatch(empty, /دفترچه آماده نیست/);
+});
+
 test('Knowledge graph loads without a profile and describes book-sourced titles', async () => {
   const {default:KnowledgeGraph} = await vite.ssrLoadModule('/src/pages/KnowledgeGraph.tsx');
   const html = renderToStaticMarkup(React.createElement(KnowledgeGraph, {nav(){},userData:null}));

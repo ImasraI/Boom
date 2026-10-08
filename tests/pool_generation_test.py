@@ -207,6 +207,20 @@ def test_quota_reason_reads_googles_array_shaped_429_body():
     assert terminal is True
 
 
+def test_long_groq_error_classifies_daily_before_display_truncation():
+    message = "Long provider model and organization prefix " * 8 + "tokens per day (TPD) exhausted"
+    _, terminal = _quota_reason(_fake_response({"error":{"message":message}}))
+    assert terminal is True
+
+
+def test_groq_quota_message_retains_numeric_budget_and_hides_organization():
+    message = ("Rate limit reached for model openai/gpt-oss-120b in organization org_private123 "
+               "on tokens per day (TPD): Limit 200000, Used 199000, Requested 5000. Try again in 120s.")
+    reason, terminal = _quota_reason(_fake_response({"error":{"message":message}}))
+    assert terminal and "org_private123" not in reason
+    assert "Limit 200000" in reason and "Requested 5000" in reason
+
+
 def test_quota_reason_treats_a_per_minute_limit_as_retryable():
     body = {"error": {"message": "Rate limit reached for requests per minute",
                       "details": [{"quotaId": "GenerateRequestsPerMinute"

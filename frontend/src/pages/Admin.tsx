@@ -28,7 +28,7 @@ interface PoolProgress {
 interface PoolPayload {
   target: number; shelves: Shelf[]; running?: boolean;
   cancel_requested?: boolean; progress?: PoolProgress;
-  provider_health?: { blocked: boolean; message?: string; retry_at?: string };
+  provider_health?: { blocked: boolean; message?: string; retry_at?: string; stage?: string; provider?: string };
   question_bank?: Record<string, number>;
   catalog?: { key: string; label: string; subjects: string[]; ranked_subjects: string[]; mock_questions: number; ranked_questions: number }[];
   inventory?: { major: string; grade: string; difficulty: string; subject: string; verified: number; unused: number; used: number }[];
@@ -43,6 +43,17 @@ function formatElapsed(seconds: number) {
   const minutes = Math.floor(total / 60);
   if (!minutes) return `${total} ثانیه`;
   return `${minutes}:${String(total % 60).padStart(2, "0")} دقیقه`;
+}
+
+export function PoolStockNotice({unavailable}: {unavailable: number}) {
+  return (
+    <div className="mb-4 text-xs text-[var(--muted)] leading-relaxed border-s-2 border-[var(--border)] ps-3">
+      <p>دفترچهٔ آماده با تعداد سؤال‌های سالم در بانک فرق دارد؛ سؤال‌های بانک برای ساخت آزمون با تعداد دلخواه قابل استفاده‌اند.</p>
+      {unavailable > 0 && <p className="mt-1">
+        {unavailable.toLocaleString("fa-IR")} دفترچه آماده نیست: سؤال‌های تأییدنشده یا گزارش‌شده دارد. این عدد صف تأیید خودکار نیست و با ادامهٔ تولید کم نمی‌شود.
+      </p>}
+    </div>
+  );
 }
 
 const FEATURE_FA: Record<string, string> = {
@@ -424,6 +435,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
         <p className="text-xs text-[var(--muted)] mb-4">حالت پیوسته سقف موجودی ندارد؛ پس از بازنشانی سهمیه و راه‌اندازی مجدد سرور ادامه می‌دهد. تمرین قبلی و تمرین نقاط ضعف از همین بانک با انتخاب مناسب هر دانش‌آموز ساخته می‌شوند.</p>
         {poolKind !== "mock" && <p className="text-xs text-[var(--muted)] mb-4">رنکینگ با استاندارد کنکور و اندازهٔ کوتاه همان صفحه ساخته می‌شود{selectedMajor ? `: ${selectedMajor.ranked_questions} سوال در حالت همه درس‌ها` : ""}. تعداد بالا فقط برای آزمون آزمایشی است.</p>}
         <p className="text-sm text-[var(--text)] mb-4">{stockQuestions.toLocaleString("fa-IR")} سوال مشترک تاییدشده · {unusedQuestions.toLocaleString("fa-IR")} استفاده‌نشده · {(pool?.question_bank?.corrupt ?? 0).toLocaleString("fa-IR")} گزارش‌شده</p>
+        <PoolStockNotice unavailable={pool?.shelves.reduce((sum, row) => sum + (row.needs_review ?? 0), 0) ?? 0} />
         {poolPollError && <p role="alert" className="text-xs text-red-400 mb-4">{poolPollError}</p>}
         {/* Aggregate fill across every shelf. While a sweep is producing, the
             bar shimmers and the live run state (booklets done, shelf in
@@ -438,7 +450,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
             </span>
           </div>
           <div
-            className={`pool-bar ${generating ? "is-running" : ""}`}
+            className={`pool-bar ${generating && pool?.run?.status !== "waiting_for_quota" ? "is-running" : ""}`}
             role="progressbar"
             aria-valuenow={poolPercent}
             aria-valuemin={0}
@@ -473,11 +485,14 @@ export default function Admin({ nav }: { nav: NavFn }) {
           )}
           {(pool?.provider_health?.blocked || progress?.last_error || pool?.run?.last_error) && (
             <p role="alert" className="text-[12px] text-red-400 mt-1.5 leading-relaxed">
+              {pool?.provider_health?.blocked && pool.provider_health.provider && (
+                <>{pool.provider_health.stage === "verification" ? "بررسی پاسخ‌ها" : "ساخت سوال‌ها"} در {pool.provider_health.provider}: </>
+              )}
               {pool?.provider_health?.blocked
                 ? pool.provider_health.message
                 : `وضعیت تولید: ${pool?.run?.last_error || progress?.last_error}`}
               {pool?.provider_health?.retry_at && (
-                <> بازنشانی بعدی: {new Date(pool.provider_health.retry_at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" })}</>
+                <> زمان مجاز تلاش بعدی: {new Date(pool.provider_health.retry_at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" })}؛ این زمان تضمین آزاد شدن سهمیهٔ کافی برای دفترچه نیست.</>
               )}
             </p>
           )}
@@ -491,7 +506,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
                   <span className={`text-lg font-bold ${s.available > 0 ? "text-emerald-400" : "text-[var(--muted)]"}`}>
                     {s.available}
                   </span>
-                  {!!s.needs_review && <span className="text-[10px] text-amber-500">{s.needs_review} دفترچه نیازمند بررسی</span>}
+                  {!!s.needs_review && <span className="text-[10px] text-amber-500">{s.needs_review} دفترچه آماده نیست</span>}
                   <span className="text-[10px] text-[var(--muted-2)]">دفترچه</span>
                 </div>
                 <div className="text-[10px] text-[var(--muted)] mt-0.5">

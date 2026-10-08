@@ -296,16 +296,20 @@ def _quota_reason(response: httpx.Response) -> tuple:
     # Keep the message readable in a log line / admin panel: provider texts
     # are long, multiline and full of documentation URLs.
     message = str(error.get("message") or data.get("message") or "")
+    # Long organization/model prefixes can put "tokens per day" past the
+    # display cutoff. Classify the complete response before shortening it.
+    full_message = message
     message = re.sub(r"\b(?:AIza[A-Za-z0-9_-]{20,}|AQ\.[A-Za-z0-9_-]{20,}|gsk_[A-Za-z0-9_-]{20,})",
                      "[redacted]", message)
     message = re.sub(r"https?://\S+", "", message)
-    message = " ".join(message.split())[:160].strip(" .،")
+    message = re.sub(r"\borg_[A-Za-z0-9_-]+", "[organization]", message)
+    message = " ".join(message.split())[:400].strip(" .،")
     nested = json.dumps(error.get("details") or data.get("details") or "",
                         ensure_ascii=False)
     match = re.search(r'"quotaId"\s*:\s*"([^"]+)"', nested)
     quota_id = match.group(1) if match else ""
-    reason = " | ".join(part for part in (message[:200], quota_id) if part)
-    return reason, bool(_DAILY_QUOTA_RE.search(quota_id or reason))
+    reason = " | ".join(part for part in (message, quota_id) if part)
+    return reason, bool(_DAILY_QUOTA_RE.search(quota_id or full_message))
 
 
 class GroqLLMClient(BaseLLMClient):

@@ -82,6 +82,7 @@ def test_all_groq_daily_limits_stop_restock_until_reset(monkeypatch):
         quota.block_daily_quota(child._quota_identity, 'daily quota', retry_seconds=120)
     health = quota.pool_quota_status()
     assert health['blocked'] and health['code'] == 'provider_daily_quota'
+    assert health['stage'] == 'generation' and health['provider'] == 'groq'
     assert health['retry_after'] <= 120
     assert 'draft-' not in repr(health)
 
