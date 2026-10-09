@@ -1039,26 +1039,28 @@ export default function Schedule({
                   key={b.id}
                   onClick={() => openEditStatic(b)}
                   title={`${b.title}\n${formatTime(b.startHour)} – ${formatTime(b.startHour + b.duration)}`}
-                  className={`schedule-block schedule-static pointer-events-auto absolute z-10 overflow-hidden px-1.5 cursor-pointer ${b.duration < 0.5 ? "py-0 text-[9px]" : "py-1 text-[11px]"}`}
+                  className="schedule-block-frame pointer-events-auto absolute z-10 cursor-pointer"
                   style={
                     {
                       "--block-color": resolveColor(b.color),
-                      "--block-h": `${b.duration * 2 * SLOT_HEIGHT - 8}px`,
-                      top: `${(b.startHour - HOUR_START) * 2 * SLOT_HEIGHT + 4}px`,
-                      height: `${b.duration * 2 * SLOT_HEIGHT - 8}px`,
+                      "--block-h": `${b.duration * 2 * SLOT_HEIGHT}px`,
+                      top: `${(b.startHour - HOUR_START) * 2 * SLOT_HEIGHT}px`,
+                      height: `${b.duration * 2 * SLOT_HEIGHT}px`,
                       right: `calc(${(b.day * 100) / DAYS.length}% + 4px)`,
                       width: `calc(${100 / DAYS.length}% - 8px)`,
                     } as React.CSSProperties
                   }
                 >
-                  <div className={`font-bold truncate flex items-center gap-1 pointer-events-none ${b.duration < 0.5 ? "leading-none" : "leading-snug"}`}>
-                    <span className="text-[10px] leading-none">↻</span>
-                    <span className="truncate">{b.title}</span>
+                  <div className={`schedule-block schedule-static overflow-hidden px-1.5 ${b.duration < 0.5 ? "py-0 text-[9px]" : "py-1 text-[11px]"}`}>
+                    <div className={`font-bold truncate flex items-center gap-1 pointer-events-none ${b.duration < 0.5 ? "leading-none" : "leading-snug"}`}>
+                      <span className="text-[10px] leading-none">↻</span>
+                      <span className="truncate">{b.title}</span>
+                    </div>
+                    {b.duration >= 0.5 && <div dir="ltr" className="text-[10px] text-right opacity-80 pointer-events-none">
+                      {formatTime(b.startHour)} –{" "}
+                      {formatTime(b.startHour + b.duration)}
+                    </div>}
                   </div>
-                  {b.duration >= 0.5 && <div dir="ltr" className="text-[10px] text-right opacity-80 pointer-events-none">
-                    {formatTime(b.startHour)} –{" "}
-                    {formatTime(b.startHour + b.duration)}
-                  </div>}
                 </div>
               ) : (
                 <div
@@ -1066,32 +1068,34 @@ export default function Schedule({
                   onPointerDown={(e) => startInteraction(e, b, "move")}
                   title={`${b.title}${b.description ? `\n${b.description}` : ""}`}
                   onClick={(e) => e.stopPropagation()}
-                  className={`schedule-block pointer-events-auto absolute z-10 overflow-hidden px-1.5 ${b.duration < 0.5 ? "py-0 text-[9px]" : "py-1 text-[11px]"} ${
+                  className={`schedule-block-frame pointer-events-auto absolute z-10 ${
                     draggingId === b.id ? "is-dragging z-30" : ""
                   }`}
                   style={
                     {
                       "--block-color": resolveColor(b.color),
-                      "--block-h": `${b.duration * 2 * SLOT_HEIGHT - 8}px`,
-                      top: `${(b.startHour - HOUR_START) * 2 * SLOT_HEIGHT + 4}px`,
-                      height: `${b.duration * 2 * SLOT_HEIGHT - 8}px`,
+                      "--block-h": `${b.duration * 2 * SLOT_HEIGHT}px`,
+                      top: `${(b.startHour - HOUR_START) * 2 * SLOT_HEIGHT}px`,
+                      height: `${b.duration * 2 * SLOT_HEIGHT}px`,
                       right: `calc(${(b.day * 100) / DAYS.length}% + 4px)`,
                       width: `calc(${100 / DAYS.length}% - 8px)`,
                     } as React.CSSProperties
                   }
                 >
-                  <div className={`font-bold pointer-events-none ${b.duration < 0.5 ? "truncate leading-none" : b.duration < 0.75 ? "truncate leading-snug" : "line-clamp-2 leading-snug"}`}>
-                    {b.question_start && b.question_end ? `تست‌های ${faNum(b.question_start)} تا ${faNum(b.question_end)}` : b.title}
+                  <div className={`schedule-block overflow-hidden px-1.5 ${b.duration < 0.5 ? "py-0 text-[9px]" : "py-1 text-[11px]"} ${draggingId === b.id ? "is-dragging" : ""}`}>
+                    <div className={`font-bold pointer-events-none ${b.duration < 0.5 ? "truncate leading-none" : b.duration < 0.75 ? "truncate leading-snug" : "line-clamp-2 leading-snug"}`}>
+                      {b.question_start && b.question_end ? `تست‌های ${faNum(b.question_start)} تا ${faNum(b.question_end)}` : b.title}
+                    </div>
+                    {b.question_start && b.resource && b.duration >= 0.75 && <div className="truncate text-[10px] pointer-events-none">{b.resource.replace(/\.pdf$/i, "")}</div>}
+                    {b.duration >= 0.5 && <div dir="ltr" className="text-[10px] text-right opacity-80 pointer-events-none">
+                      {formatTime(b.startHour)} –{" "}
+                      {formatTime(b.startHour + b.duration)}
+                    </div>}
+                    <div
+                      className="schedule-block-resize-handle"
+                      onPointerDown={(e) => startInteraction(e, b, "resize")}
+                    />
                   </div>
-                  {b.question_start && b.resource && b.duration >= 0.75 && <div className="truncate text-[10px] pointer-events-none">{b.resource.replace(/\.pdf$/i, "")}</div>}
-                  {b.duration >= 0.5 && <div dir="ltr" className="text-[10px] text-right opacity-80 pointer-events-none">
-                    {formatTime(b.startHour)} –{" "}
-                    {formatTime(b.startHour + b.duration)}
-                  </div>}
-                  <div
-                    className="schedule-block-resize-handle"
-                    onPointerDown={(e) => startInteraction(e, b, "resize")}
-                  />
                 </div>
               ),
             )}

@@ -436,66 +436,67 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; }
 
 /* ===================== end UI-refresh layer ===================== */
 
+/* The back plane occupies the actual start/end times on the grid. */
+.schedule-block-frame {
+  background: var(--block-shadow);
+  cursor: grab;
+  touch-action: none;
+}
+
+.schedule-block-frame:hover:not(.is-dragging) {
+  z-index: 40;
+}
+
 .schedule-block {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--block-h);
   background-color: var(--block-color, #e2c983);
   color: #1b1c1a;
   border: 1px solid #1b1c1a;
   border-radius: 0;
-  box-shadow: 4px 4px 0 0 var(--block-shadow);
+  transform: translate(-4px, -4px);
   cursor: grab;
   touch-action: none;
-  transition: transform 0.1s ease-in-out, box-shadow 0.15s ease-in-out,
+  transition: transform 0.1s ease-in-out,
     height 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), min-height 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 html.dark .schedule-block {
   color: #f5efe8;
   border-color: #f5efe8;
-  box-shadow: 4px 4px 0 0 var(--block-shadow);
 }
 
 .schedule-block:hover:not(.is-dragging) {
-  transform: translate(-1px, -1px);
-  box-shadow: 5px 5px 0 0 var(--block-shadow);
-  /* Reveal text that the slot clips: grow to fit the content while never
-     shrinking below the scheduled height (--block-h), and paint above the
-     neighbouring blocks while expanded. */
+  transform: translate(-5px, -5px);
+  /* Expand the face for long titles while the time-aligned back plane stays fixed. */
   height: auto !important;
   min-height: var(--block-h) !important;
   overflow: visible;
-  z-index: 40;
 }
 
-/* While expanded, keep the resize handle at the scheduled bottom edge so it
-   stays under the pointer instead of sliding away with the grown box. */
+/* Keep the resize handle at the scheduled bottom even when the face expands. */
 .schedule-block:hover:not(.is-dragging) .schedule-block-resize-handle {
   bottom: auto;
   top: calc(var(--block-h) - 10px);
 }
 
 .schedule-block:active:not(.is-dragging) {
-  transform: translate(1px, 1px);
-  box-shadow: 2px 2px 0 0 var(--block-shadow);
+  transform: translate(-1px, -1px);
 }
 
 .schedule-block.is-dragging {
   cursor: grabbing;
-  transform: translate(2px, 2px);
-  box-shadow: 2px 2px 0 0 var(--block-shadow);
+  transform: translate(-2px, -2px);
 }
 
-/* Yearly-repeating "static" timeblocks: dashed + slightly transparent so
-   they read as auto-generated instances, not per-week edits. */
 .schedule-block.schedule-static {
   border-style: dashed;
   border-width: 1.5px;
   cursor: pointer;
   opacity: 0.92;
-}
-
-.schedule-block.schedule-static:hover {
-  transform: translate(-1px, -1px);
-  box-shadow: 5px 5px 0 0 var(--block-shadow);
 }
 
 .schedule-block-resize-handle {
