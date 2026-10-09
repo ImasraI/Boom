@@ -13,6 +13,7 @@ def worker(monkeypatch):
     pool_core.finish_progress(); pool_core.clear_cancel()
     monkeypatch.setattr(service, 'SessionLocal', lambda: nullcontext(SimpleNamespace()))
     monkeypatch.setattr(service, 'pool_quota_status', lambda: {'blocked':False})
+    monkeypatch.setattr(pool_core, 'assemble_stock', lambda *a, **kw: False)
     monkeypatch.setattr(service, 'resume', lambda: None)
     yield
     pool_core.finish_progress(); pool_core.clear_cancel()
@@ -69,6 +70,17 @@ def test_access_denial_requires_changed_credentials_not_repeated_probes(monkeypa
     monkeypatch.setattr(pool_core, 'generate_one', lambda *a, **kw: pytest.fail('No access probes'))
     service.start(config()); service._run()
     assert service.snapshot()['status']=='failed' and not service.snapshot()['enabled']
+
+
+def test_verified_bank_stock_finishes_during_quota_pause_without_drafting(monkeypatch):
+    monkeypatch.setattr(service, 'pool_quota_status', lambda: {'blocked':True,
+        'message':'daily quota', 'retry_at':'2026-10-10T00:00:00Z'})
+    monkeypatch.setattr(pool_core, 'generate_one', lambda *a, **kw: pytest.fail('No drafting'))
+    stock=[]
+    monkeypatch.setattr(pool_core, 'assemble_stock', lambda *a, **kw: stock.append(kw) or True)
+    service.start(config()); service._run()
+    assert len(stock)==1 and stock[0]['total_questions']==5
+    assert service.snapshot()['status']=='finished' and service.snapshot()['produced']==1
 
 
 def test_both_rotates_mock_and_exact_ranked_shapes(monkeypatch):

@@ -32,6 +32,9 @@ interface PoolPayload {
   question_bank?: Record<string, number>;
   catalog?: { key: string; label: string; subjects: string[]; ranked_subjects: string[]; mock_questions: number; ranked_questions: number }[];
   inventory?: { major: string; grade: string; difficulty: string; subject: string; verified: number; unused: number; used: number }[];
+  token_usage?: { date_utc: string; groups: { stage: string; provider: string; model: string;
+    responses: number; unmeasured_responses: number; empty_responses: number;
+    prompt_tokens: number; completion_tokens: number; total_tokens: number }[] };
   run?: { enabled: boolean; status: string; produced: number; last_error?: string; retry_at?: string;
     config?: { kind: string; majors: string[]; difficulties: string[]; grade: string; count: number; total_questions: number; subjects: string[]; topics: string[] } };
 }
@@ -66,6 +69,10 @@ const DIFFICULTY_FA: Record<string, string> = {
 const PHASE_FA: Record<string, string> = {
   generating: "تولید سوال", verifying: "راستی‌آزمایی پاسخ‌ها", saving: "ذخیره دفترچه",
   waiting_for_quota: "منتظر بازنشانی سهمیه", waiting_for_worker: "منتظر پایان تولید قبلی",
+};
+const TOKEN_STAGE_FA: Record<string, string> = {
+  drafting: "تولید سوال", repair: "بازسازی سوال ردشده", verification: "راستی‌آزمایی",
+  repair_verification: "راستی‌آزمایی جایگزین", chat_planning: "چت و برنامه‌ریزی",
 };
 
 export default function Admin({ nav }: { nav: NavFn }) {
@@ -517,6 +524,27 @@ export default function Admin({ nav }: { nav: NavFn }) {
           })}
         </div>
         <div className="mt-5 overflow-x-auto"><table className="w-full text-xs text-start"><caption className="text-start text-[var(--muted)] mb-3">موجودی سوال‌های قابل استفاده به تفکیک رشته، پایه و درس</caption><thead><tr>{["رشته / پایه", "درس / سطح", "تاییدشده", "جدید", "استفاده‌شده"].map(label => <th key={label} className="text-start border-b border-[var(--border)] py-2 px-2 font-medium">{label}</th>)}</tr></thead><tbody>{pool?.inventory?.map(row => <tr key={`${row.major}/${row.grade}/${row.difficulty}/${row.subject}`}><td className="border-b border-[var(--border)] py-2 px-2">{row.major} · {row.grade || "همه پایه‌ها"}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.subject} · {DIFFICULTY_FA[row.difficulty] ?? row.difficulty}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.verified}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.unused}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.used}</td></tr>)}</tbody></table>{!stockQuestions && <p className="text-xs text-[var(--muted)] py-3">هنوز سوال مشترک تاییدشده آماده نشده است.</p>}</div>
+        <div className="mt-5 border-t border-[var(--border)] pt-4">
+          <h3 className="text-sm font-bold">مصرف توکن امروز</h3>
+          <p className="text-xs text-[var(--muted)] mt-2 leading-relaxed">
+            بر اساس مصرف اعلام‌شدهٔ مدل، از زمان فعال شدن ثبت مصرف؛ روز UTC: {pool?.token_usage?.date_utc}.
+            پاسخ‌های خالی و تلاش‌های مجدد هم ثبت می‌شوند. خطای سهمیه مصرف توکن محسوب نمی‌شود؛ مصرف گذشته قابل بازسازی نیست.
+          </p>
+          <div className="overflow-x-auto mt-3"><table className="w-full text-xs text-start">
+            <thead><tr>{["کار / مدل", "پاسخ‌ها", "ورودی", "خروجی", "کل"].map(label =>
+              <th key={label} className="text-start py-2 px-2 border-b border-[var(--border)]">{label}</th>)}</tr></thead>
+            <tbody>{pool?.token_usage?.groups.map(row => <tr key={`${row.stage}/${row.provider}/${row.model}`}>
+              <td className="py-2 px-2 border-b border-[var(--border)]">{TOKEN_STAGE_FA[row.stage] ?? row.stage}
+                <span className="block text-[var(--muted)]" dir="ltr">{row.provider} · {row.model}</span></td>
+              <td className="py-2 px-2 border-b border-[var(--border)]">{row.responses.toLocaleString("fa-IR")}
+                {!!row.empty_responses && <span className="block text-[var(--muted)]">{row.empty_responses.toLocaleString("fa-IR")} خالی</span>}
+                {!!row.unmeasured_responses && <span className="block text-amber-500">{row.unmeasured_responses.toLocaleString("fa-IR")} بدون آمار مصرف</span>}</td>
+              {[row.prompt_tokens, row.completion_tokens, row.total_tokens].map((value, i) =>
+                <td key={i} className="py-2 px-2 border-b border-[var(--border)]">{value.toLocaleString("fa-IR")}</td>)}
+            </tr>)}</tbody>
+          </table></div>
+          {!pool?.token_usage?.groups.length && <p className="text-xs text-[var(--muted)] mt-2">هنوز پاسخی از مدل در آمار امروز ثبت نشده است.</p>}
+        </div>
         {generating && (
           <p className="text-[11px] text-[var(--muted-2)] mt-3">
             تولید و راستی‌آزمایی در پس‌زمینه انجام می‌شود. بستن صفحه آن را متوقف نمی‌کند؛ سوال‌های سالمِ دفترچه ناقص هم حفظ می‌شوند.

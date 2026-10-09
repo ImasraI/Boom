@@ -101,7 +101,8 @@ def migrate_eligible(db, user_id, majors):
 
 
 def assemble(db, user_id, plan, majors, difficulty="konkur", grade="", topics=None,
-             *, prefer_used=True, used_only=False, allow_partial=False, shared_only=False):
+             *, prefer_used=True, used_only=False, allow_partial=False, shared_only=False,
+             unused_only=False, exclude_ids=()):
     """Select real verified rows. No replacement of previously assigned exams."""
     migrate_eligible(db, user_id, majors)
     query = select(BankQuestion).where(
@@ -112,6 +113,10 @@ def assemble(db, user_id, plan, majors, difficulty="konkur", grade="", topics=No
     )
     if used_only:
         query = query.where(BankQuestion.uses > 0)
+    if unused_only:
+        query = query.where(BankQuestion.uses == 0)
+    if exclude_ids:
+        query = query.where(BankQuestion.id.not_in(exclude_ids))
     order = (BankQuestion.uses > 0).desc() if prefer_used else (BankQuestion.uses == 0).desc()
     wanted_topics = [str(t).strip().casefold() for t in (topics or []) if str(t).strip()]
     out = []

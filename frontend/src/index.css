@@ -58,8 +58,9 @@ html.dark {
   --success-bg: #1A2A1E;
   --success-text: #8FCB9B;
   --neutral-chip: #2A241E;
-  /* Keep the original sharp blocks with a true shadow behind them. */
-  --block-shadow: rgba(0, 0, 0, 0.55);
+  /* Solid offset edge restores the original raised, pressable blocks.
+     Warm stone stays visible on the dark grid without a bright white slab. */
+  --block-shadow: #aa9580;
   --accent-rgb: 212 132 92;
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.4), 0 2px 8px rgb(0 0 0 / 0.35);
   --shadow-md: 0 2px 6px rgb(0 0 0 / 0.45), 0 12px 32px -8px rgb(0 0 0 / 0.55);

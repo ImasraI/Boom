@@ -312,8 +312,37 @@ def _harvest_questions(db, questions, major_key, difficulty, grade=""):
     db.commit()
 
 
+def _stock_seeds(db, major_key, difficulty, plan, grade, topics):
+    # Waiting booklets already reserve their questions. Unlimited storage must
+    # not repeatedly package the same unused questions as newly generated stock.
+    reserved = set()
+    for mock in db.execute(select(GeneratedMock).where(
+            GeneratedMock.student_id == POOL_OWNER_ID,
+            GeneratedMock.status == 'pending_use')).scalars():
+        rows = question_bank.index_mock(db, mock)
+        if isinstance(rows, list):
+            reserved.update(q['bank_id'] for q in rows if isinstance(q, dict)
+                            and type(q.get('bank_id')) is int)
+    return question_bank.assemble(db, POOL_OWNER_ID, plan, [CANONICAL_MAJOR[major_key]],
+        difficulty='konkur' if difficulty == DUEL_DIFFICULTY else difficulty,
+        grade=grade, topics=topics, prefer_used=False, shared_only=True,
+        unused_only=True, exclude_ids=reserved, allow_partial=True)
+
+
+def _build_from_stock(db, major_key, difficulty, plan, grade, topics, allow_generation):
+    seeds = _stock_seeds(db, major_key, difficulty, plan, grade, topics)
+    if not allow_generation and mock_generation._shortfall(seeds, plan):
+        return [], plan, sum(s['minutes'] for s in plan)
+    kwargs = {'seed_questions': seeds} if seeds else {}
+    return mock_generation.build_pool_booklet(major_key,
+        'konkur' if difficulty == DUEL_DIFFICULTY else difficulty, user_id=POOL_OWNER_ID,
+        report=_progress_reporter(), grade=grade, plan=plan, topics=topics,
+        on_verified=lambda questions: _harvest_questions(db, questions, major_key, difficulty, grade),
+        **kwargs)
+
+
 def generate_one(db, major_key: str, difficulty: str, *, grade="", total_questions=0,
-                 subjects=None, topics=None) -> bool:
+                 subjects=None, topics=None, allow_generation=True) -> bool:
     """Generate one standard booklet and insert it as a pending_use pool row.
 
     Returns True when a row was added. Generation failures are logged and
@@ -321,17 +350,15 @@ def generate_one(db, major_key: str, difficulty: str, *, grade="", total_questio
     """
     try:
         plan = generation_plan(major_key, subjects=subjects, total_questions=total_questions)
-        questions, _plan, duration = mock_generation.build_pool_booklet(
-            major_key, difficulty, user_id=POOL_OWNER_ID,
-            report=_progress_reporter(), grade=grade, plan=plan, topics=topics,
-            on_verified=lambda questions: _harvest_questions(db, questions, major_key, difficulty, grade))
+        questions, _plan, duration = _build_from_stock(
+            db, major_key, difficulty, plan, grade, topics, allow_generation)
     except Exception:
         logger.exception("Pool generation failed for %s/%s.",
                          major_key, difficulty)
         return False
     if not questions:
-        logger.warning("Pool generation produced nothing for %s/%s.",
-                       major_key, difficulty)
+        if allow_generation:
+            logger.warning("Pool generation produced nothing for %s/%s.", major_key, difficulty)
         return False
 
     mock = GeneratedMock(
@@ -450,7 +477,8 @@ def duel_pool_deficit(db, major_key: str, target: int) -> int:
     return max(0, target - ready_count(db, difficulty=DUEL_DIFFICULTY, major=CANONICAL_MAJOR[major_key]))
 
 
-def generate_one_duel(db, major_key: str, *, grade="", subjects=None, topics=None) -> bool:
+def generate_one_duel(db, major_key: str, *, grade="", subjects=None, topics=None,
+                      allow_generation=True) -> bool:
     """Generate one scaled + verified duel booklet into the duel shelf.
 
     Same shared generation path as standard pool rows (build_pool_booklet),
@@ -460,15 +488,15 @@ def generate_one_duel(db, major_key: str, *, grade="", subjects=None, topics=Non
     plan = generation_plan(major_key, ranked=True, subjects=subjects)
     duration = max(10, sum(s["minutes"] for s in plan) // 3)
     try:
-        questions, _plan, _ = mock_generation.build_pool_booklet(
-            major_key, "konkur", user_id=POOL_OWNER_ID, plan=plan,
-            report=_progress_reporter(), grade=grade, topics=topics,
-            on_verified=lambda questions: _harvest_questions(db, questions, major_key, DUEL_DIFFICULTY, grade))
+        questions, _plan, scaled_duration = _build_from_stock(
+            db, major_key, DUEL_DIFFICULTY, plan, grade, topics, allow_generation)
+        duration = max(1, round(duration * scaled_duration / sum(s['minutes'] for s in plan)))
     except Exception:
         logger.exception("Duel pool generation failed for %s.", major_key)
         return False
     if not questions:
-        logger.warning("Duel pool generation produced nothing for %s.", major_key)
+        if allow_generation:
+            logger.warning("Duel pool generation produced nothing for %s.", major_key)
         return False
 
     mock = GeneratedMock(
@@ -489,6 +517,13 @@ def generate_one_duel(db, major_key: str, *, grade="", subjects=None, topics=Non
     logger.info("Duel pool +%d questions  [%s]", len(questions), major_key)
     commit_questions(len(questions))
     return True
+
+
+def assemble_stock(db, major_key, difficulty, **kwargs):
+    """Reserve a complete fresh booklet without making any provider calls."""
+    if difficulty == DUEL_DIFFICULTY:
+        return generate_one_duel(db, major_key, allow_generation=False, **kwargs)
+    return generate_one(db, major_key, difficulty, allow_generation=False, **kwargs)
 
 
 def sweep_duels(db, target: int, majors=None, dry_run: bool = False,

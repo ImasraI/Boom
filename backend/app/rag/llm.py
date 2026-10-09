@@ -25,6 +25,7 @@ import httpx
 import base64
 
 from app.config import get_settings
+from app.rag.pool_usage import record_response, record_stream
 from app.rag.provider_quota import (
     DAILY_QUOTA_MESSAGE, block_daily_quota, blocked_quota, pool_gemini_keys, quota_identity,
     block_access, blocked_access, block_rate_limit, rate_limited, groq_keys,
@@ -404,6 +405,7 @@ class GroqLLMClient(BaseLLMClient):
                 resp = self.client.post(url, json=payload, timeout=req_timeout)
                 resp.raise_for_status()
                 data = resp.json()
+                record_response('groq', self.model, data)
                 if "choices" in data and len(data["choices"]) > 0:
                     choice = data["choices"][0]
                     content = choice["message"]["content"]
@@ -485,6 +487,7 @@ class GroqLLMClient(BaseLLMClient):
         url = f"{self.base_url}/chat/completions"
         payload = self._prepare_payload(messages)
         payload["stream"] = True
+        self.last_usage = ZERO_USAGE
 
         # Retry only the connection phase: a 429/raise_for_status fires
         # before any content is yielded, so a retry never duplicates output.
@@ -493,6 +496,7 @@ class GroqLLMClient(BaseLLMClient):
             try:
                 with self.client.stream("POST", url, json=payload) as response:
                     response.raise_for_status()
+                    usage, has_content = None, False
                     for line in response.iter_lines():
                         if not line or line == "data: [DONE]":
                             continue
@@ -500,12 +504,17 @@ class GroqLLMClient(BaseLLMClient):
                             line = line[6:]
                         try:
                             chunk = json.loads(line)
+                            usage = chunk.get('usage') or (chunk.get('x_groq') or {}).get('usage') or usage
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 content = chunk["choices"][0].get("delta", {}).get("content", "")
                                 if content:
+                                    has_content = True
                                     yield content
                         except json.JSONDecodeError:
                             continue
+                    record_stream('groq', self.model, usage, has_content)
+                    if usage:
+                        self.last_usage = _usage_from_openai({'usage': usage})
                 return
             except httpx.HTTPStatusError as e:
                 retryable = (
@@ -704,6 +713,7 @@ class GeminiLLMClient(BaseLLMClient):
                     continue
                 resp.raise_for_status()
                 data = resp.json()
+                record_response('gemini', self.model, data)
                 if "choices" in data and len(data["choices"]) > 0:
                     content = data["choices"][0].get("message", {}).get("content")
                     if content:
@@ -738,6 +748,8 @@ class GeminiLLMClient(BaseLLMClient):
         url = f"{self.base_url}/chat/completions"
         payload = self._prepare_payload(messages, images=images)
         payload["stream"] = True
+        payload['stream_options'] = {'include_usage': True}
+        self.last_usage = ZERO_USAGE
 
         # Retry only the connection phase (same contract as Groq): a 429
         # fires before any content is yielded, so a retry never duplicates
@@ -746,6 +758,7 @@ class GeminiLLMClient(BaseLLMClient):
             try:
                 with self.client.stream("POST", url, json=payload) as response:
                     response.raise_for_status()
+                    usage, has_content = None, False
                     for line in response.iter_lines():
                         if not line or line == "data: [DONE]":
                             continue
@@ -753,12 +766,17 @@ class GeminiLLMClient(BaseLLMClient):
                             line = line[6:]
                         try:
                             chunk = json.loads(line)
+                            usage = chunk.get('usage') or usage
                             if "choices" in chunk and len(chunk["choices"]) > 0:
                                 content = chunk["choices"][0].get("delta", {}).get("content", "")
                                 if content:
+                                    has_content = True
                                     yield content
                         except json.JSONDecodeError:
                             continue
+                    record_stream('gemini', self.model, usage, has_content)
+                    if usage:
+                        self.last_usage = _usage_from_openai({'usage': usage})
                 return
             except httpx.HTTPStatusError as e:
                 retryable = (
@@ -868,6 +886,7 @@ class CerebrasLLMClient(BaseLLMClient):
                     continue
                 resp.raise_for_status()
                 data = resp.json()
+                record_response('cerebras', self.model, data)
                 if "choices" in data and len(data["choices"]) > 0:
                     choice = data["choices"][0]
                     content = choice.get("message", {}).get("content")
@@ -1011,6 +1030,7 @@ class OpenAICompatibleClient(BaseLLMClient):
             resp = self.client.post(url, json=payload, timeout=req_timeout)
             resp.raise_for_status()
             data = resp.json()
+            record_response('openai_compatible', self.model, data)
             if "choices" in data and len(data["choices"]) > 0:
                 return data["choices"][0]["message"]["content"]
             else:

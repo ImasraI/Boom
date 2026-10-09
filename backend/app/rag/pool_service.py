@@ -116,6 +116,31 @@ def _run():
                 pool_core.clear_cancel()
             health = pool_quota_status()
             if health['blocked']:
+                # Stored verified stock remains usable even while API quotas
+                # are blocked. Drain at most one complete booklet per pass.
+                shelves = _shelves(config)
+                assembled = False
+                for offset in range(len(shelves)):
+                    if _shutdown.is_set() or not snapshot().get('enabled'):
+                        break
+                    index = state['cursor'] + offset
+                    major, difficulty = shelves[index % len(shelves)]
+                    kwargs = {'grade':config['grade'], 'subjects':config.get('subjects'),
+                              'topics':config.get('topics')}
+                    if difficulty != pool_core.DUEL_DIFFICULTY:
+                        kwargs['total_questions'] = config.get('total_questions', 0)
+                    with SessionLocal() as db:
+                        assembled = pool_core.assemble_stock(db, major, difficulty, **kwargs)
+                    if assembled:
+                        with _LOCK:
+                            current = snapshot()
+                            current.update(cursor=index + 1, produced=current['produced'] + 1)
+                            _save(current)
+                        pool_core.bump_produced()
+                        break
+                if assembled:
+                    failures = 0
+                    continue
                 if not health.get('retry_at'):
                     _update(enabled=False, status='failed', last_error=health['message'])
                     break  # Access errors need a changed credential, not polling.
@@ -126,12 +151,7 @@ def _run():
                 failures = 0
                 continue
             _update(status='generating', retry_at=None, last_error='')
-            shelves = []
-            for m in config['majors']:
-                if config['kind'] in ('mock','both'):
-                    shelves.extend((m,d) for d in config['difficulties'])
-                if config['kind'] in ('ranked','both'):
-                    shelves.append((m,pool_core.DUEL_DIFFICULTY))
+            shelves = _shelves(config)
             major, difficulty = shelves[state['cursor'] % len(shelves)]
             pool_core.set_current(major, difficulty)
             pool_core.add_planned(1)
@@ -161,3 +181,13 @@ def _run():
             pool_core.finish_progress()
         if snapshot().get('status') == 'stopping':
             _update(status='stopped')
+
+
+def _shelves(config):
+    shelves = []
+    for major in config['majors']:
+        if config['kind'] in ('mock', 'both'):
+            shelves.extend((major, difficulty) for difficulty in config['difficulties'])
+        if config['kind'] in ('ranked', 'both'):
+            shelves.append((major, pool_core.DUEL_DIFFICULTY))
+    return shelves

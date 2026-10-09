@@ -35,6 +35,13 @@ def isolate_selected_pool_state(monkeypatch, tmp_path):
     pool_service._wake.set()
 
 
+@pytest.fixture(autouse=True)
+def isolate_provider_usage(monkeypatch, tmp_path):
+    # Mocked completions must never inflate the developer's real token audit.
+    from app.rag import pool_usage
+    monkeypatch.setattr(pool_usage, '_directory', lambda: tmp_path / 'provider-usage')
+
+
 def pytest_sessionfinish(session, exitstatus):
     from sqlalchemy.orm import close_all_sessions
     from app.auth.database import engine

@@ -33,6 +33,7 @@ from app.config import get_settings
 from app.rag.llm import get_pool_llm_client, get_pool_verifier_client
 from app.rag.provider_quota import is_terminal_provider_error, quota_identity
 from app.rag.pool_pacing import wait_for_draft_slot
+from app.rag import pool_usage
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -108,7 +109,7 @@ _GENERATE_PROMPT = """تو طراح آزمون آزمایشی کنکور هست�
 - اگر figure.type برابر none نیست، figure.data اجباری و کامل و فقط شامل داده‌های عددی/هندسی باشد؛ هرگز توضیح متنی به‌جای داده شکل ننویس.
 - اعداد و اندازه‌های داخل figure.data باید دقیقاً با ادعاهای متن سوال سازگار باشند؛ زاویه، طول یا مقداری را تقریب یا نقض نکن.
 - برای function_plot، expression را با نحو استاندارد Python بنویس (توان با **، نه ^ یا LaTeX)؛ فقط x و تابع‌های sin، cos، sqrt و abs مجازند.
-- ساختار داده‌ها: function_plot={{"expression":"x**2 - 3*x + 2","variable":"x","domain":[-2,5],"labels":{{"x_axis":"x","y_axis":"y"}},"highlight_points":[{{"x":1,"y":0,"label":"A"}}]}}; geometry={{"shape":"triangle","points":{{"A":[0,0],"B":[4,0],"C":[1,3]}},"labels":{{"A":"A","B":"B","C":"C"}},"side_lengths":{{"AB":4,"AC":3.16,"BC":3.16}},"angles":{{"A":60}},"marks":{{"right_angle_at":null,"equal_sides":["AC","BC"],"parallel_pairs":[]}}}}.
+- ساختار داده‌ها: function_plot={{"expression":"x**2 - 3*x + 2","variable":"x","domain":[-2,5],"labels":{{"x_axis":"x","y_axis":"y"}},"highlight_points":[{{"x":1,"y":0,"label":"A"}}]}}; geometry={{"shape":"triangle","points":{{"A":[0,0],"B":[4,0],"C":[0,3]}},"labels":{{"A":"A","B":"B","C":"C"}},"side_lengths":{{"AB":4,"AC":3,"BC":5}},"angles":{{"A":90}},"marks":{{"right_angle_at":"A","equal_sides":[],"parallel_pairs":[]}}}}.
 - bar_chart={{"categories":["A","B","C","D"],"values":[12,19,7,15],"x_label":"دسته","y_label":"فراوانی"}}; coordinate_plane={{"points":[{{"x":1,"y":2,"label":"P"}}],"lines":[{{"from":[0,0],"to":[4,4],"label":"l"}}],"x_range":[-5,5],"y_range":[-5,5]}}.
 - خروجی فقط JSON، بدون markdown و توضیح اضافه، در این قالب:
 {{"questions":[{{"subject":"ریاضی","topic":"حد و پیوستگی","text":"...","options":["...","...","...","..."],"answer":2,"explanation":"...","figure":{{"type":"none","data":{{}}}}}}, ...]}}"""
@@ -143,7 +144,7 @@ def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
                        user_id: int = 0, verify: bool = True,
                        plan: Optional[List[dict]] = None,
                        report: Reporter = None, on_verified=None, grade: str = "",
-                       topics: Optional[List[str]] = None) -> tuple:
+                       topics: Optional[List[str]] = None, seed_questions=None) -> tuple:
     """One STANDARD booklet for a (major, difficulty) combination.
 
     The single generation path shared by /api/mocks/generate's live
@@ -168,8 +169,17 @@ def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
     plan = [dict(s) for s in (plan or KONKUR_SUBJECTS[major_key_str])]
     planned = sum(int(s.get("questions") or 0) for s in plan)
     duration = sum(s["minutes"] for s in plan)
-    questions = generate_booklet(user_id, plan, topics=topics or [], difficulty=difficulty,
-                                 report=report, grade=grade)
+    # Only the pool passes trusted, active bank rows here. Draft and independently
+    # solve the missing slots; never spend tokens re-verifying existing bank stock.
+    seeds = list(seed_questions or [])
+    missing_plan = []
+    for row in plan:
+        missing = int(row['questions']) - sum(q.get('subject') == row['name'] for q in seeds)
+        if missing > 0:
+            missing_plan.append({**row, 'questions': missing,
+                'minutes': max(1, round(row['minutes'] * missing / row['questions']))})
+    questions = (generate_booklet(user_id, missing_plan, topics=topics or [], difficulty=difficulty,
+                                 report=report, grade=grade) if missing_plan else [])
     if questions and verify:
         questions = verify_and_repair_booklet(questions, user_id,
                                               difficulty=difficulty,
@@ -178,6 +188,14 @@ def build_pool_booklet(major_key_str: str, difficulty: str = "konkur",
                     "answer-verification pass.", len(questions), planned)
         if on_verified and questions:
             on_verified(questions)
+    seen = set()
+    combined = []
+    for q in seeds + questions:
+        fingerprint = (q.get('subject'), _norm_qtext(q.get('text', '')))
+        if fingerprint not in seen:
+            combined.append({**q, '_id': len(combined) + 1})
+            seen.add(fingerprint)
+    questions = combined
     if verify:
         short = _shortfall(questions, plan)
         empty_subject = any(produced == 0 for _, _, produced in short)
@@ -494,8 +512,9 @@ def _verify_question(client, question: dict, timeout: float) -> Optional[int]:
         o2=question["options"][2], o3=question["options"][3],
     )
     try:
-        raw = client.generate([{"role": "user", "content": prompt}],
-                              max_tokens=200, timeout=timeout)
+        with pool_usage.stage('repair_verification'):
+            raw = client.generate([{"role": "user", "content": prompt}],
+                                  max_tokens=200, timeout=timeout)
     except Exception as exc:
         logger.warning("Verifier call failed: %s", exc)
         return None
@@ -608,10 +627,11 @@ def _verify_batch(client, batch: List[dict],
     not spend one call per question discovering that a per-day quota is gone.
     """
     try:
-        raw = client.generate(
-            [{"role": "user", "content": _verify_batch_prompt(batch)}],
-            max_tokens=max(400, 60 * len(batch)), timeout=timeout,
-        )
+        with pool_usage.stage('verification'):
+            raw = client.generate(
+                [{"role": "user", "content": _verify_batch_prompt(batch)}],
+                max_tokens=max(400, 60 * len(batch)), timeout=timeout,
+            )
     except Exception as exc:
         logger.warning("Verifier batch call failed: %s", exc)
         return None
@@ -660,7 +680,8 @@ def _generate_replacement(client, user_id: int, question: dict,
     context = _draft_context(context)
     prompt = build_booklet_prompt([row], [topic] if topic else [],
                                   difficulty, context)
-    raw = _draft_generate(client, prompt, max_tokens, timeout)
+    with pool_usage.stage('repair'):
+        raw = _draft_generate(client, prompt, max_tokens, timeout)
     rows = parse_booklet(raw)
     return rows[0] if rows else None
 
@@ -794,7 +815,8 @@ def _draft_generate(client, prompt: str, max_tokens: int, timeout: float) -> str
     model = (settings.POOL_LLM_MODEL_NAME or settings.LLM_MODEL_NAME).strip()
     identity = quota_identity(provider, model, settings.POOL_LLM_API_KEY or settings.LLM_API_KEY)
     wait_for_draft_slot(identity, max(0, getattr(settings, "POOL_GENERATION_REQUESTS_PER_MINUTE", 0)))
-    return client.generate([{"role":"user", "content":prompt}], max_tokens=budget, timeout=timeout)
+    with pool_usage.stage('repair' if pool_usage.current_stage() == 'repair' else 'drafting'):
+        return client.generate([{"role":"user", "content":prompt}], max_tokens=budget, timeout=timeout)
 
 
 def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
