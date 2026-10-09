@@ -17,7 +17,7 @@ from datetime import datetime
 
 from sqlalchemy import select, update
 
-from app.auth.database import GeneratedMock, MockAttempt
+from app.auth.database import BankQuestion, GeneratedMock, MockAttempt
 from app.rag import mock_generation
 from app.rag import question_bank
 from app.rag.provider_quota import is_terminal_provider_error, pool_quota_status
@@ -312,7 +312,7 @@ def _harvest_questions(db, questions, major_key, difficulty, grade=""):
     db.commit()
 
 
-def _stock_seeds(db, major_key, difficulty, plan, grade, topics):
+def _reserved_stock_ids(db):
     # Waiting booklets already reserve their questions. Unlimited storage must
     # not repeatedly package the same unused questions as newly generated stock.
     reserved = set()
@@ -323,10 +323,14 @@ def _stock_seeds(db, major_key, difficulty, plan, grade, topics):
         if isinstance(rows, list):
             reserved.update(q['bank_id'] for q in rows if isinstance(q, dict)
                             and type(q.get('bank_id')) is int)
+    return reserved
+
+
+def _stock_seeds(db, major_key, difficulty, plan, grade, topics):
     return question_bank.assemble(db, POOL_OWNER_ID, plan, [CANONICAL_MAJOR[major_key]],
         difficulty='konkur' if difficulty == DUEL_DIFFICULTY else difficulty,
         grade=grade, topics=topics, prefer_used=False, shared_only=True,
-        unused_only=True, exclude_ids=reserved, allow_partial=True)
+        unused_only=True, exclude_ids=_reserved_stock_ids(db), allow_partial=True)
 
 
 def _build_from_stock(db, major_key, difficulty, plan, grade, topics, allow_generation):
@@ -334,11 +338,29 @@ def _build_from_stock(db, major_key, difficulty, plan, grade, topics, allow_gene
     if not allow_generation and mock_generation._shortfall(seeds, plan):
         return [], plan, sum(s['minutes'] for s in plan)
     kwargs = {'seed_questions': seeds} if seeds else {}
-    return mock_generation.build_pool_booklet(major_key,
+    questions, built_plan, duration = mock_generation.build_pool_booklet(major_key,
         'konkur' if difficulty == DUEL_DIFFICULTY else difficulty, user_id=POOL_OWNER_ID,
         report=_progress_reporter(), grade=grade, plan=plan, topics=topics,
         on_verified=lambda questions: _harvest_questions(db, questions, major_key, difficulty, grade),
         **kwargs)
+    # Drafts can independently reproduce existing questions, and a student can
+    # use/report a seed while generation runs. Refresh their status before stock
+    # is published. The bank retains every good question, even if not fresh.
+    reserved = _reserved_stock_ids(db)
+    fresh = []
+    for q in questions:
+        row = db.scalar(select(BankQuestion).where(
+            BankQuestion.fingerprint == question_bank._fingerprint(q, POOL_OWNER_ID)))
+        if row and (row.id in reserved or row.uses or row.status != 'active' or not row.verified):
+            continue
+        fresh.append({**q, '_id':len(fresh) + 1})
+    short = mock_generation._shortfall(fresh, plan)
+    if len(fresh) < sum(s['questions'] for s in plan) * mock_generation.POOL_MIN_FILL or any(
+            produced == 0 for _, _, produced in short):
+        return [], built_plan, duration
+    if questions and len(fresh) < len(questions):
+        duration = max(1, round(duration * len(fresh) / len(questions)))
+    return fresh, built_plan, duration
 
 
 def generate_one(db, major_key: str, difficulty: str, *, grade="", total_questions=0,

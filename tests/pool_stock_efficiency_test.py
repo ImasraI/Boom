@@ -89,3 +89,20 @@ def test_ranked_and_practice_cannot_reserve_the_same_stock(db, monkeypatch):
     monkeypatch.setattr(mg,'generate_booklet', lambda *a, **kw: pytest.fail('No API'))
     assert pool.assemble_stock(db,'riazi',pool.DUEL_DIFFICULTY)
     assert not pool.assemble_stock(db,'riazi','konkur')
+
+
+@pytest.mark.parametrize('blocked', ['reserved', 'reported', 'used'])
+def test_regenerated_old_question_cannot_reenter_fresh_stock(db, monkeypatch, blocked):
+    plan=[{'name':'ریاضی','questions':3,'minutes':30}]
+    monkeypatch.setattr(pool,'generation_plan',lambda *a,**kw: plan)
+    questions=[question('ریاضی',n) for n in range(3)]
+    old=archive(db,questions,status='pending_use' if blocked=='reserved' else 'bank_only')
+    if blocked!='reserved':
+        for row in db.query(BankQuestion):
+            if blocked=='reported': row.status='corrupt'
+            else: row.uses=1
+        db.commit()
+    monkeypatch.setattr(mg,'generate_booklet', lambda *a,**kw: [dict(q) for q in questions])
+    monkeypatch.setattr(mg,'verify_and_repair_booklet', lambda rows,*a,**kw: rows)
+    assert not pool.generate_one(db,'riazi','konkur')
+    assert db.query(GeneratedMock).filter_by(status='pending_use').count()==(blocked=='reserved')
