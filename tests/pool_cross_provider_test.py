@@ -178,8 +178,48 @@ def test_daily_draft_failure_stops_remaining_batches(monkeypatch):
     drafter=Replies([json.dumps({"questions":[question(1),question(2)]}), ''])
     monkeypatch.setattr(mg,"retrieve_book_context",lambda *a,**k:"source")
     monkeypatch.setattr(mg,"get_pool_llm_client",lambda:drafter)
-    assert mg._generate_subject_questions(7,{"name":"ریاضی","questions":8},[],"konkur",6000,60)==[]
+    out = mg._generate_subject_questions(7,{"name":"ریاضی","questions":8},[],"konkur",6000,60)
+    assert [q['text'] for q in out] == ['سوال مستقل 1', 'سوال مستقل 2']
+    assert all(q.get('verification_status') != 'verified' for q in out)
     assert len(drafter.prompts)==2
+
+
+def test_draft_quota_preserves_finished_subjects_for_independent_verification(monkeypatch):
+    drafter = Replies([json.dumps({'questions':[question(1), question(2)]}), ''])
+    solver = Replies(['{"answers":{"1":0,"2":0}}'])
+    monkeypatch.setattr(mg, 'retrieve_book_context', lambda *a, **k:'source')
+    monkeypatch.setattr(mg, 'get_pool_llm_client', lambda:drafter)
+    monkeypatch.setattr(mg, 'get_pool_verifier_client', lambda:solver)
+    monkeypatch.setattr(mg, 'pad_booklet', lambda rows: rows)  # Keep deterministic option positions.
+    harvested = []
+    plan = [{'name':'ریاضی','questions':2,'minutes':2},
+            {'name':'فیزیک','questions':2,'minutes':2},
+            {'name':'شیمی','questions':2,'minutes':2}]
+    kept, _, _ = mg.build_pool_booklet('riazi', plan=plan, on_verified=harvested.extend)
+    assert kept == []  # Incomplete papers never become ready mocks.
+    assert len(drafter.prompts) == 2 and len(solver.prompts) == 1
+    assert len(harvested) == 2 and all(q['verification_status']=='verified' for q in harvested)
+
+
+def test_failed_repair_keeps_other_independent_batch_verdicts(monkeypatch):
+    solver = Replies(['{"answers":{"1":1,"2":0,"3":0}}'])
+    drafter = Replies([''])
+    monkeypatch.setattr(mg, 'retrieve_book_context', lambda *a, **k:'source')
+    monkeypatch.setattr(mg, 'get_pool_llm_client', lambda:drafter)
+    monkeypatch.setattr(mg, 'get_pool_verifier_client', lambda:solver)
+    out = mg.verify_and_repair_booklet([question(1),question(2),question(3)],0)
+    assert [q['_id'] for q in out] == [2,3]
+    assert len(drafter.prompts) == 1 and len(solver.prompts) == 1
+
+
+def test_daily_limit_during_short_batch_retry_keeps_parseable_candidates(monkeypatch):
+    drafter = Replies([json.dumps({'questions':[question(1)]}), ''])
+    monkeypatch.setattr(mg,'get_settings',lambda:configuration(POOL_GENERATION_BATCH_SIZE=4))
+    monkeypatch.setattr(mg,'retrieve_book_context',lambda *a,**k:'source')
+    monkeypatch.setattr(mg,'get_pool_llm_client',lambda:drafter)
+    out = mg.generate_booklet(0,[{'name':'ریاضی','questions':4,'minutes':4}])
+    assert len(out) == 1 and len(drafter.prompts) == 2
+    assert out[0].get('verification_status') != 'verified'
 
 
 def test_solver_receives_chart_data_without_generator_metadata(monkeypatch):

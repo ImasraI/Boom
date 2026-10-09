@@ -708,6 +708,7 @@ def verify_and_repair_booklet(
 
     out: List[dict] = []
     seen_texts: set = set()
+    repairs_blocked = False
     for q, verdict in _batch_verdicts(client, questions, timeout, report):
         if _missing_visible_reference(q):
             verdict = None  # A solver guess cannot certify a missing visual.
@@ -719,14 +720,15 @@ def verify_and_repair_booklet(
             continue
 
         best, best_score = q, _score(verdict, q["answer"])
-        for attempt in range(1, max_regens + 1):
+        for attempt in range(1, 1 if repairs_blocked else max_regens + 1):
             if generator is None:
                 generator = get_pool_llm_client()
             repl = _generate_replacement(generator, user_id, q, difficulty,
                                          gen_max_tokens, timeout)
             if getattr(generator, "last_error", ""):
                 _report(report, "provider_error", message=generator.last_error)
-                return out
+                repairs_blocked = True
+                break  # Remaining independent verdicts can still certify good questions.
             if repl is None:
                 logger.warning("Verify: replacement attempt %d for a %s "
                                "question produced nothing parseable.",
@@ -741,7 +743,8 @@ def verify_and_repair_booklet(
             repl_verdict = _verify_question(client, repl, timeout)
             if getattr(client, "last_error", ""):
                 _report(report, "provider_error", message=client.last_error)
-                return out
+                repairs_blocked = True
+                break
             s = _score(repl_verdict, repl["answer"])
             if s > best_score:
                 best, best_score = repl, s
@@ -823,7 +826,7 @@ def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
         batch = _draft_subject_batch(client, row, target, row_topics,
                                      difficulty, context, budget, timeout, report, grade, rows)
         if batch is None:
-            return []
+            break  # Keep completed batches for the independent verifier and bank.
         rows.extend(batch)
     rows = pad_booklet(rows[:count])
     for r in rows:
@@ -848,8 +851,12 @@ def _draft_subject_batch(client, row, count, row_topics, difficulty, context,
             reason = getattr(client, "last_error", "") or "provider returned no response"
             logger.error("Subject %s: provider refused the call (%s).", subject, reason)
             _report(report, "provider_error", message=reason, subject=subject)
-            return None
-        rows = parse_booklet(raw)[:count]
+            if rows:
+                _report(report, "generated", count=len(rows), subject=subject, target=count)
+            return rows or None
+        parsed = parse_booklet(raw)[:count]
+        if len(parsed) > len(rows):
+            rows = parsed
         if len(rows) >= max(1, (count + 1) // 2):
             break
         logger.warning("Subject %s: attempt %d produced %d/%d valid questions.",
@@ -900,10 +907,9 @@ def generate_booklet(
         rows = _generate_subject_questions(
             user_id, row, topics, difficulty, max_tokens, timeout, report=track,
             grade=grade)
-        if terminal_error:
-            # No subsequent subjects or verification calls can clear a daily limit.
-            return []
         if not rows:
+            if terminal_error:
+                break
             logger.warning("Booklet: subject %s produced nothing; skipping.",
                            row["name"])
             continue
@@ -911,6 +917,10 @@ def generate_booklet(
             r["_id"] = next_id
             next_id += 1
             questions.append(r)
+        if terminal_error:
+            # Stop drafting, but pass completed questions to the separately
+            # configured solver. Only verified survivors can enter the bank.
+            break
 
     if not questions:
         logger.warning("Booklet generation returned no valid questions "
