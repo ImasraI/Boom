@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiUrl, authHeaders, readApiError } from "../api";
 import { RichText } from "../richText";
+import QuestionFigure from "./QuestionFigure";
+import type { QuestionFigureData } from "../questionFigures";
 
 interface Item {
   id: number; major: string; grade: string; difficulty: string; note: string; status: string;
-  content: { text: string; options: string[]; answer: number; explanation?: string; subject?: string; topic?: string; book?: string; page?: number };
+  content: { text: string; options: string[]; answer: number; explanation?: string; subject?: string; topic?: string; book?: string; page?: number; figure?: QuestionFigureData };
   reports: { id: number; reason: string; mock_id: number; created_at: string }[];
 }
 
@@ -54,6 +56,7 @@ export default function CorruptQuestions() {
     {items.map(q => <article key={q.id} className="border-t border-[var(--border)] mt-5 pt-4 space-y-3">
       <p className="text-xs text-[var(--muted)]">#{q.id} · {q.content.subject} · {q.content.topic} · {q.major} {q.grade}</p>
       <div className="text-sm leading-relaxed text-[var(--text)]"><RichText text={q.content.text} /></div>
+      <QuestionFigure figure={q.content.figure} />
       <ol className="grid gap-2 text-sm text-[var(--text)]">{q.content.options.map((o, i) => <li key={i} className={i === q.content.answer ? "text-[var(--accent)] font-bold" : ""}>{i + 1}. <RichText text={o} /> {i === q.content.answer ? "← کلید ثبت‌شده" : ""}</li>)}</ol>
       {q.content.explanation && <div className="text-xs text-[var(--muted)]"><RichText text={q.content.explanation} /></div>}
       {q.content.book && <p className="text-xs text-[var(--muted)]">منبع: {q.content.book} {q.content.page ? `· صفحه ${q.content.page}` : ""}</p>}

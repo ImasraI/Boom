@@ -3,6 +3,8 @@ import { NavFn, SignupData } from "../types"
 import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
+import QuestionFigure from "../components/QuestionFigure"
+import type { QuestionFigureData } from "../questionFigures"
 import { requestMockGeneration } from "../mockGeneration"
 
 type Phase = "config" | "loading" | "ready" | "test" | "result"
@@ -13,6 +15,7 @@ interface MockQuestion {
   topic?: string
   text: string
   options: string[]
+  figure?: QuestionFigureData
 }
 
 interface MockInfo {
@@ -230,6 +233,7 @@ function TestRunner({ info, questions, onFinish, onExit, error }: {
             <span className="inline-block px-2.5 py-1 rounded-lg bg-[var(--chip)] text-[var(--muted)] text-[10px] font-bold mb-3">{q.topic}</span>
           )}
           <p className="text-[15px] font-bold text-[var(--text)] leading-relaxed mb-5 text-right whitespace-pre-wrap"><RichText text={q?.text ?? ""} /></p>
+          <QuestionFigure figure={q?.figure} />
           <div className="space-y-2.5">
             {q?.options.map((opt, i) => {
               const sel = answers[String(q.id)] === i
@@ -389,6 +393,7 @@ function ResultView({ result, mockId, onBack, onRetry }: { result: MockResult; m
                   </p>
                 </div>
                 <div className="space-y-1.5 pr-8">
+                  <QuestionFigure figure={q.figure} />
                   {q.options.map((opt, oi) => (
                     <p key={oi} className={`text-[12px] font-medium ${
                       oi === q.answer ? "text-green-600 dark:text-green-400 font-bold"

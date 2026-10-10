@@ -3,6 +3,8 @@ import { NavFn, SignupData } from "../types"
 import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
+import QuestionFigure from "../components/QuestionFigure"
+import type { QuestionFigureData } from "../questionFigures"
 
 type Phase = "lobby" | "queued" | "playing" | "finished" | "board" | "scheduled"
 
@@ -63,6 +65,7 @@ interface AQ {
   subject: string
   text: string
   options: string[]
+  figure?: QuestionFigureData
 }
 
 /* ---------------- Scheduled duels ---------------- */
@@ -420,6 +423,7 @@ function DuelRunner({ match, onDone, onExit }: {
         <div className="max-w-[560px] mx-auto">
           <p className="text-[11px] font-bold text-[var(--muted-2)] mb-2">سوال {current + 1} از {questions.length} — {q.subject}</p>
           <p className="text-[15px] font-bold text-[var(--text)] leading-relaxed mb-5 text-right whitespace-pre-wrap"><RichText text={q.text} /></p>
+          <QuestionFigure figure={q.figure} />
           {match.mock_id && <ReportQuestion key={q.id} mockId={match.mock_id} questionId={q.id} />}
           <div className="space-y-2.5">
             {q.options.map((opt, i) => {

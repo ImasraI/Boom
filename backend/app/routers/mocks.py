@@ -473,6 +473,7 @@ def get_mock(
                 "topic": q.get("topic"),
                 "text": q.get("text"),
                 "options": q.get("options"),
+                "figure": q.get("figure") or {"type": "none", "data": {}},
             }
             for q in visible
         ],
@@ -615,6 +616,7 @@ def _submission_response(attempt, result, questions, payload):
                 "options": q.get("options"),
                 "answer": q.get("answer"),
                 "explanation": q.get("explanation"),
+                "figure": q.get("figure") or {"type": "none", "data": {}},
                 "your_answer": payload.answers.get(str(q.get("_id") or q.get("id"))),
             }
             for q in questions

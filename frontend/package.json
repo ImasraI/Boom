@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "node --test progress-tests.cjs chat-markdown-tests.mjs panel-tests.cjs panel-render-tests.mjs",
+    "test": "node --test progress-tests.cjs chat-markdown-tests.mjs panel-tests.cjs panel-render-tests.mjs question-figure-tests.mjs",
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",

@@ -36,15 +36,41 @@ def pool_state():
     pool_core.finish_progress()
 
 
-def make_mock(db, *, owner=0, status="pending_use", difficulty="konkur", count=3, label="old", grade="دوازدهم", verified=True):
+def make_mock(db, *, owner=0, status="pending_use", difficulty="konkur", count=3, label="old", grade="دوازدهم", verified=True, figure=None):
     questions = [{"_id": i + 1, "subject": "ریاضی", "topic": "تابع", "text": f"{label} question {i}",
         "options": ["a", "b", "c", "d"], "answer": 1, "explanation": "why",
         "verification_status": "verified" if verified else "unverified"} for i in range(count)]
+    if figure is not None:
+        for question in questions:
+            question['figure'] = figure
     row = GeneratedMock(student_id=owner, title=label, major=pool_core.CANONICAL_MAJOR["riazi"],
         grade=grade, duration_minutes=10, difficulty=difficulty, status=status,
         bank_scope="shared" if owner == 0 else "private", questions=json.dumps(questions))
     db.add(row); db.flush(); bank.index_mock(db, row); db.commit()
     return row
+
+
+def test_question_diagram_survives_storage_public_booklet_and_answer_review(db):
+    figure = {'type':'geometry','data':{'shape':'triangle',
+        'points':{'A':[0,0],'B':[4,0],'C':[0,3]},
+        'side_lengths':{'AB':4,'AC':3,'BC':5},'marks':{'right_angle_at':'A'}}}
+    mock = make_mock(db, owner=1, status='claimed', count=1, figure=figure)
+    content = json.loads(db.query(BankQuestion).one().content)
+    assert content['figure'] == figure
+    visible = mocks.get_mock(mock.id, db.get(User,1), db)['questions'][0]
+    assert visible['figure'] == figure
+    assert 'answer' not in visible and 'explanation' not in visible
+    result = mocks.submit_mock(mock.id, mocks.SubmitPayload(answers={'1':1}), db.get(User,1), db)
+    assert result['correct'] == 1 and result['review'][0]['figure'] == figure
+    assert result['review'][0]['answer'] == 1
+    with pytest.raises(HTTPException) as error:
+        mocks.get_mock(mock.id, db.get(User,2), db)
+    assert error.value.status_code == 404
+
+
+def test_legacy_question_without_diagram_remains_readable(db):
+    mock = make_mock(db, owner=1, status='claimed', count=1)
+    assert mocks.get_mock(mock.id, db.get(User,1), db)['questions'][0]['figure'] == {'type':'none','data':{}}
 
 
 PLAN = [{"name": "ریاضی", "questions": 2, "minutes": 10}]
