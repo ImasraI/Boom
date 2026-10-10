@@ -54,6 +54,20 @@ The synchronous `/api/mocks/generate` endpoint remains for existing API clients.
 
 ## Gemini credential failover
 
+Admins can add credentials from **کلیدهای سرویس ساخت آزمون** in the Admin panel.
+Choose Groq drafting, Gemini answer verification, or Gemini drafting. The form
+appends to the corresponding private `backend/.env` backup list; it does not
+switch providers/models or change chat, planning, OCR, or embedding credentials.
+Inactive roles are identified in the panel and require server configuration
+before use. Existing keys are never displayed or returned by the API.
+
+`GET /api/admin/pool/credentials` exposes counts and remembered quota/access
+status only. `POST` accepts `{provider, stage, key}` with admin authentication.
+Duplicate additions are harmless. Writes are atomic and locked, and new pool
+clients pick up the keys without a restart. A waiting selected run is awakened
+to recheck availability; its selection and existing quota blocks are preserved.
+Status is based on observed errors, not a new provider validation request.
+
 Pool generation supports explicitly configured Gemini backup credentials.
 Set `POOL_LLM_PROVIDER=gemini`, keep the primary key in `POOL_LLM_API_KEY`,
 and add ordered backup keys to the comma-separated `POOL_GEMINI_API_KEYS`

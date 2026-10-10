@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl, apiJson, authHeaders, readApiError } from "../api";
 import type { NavFn } from "../types";
 import CorruptQuestions from "../components/CorruptQuestions";
+import PoolCredentials from "../components/PoolCredentials";
 
 interface AllowEntry { id: number; phone: string; note: string; created_at: string | null }
 interface Usage { features: Record<string, number>; tokens_used_today: number }
@@ -551,6 +552,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
           </p>
         )}
       </section>
+      <PoolCredentials onChanged={() => { void load(); }} />
       <CorruptQuestions />
     </div>
   );

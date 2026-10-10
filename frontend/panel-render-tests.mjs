@@ -47,6 +47,11 @@ test('Admin pool renders unlimited and targeted production controls', async () =
   assert.match(html, /مباحث هدف/);
   assert.match(html, /راه‌اندازی مجدد سرور ادامه می‌دهد/);
   assert.match(html, /موجودی سوال‌های قابل استفاده/);
+  assert.match(html, /کلیدهای سرویس ساخت آزمون/);
+  assert.match(html, /Gemini — بررسی پاسخ/);
+  assert.match(html, /Groq — تولید سؤال/);
+  assert.match(html, /type="password"/);
+  assert.match(html, /افزودن کلید/);
 });
 
 test('old unverified pool booklets are described as unavailable, not awaiting approval', async () => {

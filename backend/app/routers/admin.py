@@ -17,7 +17,7 @@ import shutil
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,6 +34,28 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"],
                    dependencies=[Depends(require_admin)])
+
+
+@router.get("/pool/credentials")
+def pool_credentials_status(response: Response):
+    from ..rag import pool_credentials
+    response.headers["Cache-Control"] = "no-store"
+    return pool_credentials.snapshot()
+
+
+@router.post("/pool/credentials")
+async def add_pool_credential(request: Request, response: Response):
+    from ..rag import pool_credentials
+    # Parse here so malformed secret bodies are never echoed in 422 errors.
+    try:
+        payload = await request.json()
+    except (ValueError, UnicodeError):
+        raise HTTPException(400, "درخواست معتبر نیست.") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "درخواست معتبر نیست.")
+    result = pool_credentials.add(payload.get("provider"), payload.get("stage"), payload.get("key"))
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
 @router.get("/metrics")

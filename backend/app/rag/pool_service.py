@@ -94,6 +94,11 @@ def shutdown():
     _wake.set()
 
 
+def notify_credentials_changed():
+    """Recheck a waiting run without resetting its quota history or selection."""
+    _wake.set()
+
+
 def _run():
     failures = 0
     owned = False
