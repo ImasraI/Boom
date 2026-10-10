@@ -130,6 +130,9 @@ type DragMode = "move" | "resize"
 
 interface DragState {
   id: string
+  pointerId: number
+  original: ScheduleBlock | StaticInstance
+  template?: StaticBlock
   mode: DragMode
   originX: number
   originY: number
@@ -429,22 +432,22 @@ export default function Schedule({
       skipPersistRef.current = false
       return
     }
-    if (mountedToken.current !== localStorage.getItem("boom-token")) return;
+    if (drag || mountedToken.current !== localStorage.getItem("boom-token")) return;
     const iso = toISO(weekStartRef.current);
     if (JSON.stringify(loadBlocks(weekStartRef.current)) !== JSON.stringify(blocks)) {
       try { saveWeekBlocks(iso, blocks); } catch (error) { setPlanMessage(String(error)); }
     }
-  }, [blocks])
+  }, [blocks, drag])
 
   // Persist static templates separately (they are global / yearly).
   useEffect(() => {
-    if (mountedToken.current !== localStorage.getItem("boom-token")) return;
+    if (drag || mountedToken.current !== localStorage.getItem("boom-token")) return;
     if (JSON.stringify(loadStatics()) !== JSON.stringify(statics)) saveStaticTemplates(statics);
-  }, [statics])
+  }, [statics, drag])
 
   useEffect(() => {
     function reload() {
-      if (mountedToken.current !== localStorage.getItem("boom-token")) return;
+      if (dragRef.current || mountedToken.current !== localStorage.getItem("boom-token")) return;
       setBlocks(loadBlocks(weekStartRef.current));
       setStatics(loadStatics());
       if (calendarSyncError()) setPlanMessage(calendarSyncError());
@@ -755,6 +758,31 @@ export default function Schedule({
     const deltaDay = slot.day - current.originDay
     const deltaHour = slot.hour - current.originHour
 
+    if (current.template) {
+      const original = current.template;
+      const day = clamp(current.startDay + deltaDay, 0, DAYS.length - 1);
+      const shift = day - current.startDay;
+      const candidate: StaticBlock = {
+        ...original,
+        startHour: current.mode === "resize" ? current.startHour : clamp(current.startHour + deltaHour, HOUR_START, HOUR_START + TOTAL_HOURS - current.startDuration),
+        duration: current.mode === "resize" ? clamp(current.startDuration + deltaHour, MIN_DURATION, maxDurationForHour(current.startHour)) : current.startDuration,
+        ...(original.date ? { date: toISO(addDays(fromISO(original.date), shift)) } : { day }),
+        ...(original.recurrence?.weekdays ? { recurrence: { ...original.recurrence, weekdays: original.recurrence.weekdays.map(d => (d + shift + DAYS.length) % DAYS.length) } } : {}),
+      };
+      setStatics(prev => {
+        const next = prev.map(t => t.id === original.id ? candidate : t);
+        let savedWeeks: string[] = [];
+        try { savedWeeks = JSON.parse(accountStorage.getItem("boom-calendar-weeks") || "[]"); } catch { /* current week still checked */ }
+        const currentWeek = toISO(weekStartRef.current);
+        const conflict = [...new Set([currentWeek, ...savedWeeks])].some(iso => hasScheduleOverlap(
+          iso === currentWeek ? blocksRef.current : loadBlocks(fromISO(iso)),
+          staticInstancesForWeek(next, fromISO(iso)),
+        ));
+        return conflict ? prev : next;
+      });
+      return;
+    }
+
     setBlocks((prev) =>
       prev.map((block) => {
         if (block.id !== current.id) return block
@@ -785,15 +813,20 @@ export default function Schedule({
     block: ScheduleBlock,
     mode: DragMode,
   ) {
-    if (genBusyRef.current[toISO(weekStartRef.current)]) return;
+    if (!e.isPrimary || e.button !== 0 || genBusyRef.current[toISO(weekStartRef.current)]) return;
     e.preventDefault()
-    e.stopPropagation()
+    e.stopPropagation();
+    // The grid survives moving a recurrence to another date; its face may remount.
+    (gridRef.current ?? e.currentTarget).setPointerCapture(e.pointerId)
     const originSlot = slotFromPoint(e.clientX, e.clientY) ?? {
       day: block.day,
       hour: block.startHour,
     }
     const next: DragState = {
       id: block.id,
+      pointerId: e.pointerId,
+      original: block,
+      template: isStaticInstance(block) ? statics.find(t => t.id === block.templateId) : undefined,
       mode,
       originX: e.clientX,
       originY: e.clientY,
@@ -813,33 +846,50 @@ export default function Schedule({
 
     function onMove(e: PointerEvent) {
       const current = dragRef.current
-      if (!current) return
+      if (!current || e.pointerId !== current.pointerId) return
       applyDrag(current, e.clientX, e.clientY)
     }
 
-    function onUp() {
+    function onUp(e: PointerEvent) {
       const current = dragRef.current
+      if (!current || e.pointerId !== current.pointerId) return
       dragRef.current = null
       setDrag(null)
-      if (!current) return
       if (current.moved) {
         suppressClickRef.current = true
+        window.setTimeout(() => { suppressClickRef.current = false; }, 0)
         return
       }
-      const block = blocksRef.current.find((b) => b.id === current.id)
-      if (block) openEdit(block)
+      if (isStaticInstance(current.original)) openEditStatic(current.original);
+      else {
+        const block = blocksRef.current.find((b) => b.id === current.id)
+        if (block) openEdit(block)
+      }
+    }
+
+    function onCancel(e: PointerEvent) {
+      const current = dragRef.current;
+      if (!current || e.pointerId !== current.pointerId) return;
+      dragRef.current = null;
+      setDrag(null);
+      if (current.template) setStatics(prev => prev.map(t => t.id === current.template!.id ? current.template! : t));
+      else setBlocks(prev => prev.map(b => b.id === current.id ? current.original : b));
     }
 
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
+    window.addEventListener("pointercancel", onCancel)
     return () => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
+      window.removeEventListener("pointercancel", onCancel)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drag])
+  }, [drag?.id])
 
   const draggingId = drag?.id ?? null
+  const isBlockDragging = (block: ScheduleBlock | StaticInstance) => block.id === draggingId ||
+    (isStaticInstance(block) && !!drag?.template && block.templateId === drag.template.id)
   const todayColumn = weekdayOf(today)
   const isCurrentWeek = currentOffset === 0
   const weekNumbers = MAX_WEEKS * 2 + 1
@@ -1037,9 +1087,10 @@ export default function Schedule({
               isStaticInstance(b) ? (
                 <div
                   key={b.id}
-                  onClick={() => openEditStatic(b)}
-                  title={`${b.title}\n${formatTime(b.startHour)} – ${formatTime(b.startHour + b.duration)}`}
-                  className="schedule-block-frame pointer-events-auto absolute z-10 cursor-pointer"
+                  onPointerDown={(e) => startInteraction(e, b, "move")}
+                  onClick={(e) => e.stopPropagation()}
+                  title={`${b.title}\n${formatTime(b.startHour)} – ${formatTime(b.startHour + b.duration)}\nجابجایی این فعالیت، زمان تمام تکرارهای آن را تغییر می‌دهد.`}
+                  className={`schedule-block-frame pointer-events-auto absolute z-10 ${isBlockDragging(b) ? "is-dragging z-30" : ""}`}
                   style={
                     {
                       "--block-color": resolveColor(b.color),
@@ -1051,7 +1102,7 @@ export default function Schedule({
                     } as React.CSSProperties
                   }
                 >
-                  <div className={`schedule-block schedule-static overflow-hidden px-1.5 ${b.duration < 0.5 ? "py-0 text-[9px]" : "py-1 text-[11px]"}`}>
+                  <div className={`schedule-block schedule-static overflow-hidden px-1.5 ${b.duration < 0.5 ? "py-0 text-[9px]" : "py-1 text-[11px]"} ${isBlockDragging(b) ? "is-dragging" : ""}`}>
                     <div className={`font-bold truncate flex items-center gap-1 pointer-events-none ${b.duration < 0.5 ? "leading-none" : "leading-snug"}`}>
                       <span className="text-[10px] leading-none">↻</span>
                       <span className="truncate">{b.title}</span>
@@ -1060,6 +1111,7 @@ export default function Schedule({
                       {formatTime(b.startHour)} –{" "}
                       {formatTime(b.startHour + b.duration)}
                     </div>}
+                    <div className="schedule-block-resize-handle" onPointerDown={(e) => startInteraction(e, b, "resize")} />
                   </div>
                 </div>
               ) : (

@@ -24,8 +24,7 @@
   --success-bg: #EAF5EC;
   --success-text: #6B9E7A;
   --neutral-chip: #F5F5F5;
-  /* Timeblock shadows: hard flat offset, exactly like the original weekly
-     UI. The token is a COLOR; the 4px/4px offsets live in the block rules. */
+  /* Hard timeblock back planes. Face offsets and the gap live in block rules. */
   --block-shadow: #1b1c1a;
   /* Elevation + focus (UI refresh) */
   --accent-rgb: 196 113 74;
@@ -452,12 +451,12 @@ input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.5; }
   top: 0;
   left: 0;
   right: 0;
-  height: var(--block-h);
+  height: calc(var(--block-h) - 4px);
   background-color: var(--block-color, #e2c983);
   color: #1b1c1a;
   border: 1px solid #1b1c1a;
   border-radius: 0;
-  transform: translate(-4px, -4px);
+  transform: translate(-4px, -7px);
   cursor: grab;
   touch-action: none;
   transition: transform 0.1s ease-in-out,
@@ -470,32 +469,32 @@ html.dark .schedule-block {
 }
 
 .schedule-block:hover:not(.is-dragging) {
-  transform: translate(-5px, -5px);
+  transform: translate(-5px, -8px);
   /* Expand the face for long titles while the time-aligned back plane stays fixed. */
   height: auto !important;
-  min-height: var(--block-h) !important;
+  min-height: calc(var(--block-h) - 4px) !important;
   overflow: visible;
 }
 
 /* Keep the resize handle at the scheduled bottom even when the face expands. */
 .schedule-block:hover:not(.is-dragging) .schedule-block-resize-handle {
   bottom: auto;
-  top: calc(var(--block-h) - 10px);
+  top: calc(var(--block-h) - 14px);
 }
 
 .schedule-block:active:not(.is-dragging) {
-  transform: translate(-1px, -1px);
+  transform: translate(-1px, -5px);
 }
 
 .schedule-block.is-dragging {
   cursor: grabbing;
-  transform: translate(-2px, -2px);
+  transform: translate(-2px, -5px);
 }
 
 .schedule-block.schedule-static {
   border-style: dashed;
   border-width: 1.5px;
-  cursor: pointer;
+  cursor: grab;
   opacity: 0.92;
 }
 
