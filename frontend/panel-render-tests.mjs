@@ -64,6 +64,17 @@ test('old unverified pool booklets are described as unavailable, not awaiting ap
   assert.doesNotMatch(empty, /دفترچه آماده نیست/);
 });
 
+test('pool credentials identify verifier quota as the blocker despite available Groq keys', async () => {
+  const {PoolCredentialBlocker} = await vite.ssrLoadModule('/src/components/PoolCredentials.tsx');
+  const html = renderToStaticMarkup(React.createElement(PoolCredentialBlocker, {
+    health:{blocked:true,provider:'gemini',stage:'verification',retry_at:'2026-10-11T07:00:00Z'},
+  }));
+  assert.match(html, /تولید منتظر بررسی پاسخ با Gemini/);
+  assert.match(html, /افزودن کلید Groq این توقف را برطرف نمی‌کند/);
+  assert.match(html, /بررسی دوباره پس از/);
+  assert.equal(renderToStaticMarkup(React.createElement(PoolCredentialBlocker, {health:{blocked:false}})), '');
+});
+
 test('Knowledge graph loads without a profile and describes book-sourced titles', async () => {
   const {default:KnowledgeGraph} = await vite.ssrLoadModule('/src/pages/KnowledgeGraph.tsx');
   const html = renderToStaticMarkup(React.createElement(KnowledgeGraph, {nav(){},userData:null}));

@@ -111,9 +111,30 @@ def test_new_verifier_key_preserves_existing_quota_and_saved_selection(setup):
     result = credentials.add("gemini", "verification", new)
     group = next(g for g in result["groups"] if g["stage"] == "verification")
     assert group["daily_limited"] == 1 and group["available"] == 1 and group["active"]
+    assert result["health"]["blocked"] is False
     assert provider_quota.blocked_quota(identity)
     assert pool_service.snapshot() == selection
     assert old not in json.dumps(result) and new not in json.dumps(result)
+
+
+def test_adding_groq_does_not_unblock_exhausted_gemini_verification(setup):
+    path, app, client = setup
+    verifier = secret("gemini", "B")
+    credentials.add("gemini", "verification", verifier)
+    settings = credentials.get_settings()
+    identity = provider_quota.quota_identity(settings.GEMINI_BASE_URL, settings.GEMINI_MODEL_NAME, verifier)
+    provider_quota._BLOCKS[identity] = (time.time() + 3600, "daily limit")
+    result = credentials.add("groq", "generation", secret())
+    assert result["added"]
+    assert result["health"]["blocked"]
+    assert result["health"]["provider"] == "gemini"
+    assert result["health"]["stage"] == "verification"
+    assert result["health"]["retry_at"]
+    # A genuinely available verifier key wakes the same saved run and clears
+    # the overall blocker, without clearing the exhausted key's history.
+    result = credentials.add("gemini", "verification", secret("gemini", "C"))
+    assert result["health"]["blocked"] is False
+    assert provider_quota.blocked_quota(identity)
 
 
 def test_concurrent_additions_are_not_lost(setup):

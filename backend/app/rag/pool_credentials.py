@@ -82,7 +82,7 @@ def snapshot():
             else:
                 counts["available"] += 1
         groups.append(dict(provider=provider, stage=stage, active=active, total=len(keys), **counts))
-    return {"groups": groups}
+    return {"groups": groups, "health": provider_quota.pool_quota_status(settings=settings)}
 
 
 def add(provider, stage, key):

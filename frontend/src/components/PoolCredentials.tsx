@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiJson } from "../api";
 
 interface CredentialGroup {
@@ -14,12 +14,31 @@ interface CredentialGroup {
 interface CredentialStatus {
   groups: CredentialGroup[];
   added?: boolean;
+  health?: CredentialHealth;
+}
+interface CredentialHealth {
+  blocked: boolean;
+  provider?: string;
+  stage?: string;
+  retry_at?: string;
 }
 const choices = [
   { value: "groq:generation", label: "Groq — تولید سؤال" },
   { value: "gemini:verification", label: "Gemini — بررسی پاسخ" },
   { value: "gemini:generation", label: "Gemini — تولید سؤال" },
 ];
+
+export function PoolCredentialBlocker({ health }: { health?: CredentialHealth }) {
+  if (!health?.blocked) return null;
+  const verifying = health.stage === "verification";
+  return <div role="status" className="border-s-2 border-amber-500 ps-3 text-xs leading-relaxed space-y-1">
+    <p className="font-bold">تولید منتظر {verifying ? "بررسی پاسخ" : "تولید سؤال"} با {health.provider === "gemini" ? "Gemini" : "Groq"} است.</p>
+    <p>{verifying && health.provider === "gemini" ?
+      "افزودن کلید Groq این توقف را برطرف نمی‌کند؛ یک کلید Gemini با سهمیهٔ قابل استفاده برای «بررسی پاسخ» اضافه کنید یا منتظر بازنشانی سهمیه بمانید." :
+      "کلیدِ سرویس همین مرحله باید سهمیه و دسترسی قابل استفاده داشته باشد؛ کلید سرویس دیگر این توقف را برطرف نمی‌کند."}</p>
+    {health.retry_at && <p>بررسی دوباره پس از: {new Date(health.retry_at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" })}</p>}
+  </div>;
+}
 
 export default function PoolCredentials({ onChanged }: { onChanged: () => void }) {
   const [status, setStatus] = useState<CredentialStatus | null>(null);
@@ -29,9 +48,15 @@ export default function PoolCredentials({ onChanged }: { onChanged: () => void }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const choiceTouched = useRef(false);
   async function refresh() {
     setLoading(true); setError("");
-    try { setStatus(await apiJson<CredentialStatus>("/api/admin/pool/credentials")); }
+    try {
+      const result = await apiJson<CredentialStatus>("/api/admin/pool/credentials");
+      setStatus(result);
+      const suggested = `${result.health?.provider}:${result.health?.stage}`;
+      if (!choiceTouched.current && result.health?.blocked && choices.some(item => item.value === suggested)) setChoice(suggested);
+    }
     catch { setError("وضعیت کلیدها دریافت نشد؛ دوباره تلاش کنید."); }
     finally { setLoading(false); }
   }
@@ -46,7 +71,9 @@ export default function PoolCredentials({ onChanged }: { onChanged: () => void }
       });
       setKey(""); setStatus(result);
       const active = result.groups.find(group => group.provider === provider && group.stage === stage)?.active;
-      setMessage(result.added === false ? "این کلید قبلاً برای همین کاربرد ثبت شده است." :
+      const blockedElsewhere = result.health?.blocked && `${result.health.provider}:${result.health.stage}` !== choice;
+      setMessage(result.added === false ? "این کلید قبلاً برای همین کاربرد ثبت شده است؛ کلید جدیدی اضافه نشد." :
+        blockedElsewhere ? "کلید ذخیره شد، ولی تولید هنوز به دلیل محدودیت سرویسِ مرحلهٔ دیگر متوقف است. راهنمای توقف را بررسی کنید." :
         active ? "کلید ذخیره شد؛ تولیدهای بعدی بدون راه‌اندازی مجدد از آن استفاده می‌کنند." :
         "کلید ذخیره شد. این سرویس برای کاربرد انتخاب‌شده در تنظیمات سرور فعال نیست.");
       onChanged();
@@ -62,6 +89,7 @@ export default function PoolCredentials({ onChanged }: { onChanged: () => void }
     <p className="text-xs text-[var(--muted)] leading-relaxed">
       کلیدها فقط در تنظیمات خصوصی سرور ذخیره می‌شوند. کلید جدید به فهرست همان کاربرد اضافه می‌شود؛ کلیدهای چت و برنامه‌ریزی تغییر نمی‌کنند.
     </p>
+    <PoolCredentialBlocker health={status?.health} />
     {loading && !status && <p className="text-xs text-[var(--muted)]">در حال دریافت وضعیت کلیدها…</p>}
     {status && <div className="divide-y divide-[var(--border)]">
       {status.groups.map(group => <div key={`${group.provider}:${group.stage}`} className="py-3 text-xs space-y-1">
@@ -79,7 +107,7 @@ export default function PoolCredentials({ onChanged }: { onChanged: () => void }
       <div className="flex flex-wrap gap-3 items-end">
         <label className="text-xs space-y-2 flex-1 min-w-48">
           <span className="block">سرویس و کاربرد کلید</span>
-          <select value={choice} onChange={event => setChoice(event.target.value)} disabled={busy}
+          <select value={choice} onChange={event => { choiceTouched.current = true; setChoice(event.target.value); }} disabled={busy}
             className="w-full rounded-lg border border-[var(--border)] bg-[var(--field)] px-3 py-2">
             {choices.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>

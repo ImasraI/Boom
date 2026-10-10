@@ -184,11 +184,12 @@ def _has_pool_fallback(settings) -> bool:
     return False
 
 
-def pool_quota_status() -> dict:
+def pool_quota_status(settings=None) -> dict:
     """Read health without a network request or creating another HTTP client."""
     from app.config import get_settings
 
-    settings = get_settings()
+    if settings is None:
+        settings = get_settings()
     generation = _stage_quota_status(settings)
     if generation["blocked"]:
         return {**generation, "stage": "generation",
