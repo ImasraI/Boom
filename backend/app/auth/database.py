@@ -286,6 +286,26 @@ class GeneratedMock(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class PoolDraftJob(Base):
+    """Private durable candidates, never eligible for practice or ranked."""
+    __tablename__ = "pool_draft_jobs"
+    id = Column(Integer, primary_key=True)
+    config = Column(Text, nullable=False)
+    major = Column(String, nullable=False)
+    difficulty = Column(String, nullable=False)
+    grade = Column(String, nullable=False, default="")
+    plan = Column(Text, nullable=False)
+    questions = Column(Text, nullable=False, default="[]")
+    status = Column(String, nullable=False, default="drafting", index=True)
+    question_count = Column(Integer, nullable=False, default=0)
+    verified_count = Column(Integer, nullable=False, default=0)
+    rejected_count = Column(Integer, nullable=False, default=0)
+    lease_owner = Column(String, nullable=False, default="")
+    lease_until = Column(DateTime, nullable=True)
+    retry_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class BankQuestion(Base):
     """An independent question; booklet snapshots refer to its stable id."""
     __tablename__ = "bank_questions"

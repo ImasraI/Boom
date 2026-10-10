@@ -75,7 +75,7 @@ def test_add_persists_private_key_and_wakes_run_without_changing_settings(setup)
 
 
 @pytest.mark.parametrize("payload", [
-    {"provider": "groq", "stage": "verification", "key": secret()},
+    {"provider": "cerebras", "stage": "verification", "key": secret()},
     {"provider": [], "stage": "generation", "key": secret()},
     {"provider": "groq", "stage": "generation", "key": [secret()]},
     {"provider": "gemini", "stage": "verification", "key": secret()},
@@ -109,7 +109,7 @@ def test_new_verifier_key_preserves_existing_quota_and_saved_selection(setup):
     selection = {"enabled": True, "config": {"majors": ["riazi"]}, "produced": 7, "status": "waiting_for_quota"}
     pool_service._save(selection)
     result = credentials.add("gemini", "verification", new)
-    group = next(g for g in result["groups"] if g["stage"] == "verification")
+    group = next(g for g in result["groups"] if g["stage"] == "verification" and g["provider"] == "gemini")
     assert group["daily_limited"] == 1 and group["available"] == 1 and group["active"]
     assert result["health"]["blocked"] is False
     assert provider_quota.blocked_quota(identity)

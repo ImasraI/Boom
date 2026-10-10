@@ -3,6 +3,7 @@ import { apiUrl, apiJson, authHeaders, readApiError } from "../api";
 import type { NavFn } from "../types";
 import CorruptQuestions from "../components/CorruptQuestions";
 import PoolCredentials from "../components/PoolCredentials";
+import PoolDraftQueue, { type QueueStats, type PoolWorkerState } from "../components/PoolDraftQueue";
 
 interface AllowEntry { id: number; phone: string; note: string; created_at: string | null }
 interface Usage { features: Record<string, number>; tokens_used_today: number }
@@ -31,12 +32,14 @@ interface PoolPayload {
   cancel_requested?: boolean; progress?: PoolProgress;
   provider_health?: { blocked: boolean; message?: string; retry_at?: string; stage?: string; provider?: string };
   question_bank?: Record<string, number>;
+  draft_queue?: QueueStats;
   catalog?: { key: string; label: string; subjects: string[]; ranked_subjects: string[]; mock_questions: number; ranked_questions: number }[];
   inventory?: { major: string; grade: string; difficulty: string; subject: string; verified: number; unused: number; used: number }[];
   token_usage?: { date_utc: string; groups: { stage: string; provider: string; model: string;
     responses: number; unmeasured_responses: number; empty_responses: number;
     prompt_tokens: number; completion_tokens: number; total_tokens: number }[] };
   run?: { enabled: boolean; status: string; produced: number; last_error?: string; retry_at?: string;
+    drafting?: PoolWorkerState; verification?: PoolWorkerState;
     config?: { kind: string; majors: string[]; difficulties: string[]; grade: string; count: number; total_questions: number; subjects: string[]; topics: string[] } };
 }
 interface SmsCredit { credit: number; configured: boolean; detail: string; bypass_active: boolean }
@@ -552,6 +555,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
           </p>
         )}
       </section>
+      <PoolDraftQueue queue={pool?.draft_queue} drafting={pool?.run?.drafting} verification={pool?.run?.verification} running={pool?.run?.enabled} />
       <PoolCredentials onChanged={() => { void load(); }} />
       <CorruptQuestions />
     </div>

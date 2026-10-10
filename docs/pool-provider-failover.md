@@ -54,6 +54,36 @@ The synchronous `/api/mocks/generate` endpoint remains for existing API clients.
 
 ## Gemini credential failover
 
+## Durable drafting queue and Groq verification fallback
+
+`POOL_DRAFT_QUEUE_ENABLED=True` runs a drafting worker and a separate blind
+verification worker for the selected Admin production run. Completed draft
+batches persist immediately in SQLite `pool_draft_jobs`. Candidates remain
+outside the question bank and practice/ranked inventory until verification.
+Each verification batch atomically saves its decisions and accepted bank rows;
+provider refusals retain unanswered candidates. Interrupted leases recover on
+restart (dead process on Linux, or lease expiry). Stopping production preserves
+the queue. The old quarantined booklets are never imported automatically.
+
+`POOL_DRAFT_QUEUE_CAPACITY=20` bounds pending/drafting/verifying booklets only;
+the verified bank and ready stock remain unlimited. Drafting continues while
+verification is quota-paused until this buffer fills. Selected subject/grade,
+difficulty, question-count and ranked format rules still govern publication.
+
+Enable `POOL_VERIFY_FALLBACK_PROVIDERS=groq` with dedicated comma-separated
+`POOL_VERIFY_GROQ_API_KEYS`, or explicitly share the drafting fleet via
+`POOL_VERIFY_GROQ_USE_POOL_KEYS=True`. `POOL_VERIFY_GROQ_MODEL_NAME` defaults to
+`openai/gpt-oss-120b`. Gemini stays first; Groq performs a separate blind solve
+when its keys are unavailable. The same model can repeat its own errors, so this
+is an availability fallback, not a claim of independent-model agreement or
+guaranteed correctness. Disagreement, ambiguous answers and missing figures
+are rejected; no candidate is published just because a provider is unavailable.
+Shared Groq keys consume the same provider allowance for both worker stages.
+Admin shows separate worker states, pending booklets/questions, accepted and
+rejected totals, and supports adding dedicated Groq verification keys.
+
+## Credential management
+
 Admins can add credentials from **کلیدهای سرویس ساخت آزمون** in the Admin panel.
 Choose Groq drafting, Gemini answer verification, or Gemini drafting. The form
 appends to the corresponding private `backend/.env` backup list; it does not

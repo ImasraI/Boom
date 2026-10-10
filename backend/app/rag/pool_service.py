@@ -85,6 +85,8 @@ def cancel():
         _update(enabled=False, status='stopping')
         pool_core.request_cancel()
         _wake.set()
+        from app.rag import pool_queue
+        pool_queue.wake()
         return True
 
 
@@ -92,14 +94,23 @@ def shutdown():
     # Preserve enabled/config: this is a server restart, not admin cancellation.
     _shutdown.set()
     _wake.set()
+    from app.rag import pool_queue
+    pool_queue.wake()
 
 
 def notify_credentials_changed():
     """Recheck a waiting run without resetting its quota history or selection."""
+    if snapshot().get("drafting_paused"):
+        _update(drafting_paused=False)
     _wake.set()
+    from app.rag import pool_queue
+    pool_queue.wake()
 
 
 def _run():
+    if get_settings().POOL_DRAFT_QUEUE_ENABLED:
+        from app.rag import pool_queue
+        return pool_queue.run()
     failures = 0
     owned = False
     try:

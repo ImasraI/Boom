@@ -823,7 +823,7 @@ def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
                                 difficulty: str, max_tokens: int,
                                 timeout: float,
                                 report: Reporter = None,
-                                grade: str = "") -> List[dict]:
+                                grade: str = "", on_drafted=None) -> List[dict]:
     """Retrieve once per subject, optionally draft in smaller paced batches.
 
     Subject names, grade and per-subject weak areas are enforced from the
@@ -849,6 +849,8 @@ def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
                                      difficulty, context, budget, timeout, report, grade, rows)
         if batch is None:
             break  # Keep completed batches for the independent verifier and bank.
+        if on_drafted and batch:
+            on_drafted([{**q, "subject": subject} for q in batch])
         rows.extend(batch)
     rows = pad_booklet(rows[:count])
     for r in rows:
@@ -896,6 +898,7 @@ def generate_booklet(
     timeout: float = 420.0,
     report: Reporter = None,
     grade: str = "",
+    on_drafted=None,
 ) -> List[dict]:
     """Full pipeline: per-subject (retrieval -> prompt -> LLM -> parse -> pad).
 
@@ -928,7 +931,7 @@ def generate_booklet(
             continue
         rows = _generate_subject_questions(
             user_id, row, topics, difficulty, max_tokens, timeout, report=track,
-            grade=grade)
+            grade=grade, **({"on_drafted": on_drafted} if on_drafted else {}))
         if not rows:
             if terminal_error:
                 break

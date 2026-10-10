@@ -169,6 +169,45 @@ def groq_keys(settings, *, pool: bool = False) -> list[str]:
                              if key.strip()))
 
 
+def verifier_groq_keys(settings) -> list[str]:
+    primary = (getattr(settings, "POOL_VERIFY_LLM_API_KEY", "") or settings.LLM_API_KEY or "") if (
+        getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "").strip().lower() == "groq") else ""
+    extras = (getattr(settings, "POOL_VERIFY_GROQ_API_KEYS", "") or "").split(",")
+    shared = groq_keys(settings, pool=True) if getattr(settings, "POOL_VERIFY_GROQ_USE_POOL_KEYS", False) else []
+    return list(dict.fromkeys(k.strip() for k in [primary, *extras, *shared] if k.strip()))
+
+
+def verifier_providers(settings) -> list[str]:
+    primary = (getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "") or "").strip().lower()
+    fallbacks = (getattr(settings, "POOL_VERIFY_FALLBACK_PROVIDERS", "") or "").split(",")
+    return list(dict.fromkeys(p.strip().lower() for p in [primary, *fallbacks]
+                             if p.strip() and (p == primary or p.strip().lower() == "groq")))
+
+
+def pool_verification_status(settings=None) -> dict:
+    from app.config import get_settings
+    settings = settings if settings is not None else get_settings()
+    providers = verifier_providers(settings)
+    if not providers:
+        return pool_generation_status(settings)
+    states = []
+    for provider in providers:
+        state = {**_stage_quota_status(settings, verification=True, provider_override=provider),
+                 "stage": "verification", "provider": provider}
+        if not state["blocked"]:
+            return {**state, "fallback": provider != providers[0]}
+        states.append(state)
+    retryable = [s for s in states if s.get("retry_after")]
+    return min(retryable, key=lambda s: s["retry_after"]) if retryable else states[0]
+
+
+def pool_generation_status(settings=None) -> dict:
+    from app.config import get_settings
+    settings = settings if settings is not None else get_settings()
+    return {**_stage_quota_status(settings), "stage": "generation",
+            "provider": (settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER).strip().lower()}
+
+
 def _has_pool_fallback(settings) -> bool:
     """Mirror supported factory fallbacks without opening HTTP clients."""
     names = {name.strip().lower() for name in
@@ -195,17 +234,16 @@ def pool_quota_status(settings=None) -> dict:
         return {**generation, "stage": "generation",
                 "provider": (settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER).strip().lower()}
     if (getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "") or "").strip():
-        verification = _stage_quota_status(settings, verification=True)
-        if verification["blocked"]:
-            return {**verification, "provider": settings.POOL_VERIFY_LLM_PROVIDER.strip().lower()}
-        return verification
+        return pool_verification_status(settings)
     return generation
 
 
-def _stage_quota_status(settings, *, verification: bool = False) -> dict:
+def _stage_quota_status(settings, *, verification: bool = False, provider_override=None) -> dict:
     if verification:
-        provider = settings.POOL_VERIFY_LLM_PROVIDER.strip().lower()
+        provider = provider_override or settings.POOL_VERIFY_LLM_PROVIDER.strip().lower()
         override_model = getattr(settings, "POOL_VERIFY_LLM_MODEL_NAME", "")
+        if provider == "groq" and settings.POOL_VERIFY_LLM_PROVIDER.strip().lower() != "groq":
+            override_model = getattr(settings, "POOL_VERIFY_GROQ_MODEL_NAME", "openai/gpt-oss-120b")
     else:
         provider = ((settings.POOL_LLM_PROVIDER or "").strip()
                     or (settings.LLM_PROVIDER or "").strip()).lower()
@@ -216,7 +254,7 @@ def _stage_quota_status(settings, *, verification: bool = False) -> dict:
              (settings.GEMINI_MODEL_NAME if provider == "gemini" else settings.LLM_MODEL_NAME).strip())
     base = settings.GEMINI_BASE_URL if provider == "gemini" else "https://api.groq.com/openai/v1"
     keys = (pool_gemini_keys(settings, verification=verification) if provider == "gemini"
-            else groq_keys(settings, pool=True))
+            else verifier_groq_keys(settings) if verification else groq_keys(settings, pool=True))
     identities = [quota_identity(base, model, key) for key in keys]
     entries = [(blocked_quota(identity), blocked_access(identity)) for identity in identities]
     cooldowns = [rate_limited(identity) for identity in identities]

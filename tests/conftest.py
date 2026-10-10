@@ -10,6 +10,7 @@ os.environ["BOOM_DATABASE_URL"] = "sqlite:///" + (Path(_test_db_dir.name) / "tes
 os.environ["POOL_GENERATION_REQUESTS_PER_MINUTE"] = "0"
 # Legacy generation tests explicitly exercise the optional live branch.
 os.environ["POOL_ALLOW_LIVE_GENERATION"] = "true"
+os.environ["POOL_DRAFT_QUEUE_ENABLED"] = "false"
 
 
 @pytest.fixture(autouse=True)

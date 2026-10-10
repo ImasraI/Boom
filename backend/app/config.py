@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     POOL_VERIFY_LLM_API_KEY: str = ""
     POOL_VERIFY_LLM_MODEL_NAME: str = ""
     POOL_VERIFY_GEMINI_API_KEYS: str = ""
+    POOL_VERIFY_GROQ_API_KEYS: str = ""
+    POOL_VERIFY_FALLBACK_PROVIDERS: str = ""
+    POOL_VERIFY_GROQ_USE_POOL_KEYS: bool = False
+    POOL_VERIFY_GROQ_MODEL_NAME: str = "openai/gpt-oss-120b"
     POOL_VERIFY_MAX_TOKENS: int = 0
     POOL_VERIFY_REASONING_EFFORT: str = "low"
     # Drafting workload limits; 0 preserves the previous subject calls.
@@ -151,6 +155,8 @@ class Settings(BaseSettings):
     # Operators can disable live student-facing generation while building stock.
     POOL_ALLOW_LIVE_GENERATION: bool = True
     POOL_RUN_STATE_FILE: str = "data/pool-run.json"
+    POOL_DRAFT_QUEUE_ENABLED: bool = False
+    POOL_DRAFT_QUEUE_CAPACITY: int = 20
     KNOWLEDGE_GRAPH_PATH: str = "data/knowledge_graph/catalog.json"
     # Run the pool top-up INSIDE the API process (a background thread sweeps
     # every POOL_SWEEP_INTERVAL_SECONDS and refills low shelves through the

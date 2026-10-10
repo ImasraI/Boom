@@ -1339,8 +1339,9 @@ def get_pool_llm_client() -> BaseLLMClient:
 def get_pool_verifier_client() -> BaseLLMClient:
     """Answer checking is independent of drafting when explicitly configured.
 
-    No automatic fallback to the drafting provider: an exhausted Gemini
-    solver must not quietly let Groq check its own generated answer keys.
+    Cross-provider fallback is explicit, with its own model/fleet settings.
+    The solver receives no generated answers or explanations. Gemini remains
+    preferred; configured Groq fallback answers only when primary keys refuse.
     """
     settings = get_settings()
     provider = (getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "") or "").strip().lower()
@@ -1348,13 +1349,18 @@ def get_pool_verifier_client() -> BaseLLMClient:
         return get_pool_llm_client()
     key = (getattr(settings, "POOL_VERIFY_LLM_API_KEY", "") or "").strip()
     model = (getattr(settings, "POOL_VERIFY_LLM_MODEL_NAME", "") or "").strip() or None
-    if provider != "gemini":
+    if provider not in {"gemini", "groq"}:
         return get_llm_client(provider=provider, api_key=key or None, model=model)
-    keys = pool_gemini_keys(settings, verification=True)
-    if not keys:
+    from app.rag.provider_quota import verifier_groq_keys, verifier_providers
+    clients, labels = [], []
+    for name in verifier_providers(settings):
+        keys = pool_gemini_keys(settings, verification=True) if name == "gemini" else verifier_groq_keys(settings)
+        selected_model = model if name == provider else settings.POOL_VERIFY_GROQ_MODEL_NAME
+        for credential in keys:
+            clients.append(get_llm_client(provider=name, api_key=credential, model=selected_model))
+            labels.append(f"{name} verifier {len(labels) + 1}")
+    if not clients:
         return MockLLMClient()
-    clients = [get_llm_client(provider="gemini", api_key=credential, model=model)
-               for credential in keys]
     for client in clients:
         client.temperature = 0.0
         client.minimum_completion_tokens = max(0, getattr(settings, "POOL_VERIFY_MAX_TOKENS", 0))
@@ -1362,8 +1368,7 @@ def get_pool_verifier_client() -> BaseLLMClient:
         client.reasoning_effort = effort if effort in {"none","low","medium","high"} else "low"
     if len(clients) == 1:
         return clients[0]
-    return FallbackLLMClient(clients, ["gemini verifier"] +
-                             [f"gemini verifier backup {i}" for i in range(1, len(clients))], switch_on_rate_limit=True)
+    return FallbackLLMClient(clients, labels, switch_on_rate_limit=True)
 
 
 def get_vision_llm_client() -> BaseLLMClient:

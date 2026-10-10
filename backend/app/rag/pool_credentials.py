@@ -15,6 +15,7 @@ from app.rag import provider_quota
 _LOCK = threading.RLock()
 _FIELDS = {
     ("groq", "generation"): "POOL_GROQ_API_KEYS",
+    ("groq", "verification"): "POOL_VERIFY_GROQ_API_KEYS",
     ("gemini", "generation"): "POOL_GEMINI_API_KEYS",
     ("gemini", "verification"): "POOL_VERIFY_GEMINI_API_KEYS",
 }
@@ -53,12 +54,14 @@ def _file_lock(path):
 def _keys(settings, provider, stage):
     active_provider = ((settings.POOL_VERIFY_LLM_PROVIDER if stage == "verification"
                         else settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER) or "").lower().strip()
-    if active_provider == provider:
-        keys = (provider_quota.groq_keys(settings, pool=True) if provider == "groq"
+    active = active_provider == provider or (stage == "verification" and provider in provider_quota.verifier_providers(settings))
+    if active:
+        keys = ((provider_quota.verifier_groq_keys(settings) if stage == "verification"
+                 else provider_quota.groq_keys(settings, pool=True)) if provider == "groq"
                 else provider_quota.pool_gemini_keys(settings, verification=stage == "verification"))
     else:
         keys = getattr(settings, _FIELDS[(provider, stage)], "").split(",")
-    return list(dict.fromkeys(key.strip() for key in keys if key.strip())), active_provider == provider
+    return list(dict.fromkeys(key.strip() for key in keys if key.strip())), active
 
 
 def snapshot():
@@ -69,6 +72,8 @@ def snapshot():
         model = ((settings.POOL_VERIFY_LLM_MODEL_NAME if stage == "verification"
                   else settings.POOL_LLM_MODEL_NAME) or
                  (settings.GEMINI_MODEL_NAME if provider == "gemini" else settings.LLM_MODEL_NAME))
+        if stage == "verification" and provider == "groq" and settings.POOL_VERIFY_LLM_PROVIDER != "groq":
+            model = settings.POOL_VERIFY_GROQ_MODEL_NAME
         base = settings.GEMINI_BASE_URL if provider == "gemini" else "https://api.groq.com/openai/v1"
         counts = dict(available=0, daily_limited=0, access_denied=0, cooling_down=0)
         for key in keys:

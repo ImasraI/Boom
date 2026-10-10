@@ -299,7 +299,7 @@ def pool_deficit(db, major_key: str, difficulty: str, target: int) -> int:
     return max(0, target - ready_count(db, difficulty=difficulty, major=CANONICAL_MAJOR[major_key]))
 
 
-def _harvest_questions(db, questions, major_key, difficulty, grade=""):
+def _harvest_questions(db, questions, major_key, difficulty, grade="", *, commit=True):
     # A too-small booklet is not served as a mock; its independently verified
     # questions still belong in the bank and can assemble later booklets.
     archive = GeneratedMock(student_id=0, title="بانک سوال — سوال‌های تاییدشده",
@@ -309,7 +309,8 @@ def _harvest_questions(db, questions, major_key, difficulty, grade=""):
     db.add(archive)
     db.flush()
     question_bank.index_mock(db, archive)
-    db.commit()
+    if commit:
+        db.commit()
 
 
 def _reserved_stock_ids(db):

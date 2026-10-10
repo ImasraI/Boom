@@ -21,14 +21,19 @@ interface CredentialHealth {
   provider?: string;
   stage?: string;
   retry_at?: string;
+  fallback?: boolean;
 }
 const choices = [
   { value: "groq:generation", label: "Groq — تولید سؤال" },
   { value: "gemini:verification", label: "Gemini — بررسی پاسخ" },
+  { value: "groq:verification", label: "Groq — بررسی پاسخ پشتیبان" },
   { value: "gemini:generation", label: "Gemini — تولید سؤال" },
 ];
 
 export function PoolCredentialBlocker({ health }: { health?: CredentialHealth }) {
+  if (health?.fallback && !health.blocked) return <p role="status" className="text-xs text-[var(--accent)] leading-relaxed">
+    بررسی پاسخ با Groq پشتیبان انجام می‌شود؛ سهمیهٔ آن با تولید سؤال مشترک است. Gemini پس از رفع محدودیت دوباره در اولویت قرار می‌گیرد.
+  </p>;
   if (!health?.blocked) return null;
   const verifying = health.stage === "verification";
   return <div role="status" className="border-s-2 border-amber-500 ps-3 text-xs leading-relaxed space-y-1">

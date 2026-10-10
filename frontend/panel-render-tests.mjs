@@ -75,6 +75,30 @@ test('pool credentials identify verifier quota as the blocker despite available 
   assert.equal(renderToStaticMarkup(React.createElement(PoolCredentialBlocker, {health:{blocked:false}})), '');
 });
 
+test('durable draft queue distinguishes pending candidates from verified usable stock', async () => {
+  const {default:PoolDraftQueue} = await vite.ssrLoadModule('/src/components/PoolDraftQueue.tsx');
+  const html = renderToStaticMarkup(React.createElement(PoolDraftQueue, {
+    queue:{enabled:true,capacity:20,pending_booklets:3,pending_questions:22,drafting_booklets:1,
+      verifying_booklets:1,completed_booklets:2,rejected_booklets:0,verified_questions:17,rejected_questions:2},
+    drafting:{status:'generating',provider:'groq'},verification:{status:'verifying',provider:'groq',fallback:true},running:true,
+  }));
+  assert.match(html,/صف پیش‌نویس‌های آزمون/);
+  assert.match(html,/تا تأیید وارد تمرین یا رنکینگ نمی‌شوند/);
+  assert.match(html,/سؤال منتظر بررسی/);
+  assert.match(html,/در حال طراحی سؤال/);
+  assert.match(html,/در حال بررسی پاسخ/);
+  assert.match(html,/پشتیبان/);
+});
+
+test('credentials explain that Groq fallback continues verification while Gemini is unavailable', async () => {
+  const {PoolCredentialBlocker} = await vite.ssrLoadModule('/src/components/PoolCredentials.tsx');
+  const html = renderToStaticMarkup(React.createElement(PoolCredentialBlocker, {
+    health:{blocked:false,provider:'groq',stage:'verification',fallback:true},
+  }));
+  assert.match(html,/بررسی پاسخ با Groq پشتیبان انجام می‌شود/);
+  assert.doesNotMatch(html,/تولید منتظر بررسی پاسخ/);
+});
+
 test('Knowledge graph loads without a profile and describes book-sourced titles', async () => {
   const {default:KnowledgeGraph} = await vite.ssrLoadModule('/src/pages/KnowledgeGraph.tsx');
   const html = renderToStaticMarkup(React.createElement(KnowledgeGraph, {nav(){},userData:null}));

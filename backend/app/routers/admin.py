@@ -26,6 +26,7 @@ from ..auth import limits
 from ..auth.database import BankQuestion, QuestionReport, GeneratedMock, SignupAllowlist, User, get_db
 from ..auth.deps import require_admin
 from ..rag import pool_core, question_bank, pool_service, pool_usage
+from ..rag import pool_queue
 from ..rag.provider_quota import pool_quota_status, require_pool_available
 from ..utils.logger import get_logger
 from ..utils.metrics import snapshot
@@ -230,6 +231,7 @@ def pool_levels(db: Session = Depends(get_db)):
         "token_usage": pool_usage.summary(),
         "provider_health": pool_quota_status(),
         "question_bank": question_bank.counts(db),
+        "draft_queue": pool_queue.snapshot(),
         "unlimited_storage": True,
         "cancel_requested": pool_core.cancel_requested(),
         "progress": progress,
