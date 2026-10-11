@@ -121,6 +121,18 @@ def test_contents_page_is_retrievable_when_ocr_loses_the_word_contents(tmp_path)
     assert pages[7] == path.read_text(encoding='utf-8')
 
 
+def test_question_excerpt_rejects_contents_even_without_contents_label(tmp_path, monkeypatch):
+    monkeypatch.setattr(bp, 'get_settings', lambda: SimpleNamespace(OCR_DIR=str(tmp_path)))
+    folder=tmp_path/'فیزیک';folder.mkdir()
+    titles=['کار و انرژی','الکتریسیته ساکن','مغناطیس','نوسان و امواج']
+    nodes=[dict(title=t,sources=[dict(book='فیزیک',page=7)]) for t in titles]
+    monkeypatch.setattr(bp,'load_catalog',lambda:{'nodes':nodes})
+    (folder/'page_0007.txt').write_text('\n'.join(titles),encoding='utf-8')
+    assert bp.book_excerpt(nodes[0]) is None
+    (folder/'page_0030.txt').write_text('کار و انرژی: انرژی جنبشی یک جسم با جرم ۲ و سرعت ۴ چقدر است؟',encoding='utf-8')
+    assert bp.book_excerpt(nodes[0])['page']==30
+
+
 def test_selected_curriculum_refresh_keeps_other_books_and_caches_validated_results(tmp_path, monkeypatch):
     from scripts import refresh_exam_curriculum as refresh
     folder = tmp_path/'ocr'/'فیزیک ریاضی.pdf'; folder.mkdir(parents=True)

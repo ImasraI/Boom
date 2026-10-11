@@ -151,12 +151,19 @@ def book_excerpt(node, limit=1500):
                     paths[path.stem] = path
         signature = tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in sorted(paths.values()))
         words = [norm(w) for w in node['title'].split() if len(norm(w)) > 2]
+        # Noisy OCR often drops "فهرست". Several catalogue headings on one
+        # front-matter page identify contents rather than a worked example.
+        headings = {norm(n['title']) for n in load_catalog().get('nodes', [])
+                    if any(str(s.get('book', '')).removesuffix('.pdf') == book
+                           for s in n.get('sources', []))}
         ranked = []
         for page, text, normalized in _read_book(signature):
             score = 10 * (norm(node['title']) in normalized) + sum(w in normalized for w in words)
             # A contents page proves a heading, but is not a question style example.
             enough_words = sum(w in normalized for w in words) >= max(1, (len(words) * 2 + 2) // 3)
-            if score and enough_words and not ('فهرست' in text and page <= 18):
+            contents = page <= 18 and ('فهرست' in text or
+                sum(heading in normalized for heading in headings if len(heading) >= 4) >= 4)
+            if score and enough_words and not contents:
                 ranked.append((score, page, text))
         if not ranked:
             continue
