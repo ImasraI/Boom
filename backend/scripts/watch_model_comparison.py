@@ -5,6 +5,7 @@ questions intact. Stop with Ctrl+C; rerun the same command to resume copying.
 """
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -19,6 +20,8 @@ def main():
     parser.add_argument("--run", default="quality-20")
     parser.add_argument("--interval", type=int, default=60)
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--ssh", help="SSH executable path when it is not on PATH")
+    parser.add_argument("--node", help="Node executable path when it is not on PATH")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.run):
         parser.error("Invalid run name")
@@ -27,8 +30,11 @@ def main():
     root = Path(__file__).resolve().parents[2]
     folder = root / "tmp/verification/model-comparison"
     folder.mkdir(parents=True, exist_ok=True)
-    ssh = shutil.which("ssh")
-    node = shutil.which("node")
+    ssh = args.ssh or shutil.which("ssh")
+    if not ssh and os.name == "nt":
+        installed = Path(os.environ.get("SYSTEMROOT", "C:/Windows")) / "System32/OpenSSH/ssh.exe"
+        ssh = str(installed) if installed.is_file() else None
+    node = args.node or shutil.which("node")
     if not ssh or not node:
         parser.error("SSH and Node must be available")
     command = [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-i", args.key,
