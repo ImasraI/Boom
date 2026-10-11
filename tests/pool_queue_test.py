@@ -230,6 +230,27 @@ def test_definitive_quality_failure_saves_reason_and_solver_answer(setup):
         assert q["validation"]["reason"] == "missing mass in gravitational work"
 
 
+def test_uncertain_review_does_not_block_other_questions_in_same_booklet(setup):
+    settings, tag = setup
+    job_id = draft(tag, 2)
+    queue.claim_job()
+    class Reviewer:
+        replies = iter(['{"answers":{"1":1}}', '{"valid":true,"reason":"stored key correct"}',
+                        '{"answers":{"1":0}}', '{"valid":true,"reason":"key and solution correct"}'])
+        def generate(self, *args, **kwargs):
+            return next(self.replies)
+    reviewer = Reviewer()
+    assert not queue.verify_step(job_id, reviewer)
+    assert queue.claim_job() == job_id
+    assert queue.verify_step(job_id, reviewer)
+    with SessionLocal() as db:
+        job = db.get(PoolDraftJob, job_id)
+        rows = json.loads(job.questions)
+        assert job.verified_count == 1 and job.rejected_count == 0
+        assert rows[0]["_queue_status"] == "pending" and rows[1]["_queue_status"] == "verified"
+        assert job.retry_at > queue._now()
+
+
 def test_verifier_health_uses_groq_fallback_without_resetting_gemini_limits(setup):
     settings, tag = setup
     identity = provider_quota.quota_identity(settings.GEMINI_BASE_URL, settings.GEMINI_MODEL_NAME, "verifier-key")

@@ -139,7 +139,8 @@ def verify_step(job_id, client=None):
         if not job or job.status != "verifying" or job.lease_owner != _OWNER:
             return False
         rows = json.loads(job.questions)
-        positions = [i for i, q in enumerate(rows) if q.get("_queue_status") == "pending"][:mock_generation._VERIFY_BATCH_SIZE]
+        positions = [i for i, q in enumerate(rows) if q.get("_queue_status") == "pending"
+                     and q.get("_review_after", "") <= _now().isoformat()][:mock_generation._VERIFY_BATCH_SIZE]
     client = client if client is not None else get_pool_verifier_client()
     verdicts = mock_generation._verify_batch(client, [rows[i] for i in positions], 60)
     with SessionLocal() as db:
@@ -163,13 +164,15 @@ def verify_step(job_id, client=None):
                 q["validation"] = verdicts.details[index]
             if index in getattr(verdicts, "deferred", set()):
                 q["_review_retries"] = q.get("_review_retries", 0) + 1
+                q["_review_after"] = (_now() + timedelta(seconds=min(
+                    21600, 60 * 2 ** min(q["_review_retries"], 8)))).isoformat()
                 continue
             valid = (verdicts.get(index) == q["answer"]
                      and not mock_generation._missing_visible_reference(q))
             q["_queue_status"] = "verified" if valid else "rejected"
             q["verification_status"] = "verified" if valid else "rejected"
             if valid:
-                accepted.append({k: v for k, v in q.items() if k != "_queue_status"})
+                accepted.append({k: v for k, v in q.items() if not k.startswith("_review") and k != "_queue_status"})
                 job.verified_count += 1
             else:
                 job.rejected_count += 1
@@ -178,8 +181,12 @@ def verify_step(job_id, client=None):
         job.questions = json.dumps(rows, ensure_ascii=False)
         job.status = ("pending" if any(q.get("_queue_status") == "pending" for q in rows)
                       else "completed" if job.verified_count else "rejected")
-        retries = max((rows[i].get("_review_retries", 0) for i in positions), default=0)
-        job.retry_at = _now() + timedelta(seconds=min(21600, 60 * 2 ** min(retries, 8))) if retries else None
+        # An uncertain question waits without blocking the remaining questions
+        # in the same draft booklet. Only due reviews compete for this lease.
+        pending_times = [datetime.fromisoformat(q["_review_after"]) if q.get("_review_after") else _now()
+                         for q in rows if q.get("_queue_status") == "pending"]
+        earliest = min(pending_times, default=_now())
+        job.retry_at = earliest if earliest > _now() else None
         job.lease_owner = ""; job.lease_until = None
         db.commit()
         return bool(accepted)
