@@ -464,7 +464,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                 <div>
                   <p className="text-[10px] font-bold text-[var(--muted-2)] mb-1">روز تا آزمون ثبت‌شده</p>
                   <p className="text-[72px] font-bold text-[var(--text)] leading-none tabular-nums">{daysLeft}</p>
-                  <p className="text-[11px] text-[var(--muted-2)] mt-1">{[userData.examYear, userData.major].filter(Boolean).join(" · ") || "پروفایل ناقص"}</p>
+                  <p className="text-[11px] text-[var(--muted-2)] mt-1">{[userData.grade, userData.major].filter(Boolean).join(" · ") || "پروفایل ناقص"}</p>
                 </div>
                 <div className="bg-[#FFF5F0] rounded-2xl px-4 py-3 text-left">
                   <p className="text-[9px] font-bold text-[var(--muted-2)]">تکمیل امروز</p>
@@ -479,7 +479,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                 <div className="text-left">
                   <p className="text-[10px] font-bold text-[var(--muted-2)]">روز تا آزمون ثبت‌شده</p>
                   <p className="text-[42px] font-bold text-[#C4714A] leading-none">{daysLeft}</p>
-                  <p className="text-[11px] text-[var(--muted-2)] mt-1">{userData.examYear || "—"}</p>
+                  <p className="text-[11px] text-[var(--muted-2)] mt-1">{userData.grade || "—"}</p>
                 </div>
               </div>
             )}
@@ -593,11 +593,9 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
         </div>
       </div>
 
-      {/* ── 3 Action buttons ── */}
-      <div className="bg-[var(--card)] grid grid-cols-3 [&>*+*]:border-r [&>*+*]:border-[var(--border)]">
+      {/* ── Planning and exam shortcuts ── */}
+      <div className="bg-[var(--card)] grid grid-cols-2 [&>*+*]:border-r [&>*+*]:border-[var(--border)]">
         {[
-          { label: "ریکاوری", sub: "خواب و خلق‌وخو", screen: "recovery" as const, bg: "#EDF5F0", color: "#6B9E7A",
-            icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> },
           { label: "آزمون‌ها", sub: "نتایج و تحلیل", screen: "exams" as const, bg: "#F0EBF5", color: "#9B7AAD",
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
           { label: "برنامه", sub: "اهداف و تقویم", screen: "plan" as const, bg: "#EBF0F5", color: "#5C8BA8",

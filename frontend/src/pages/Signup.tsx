@@ -2,7 +2,7 @@ import { accountStorage } from "../accountStorage";
 import { useState } from "react";
 import { apiUrl, readApiError } from "../api";
 import { NavFn, SignupData, normalizeSignupData } from "../types";
-import { MAJORS, GRADES, EXAM_YEARS, TARGET_RANKS, STUDY_HOURS_OPTIONS, TEST_EXAM_OPTIONS } from "../data";
+import { MAJORS, GRADES, STUDY_HOURS_OPTIONS, TEST_EXAM_OPTIONS } from "../data";
 import {
   AuthOrbs, BackButton, ErrorBanner, StepHeading, PrimaryButton,
   PhoneInput, PasswordInput, StrengthMeter, OtpInput, ChoiceButton,
@@ -41,8 +41,6 @@ export default function Signup({ nav, onComplete }: Props) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [major, setMajor] = useState("");
   const [grade, setGrade] = useState("");
-  const [examYear, setExamYear] = useState("");
-  const [targetRank, setTargetRank] = useState("");
   const [studyHours, setStudyHours] = useState("");
   const [testExams, setTestExams] = useState<string[]>([]);
   const [customExam, setCustomExam] = useState("");
@@ -54,7 +52,7 @@ export default function Signup({ nav, onComplete }: Props) {
   // Explicit reset flow: the user chose "reset password" on the intercept.
   const [resetMode, setResetMode] = useState(false);
 
-  const TOTAL = 10;
+  const TOTAL = 8;
 
   async function advance() {
     if (submitting) return;
@@ -110,7 +108,7 @@ export default function Signup({ nav, onComplete }: Props) {
 
     if (step < TOTAL - 1) { setStep(s => s + 1); return; }
     // Profile done: everything is already registered + logged in.
-    onComplete({ name, phone, major, grade, examYear, targetRank, studyHours, testExams });
+    onComplete(normalizeSignupData({ name, phone, major, grade, studyHours, testExams }));
   }
 
   function toggleExam(e: string) {
@@ -199,8 +197,6 @@ export default function Signup({ nav, onComplete }: Props) {
     password.length >= 4 && password === confirmPassword,
     major.length > 0,
     grade.length > 0,
-    examYear.length > 0,
-    targetRank.length > 0,
     studyHours.length > 0,
     testExams.length > 0,
   ][step] ?? false;
@@ -324,35 +320,6 @@ export default function Signup({ nav, onComplete }: Props) {
           {GRADES.map((g, i) => (
             <ChoiceButton key={g} selected={grade === g} onClick={() => pick(setGrade, g)} delay={stagger(i)}>
               <span className="me-2">{GRADE_ICONS[g] || "🏫"}</span>{g}
-            </ChoiceButton>
-          ))}
-        </div>
-      ),
-    },
-    {
-      q: "کدوم سال می‌خوای کنکور بدی؟",
-      sub: "افق برنامه‌ریزی‌ات رو مشخص می‌کنه.",
-      content: (
-        <div className="grid grid-cols-2 gap-2.5">
-          {EXAM_YEARS.map((y, i) => (
-            <button key={y} onClick={() => pick(setExamYear, y)}
-              className={`press anim-fade-up ${stagger(i)} py-6 rounded-2xl font-bold text-2xl text-center font-display transition-all ${
-                examYear === y
-                  ? "bg-[var(--accent)] text-[var(--surface)] glow-accent"
-                  : "bg-[var(--card)] border border-[var(--border-strong)] text-[var(--text-strong)] hover:border-[var(--accent)] shadow-soft"
-              }`}>{y}</button>
-          ))}
-        </div>
-      ),
-    },
-    {
-      q: "رتبه‌ی هدفت چنده؟",
-      sub: "صادقانه بگو — سطح و سرعت برنامه‌ات رو تعیین می‌کنه.",
-      content: (
-        <div className="flex flex-col gap-2">
-          {TARGET_RANKS.map((r, i) => (
-            <ChoiceButton key={r} selected={targetRank === r} onClick={() => pick(setTargetRank, r)} delay={stagger(i)}>
-              <span className="me-2">🎯</span>{r}
             </ChoiceButton>
           ))}
         </div>

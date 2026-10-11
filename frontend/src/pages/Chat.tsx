@@ -157,7 +157,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
       daily_hours: Number((currentUser?.studyHours || "4").match(/[0-9]+/)?.[0] || 4),
       major: currentUser?.major || "ریاضی فیزیک",
       grade: currentUser?.grade || "دوازدهم (سال کنکور)",
-      target_rank: currentUser?.targetRank || "زیر ۵٬۰۰۰",
+      target_rank: currentUser?.targetRank || "",
       student: currentUser || {},
       weak_subjects: [], strong_subjects: [], notes: query,
     } : { question: query, history, student: currentUser || {}, schedule: weeklyScheduleContext(),

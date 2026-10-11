@@ -100,7 +100,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [poolMajor, setPoolMajor] = useState("riazi");
   const [poolDifficulty, setPoolDifficulty] = useState("konkur");
   const [poolGrade, setPoolGrade] = useState("دوازدهم");
-  const [poolCount, setPoolCount] = useState(0);
+  const [poolCount, setPoolCount] = useState("0");
   const [poolQuestions, setPoolQuestions] = useState(10);
   const [poolSubjects, setPoolSubjects] = useState<string[]>([]);
   const [poolTopics, setPoolTopics] = useState("");
@@ -143,7 +143,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
     const cfg = run.config;
     setPoolKind(cfg.kind); setPoolMajor(cfg.majors.length === 1 ? cfg.majors[0] : "all");
     setPoolGrade(cfg.grade); setPoolDifficulty(cfg.difficulties[0]);
-    setPoolCount(cfg.count); setPoolQuestions(cfg.total_questions);
+    setPoolCount(String(cfg.count)); setPoolQuestions(cfg.total_questions);
     setPoolSubjects(cfg.subjects ?? []); setPoolTopics((cfg.topics ?? []).join("\n"));
   }, [pool?.run?.enabled, pool?.run?.config]);
 
@@ -223,9 +223,13 @@ export default function Admin({ nav }: { nav: NavFn }) {
   async function restock() {
     setBusy(true); setErr(""); setMsg("");
     try {
+      const count = Number(poolCount);
+      if (!poolCount.trim() || !Number.isSafeInteger(count) || count < 0) {
+        throw new Error("تعداد دفترچه را به صورت عدد صحیح وارد کنید؛ برای تولید پیوسته صفر بگذارید.");
+      }
       const res = await fetch(apiUrl("/api/admin/pool/restock"), {
         method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ kind: poolKind, major: poolMajor, difficulty: poolDifficulty, grade: poolGrade, count: poolCount,
+        body: JSON.stringify({ kind: poolKind, major: poolMajor, difficulty: poolDifficulty, grade: poolGrade, count,
           total_questions: poolQuestions, subjects: poolSubjects,
           topics: poolTopics.split("\n").map(t => t.trim()).filter(Boolean) }),
       });
@@ -438,7 +442,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
           <label>رشته<select aria-label="رشته برای تولید" value={poolMajor} onChange={e => { setPoolMajor(e.target.value); setPoolSubjects([]); }} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{pool?.catalog?.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}<option value="all">همه رشته‌ها</option></select></label>
           <label>دشواری<select aria-label="دشواری برای تولید" value={poolDifficulty} onChange={e => setPoolDifficulty(e.target.value)} disabled={generating || poolKind === "ranked"} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{Object.entries(DIFFICULTY_FA).map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
           <label>پایه<select value={poolGrade} onChange={e => setPoolGrade(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{["دهم", "یازدهم", "دوازدهم"].map(g => <option key={g}>{g}</option>)}</select></label>
-          <label>تعداد دفترچه؛ صفر = پیوسته<input aria-label="تعداد دفترچه" type="number" min={0} step={1} value={poolCount} onChange={e => setPoolCount(Math.max(0, Math.floor(Number(e.target.value))))} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]" /></label>
+          <label>تعداد دفترچه؛ صفر = پیوسته<input aria-label="تعداد دفترچه" type="number" min={0} step={1} value={poolCount} onChange={e => setPoolCount(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]" /></label>
           {poolKind !== "ranked" && <label>تعداد کل سوال‌های آزمون آزمایشی<select aria-label="تعداد سوال برای تولید" value={poolQuestions} onChange={e => setPoolQuestions(Number(e.target.value))} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]"><option value={5}>۵ سوال</option><option value={10}>۱۰ سوال</option><option value={0}>دفترچه کامل</option></select></label>}
         </div>
         {offeredSubjects.length > 0 && <fieldset className="border-b border-[var(--border)] pb-4 mb-4"><legend className="text-xs text-[var(--muted)] mb-2">درس‌ها؛ انتخاب خالی یعنی همه درس‌های آزمون</legend><div className="flex flex-wrap gap-4">{offeredSubjects.map(subject => <label key={subject} className="text-xs flex gap-2 items-center"><input type="checkbox" checked={poolSubjects.includes(subject)} disabled={generating} onChange={e => setPoolSubjects(previous => e.target.checked ? [...previous, subject] : previous.filter(s => s !== subject))} />{subject}</label>)}</div></fieldset>}

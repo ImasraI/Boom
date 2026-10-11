@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { NavFn, SignupData } from "../types";
-import { pullServerProfile, pushProfile, toSignupData as toSignupPatch, initialDailyHours } from "../profileSync";
+import { pullServerProfile, pushProfile, toSignupData as toSignupPatch } from "../profileSync";
 import { SUBJECTS_BY_MAJOR } from "../data";
 import { PREFERENCES_CHANGED_EVENT, readPreferences, playFeedback, updatePreferences, SoundIcon } from "../components/Experience";
 import { apiUrl, authHeaders } from "../api";
@@ -38,7 +38,6 @@ function Chips({ options, value, onChange }: { options: string[]; value: string;
   );
 }
 
-const DAYS_FA = ["شنبه", "یکشنبه", "دوشنبه", "سهشنبه", "چهارشنبه", "پنجشنبه", "جمعه"];
 const SECTIONS = ["اطلاعات عمومی", "سبک زندگی", "ارزیابی دروس", "هوش مصنوعی", "تنظیمات"];
 
 export default function Profile({ nav, userData, dark, toggleDark, onSave, logout }: { 
@@ -62,10 +61,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
 
   // Lifestyle
   const [wakeTime, setWakeTime] = useState(userData?.wakeTime ?? "");
-  const [dailyHours, setDailyHours] = useState<Record<string, number>>(() => initialDailyHours(userData, DAYS_FA));
-  const [maxConsec, setMaxConsec] = useState(userData?.maxConsec ?? 2);
   const [breakStyle, setBreakStyle] = useState(userData?.breakStyle ?? "");
-  const [sleepHours, setSleepHours] = useState(userData?.sleepHours ?? 7);
   const [environment, setEnvironment] = useState(userData?.environment ?? "");
   const [phoneUsage, setPhoneUsage] = useState(userData?.phoneUsage ?? "");
 
@@ -141,11 +137,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
       city,
       school,
       wakeTime,
-      dailyHours,
-      studyHours: userData?.studyHours || String(Math.round(Object.values(dailyHours).reduce((sum, hours) => sum + hours, 0) / 7 * 10) / 10),
-      maxConsec,
       breakStyle,
-      sleepHours,
       environment,
       phoneUsage,
       completion,
@@ -228,45 +220,12 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
           className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)]" />
       </Field>
 
-      <div className="study-field px-1 py-4">
-        <p className="text-[10px] font-bold text-[var(--muted-2)] mb-3 text-right">ساعت مطالعه در هر روز هفته</p>
-        <div className="space-y-3">
-          {DAYS_FA.map(d => (
-            <div key={d} className="flex items-center gap-3">
-              <span className="text-[12px] font-bold text-[var(--accent)] w-8 text-left flex-shrink-0">{dailyHours[d]}س</span>
-              <input type="range" min={0} max={12} step={0.5} value={dailyHours[d]}
-                onChange={e => setDailyHours(h => ({ ...h, [d]: Number(e.target.value) }))}
-                className="flex-1" />
-              <span className="text-[12px] font-bold text-[var(--muted)] w-14 text-right flex-shrink-0">{d}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="study-field px-1 py-4">
-        <p className="text-[10px] font-bold text-[var(--muted-2)] mb-2 text-right">حداکثر ساعت مطالعهی پشت سر هم</p>
-        <div className="flex items-center gap-3">
-          <span className="text-[13px] font-bold text-[var(--accent)] flex-shrink-0">{maxConsec} ساعت</span>
-          <input type="range" min={0.5} max={5} step={0.5} value={maxConsec}
-            onChange={e => setMaxConsec(Number(e.target.value))} className="flex-1" />
-        </div>
-      </div>
-
       <Field label="سبک استراحت مورد علاقهات">
         <div className="mt-1">
           <Chips options={["پومودورو ۲۵ دقیقه", "تمرکز ۴۵ دقیقه", "بلوکهای ۶۰ دقیقه", "خودم تصمیم میگیرم"]}
             value={breakStyle} onChange={setBreakStyle} />
         </div>
       </Field>
-
-      <div className="study-field px-1 py-4">
-        <p className="text-[10px] font-bold text-[var(--muted-2)] mb-2 text-right">ساعت خواب شبانه</p>
-        <div className="flex items-center gap-3">
-          <span className="text-[13px] font-bold text-[var(--accent)] flex-shrink-0">{sleepHours} ساعت</span>
-          <input type="range" min={3} max={12} step={0.5} value={sleepHours}
-            onChange={e => setSleepHours(Number(e.target.value))} className="flex-1" />
-        </div>
-      </div>
 
       <Field label="محیط مطالعه">
         <div className="mt-1">
