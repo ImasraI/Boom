@@ -55,3 +55,14 @@ The export separates questions from answer keys and renders math and figures.
 Rate correctness, sufficient givens, exactly one correct option, explanation
 accuracy, book/topic fidelity, appropriate difficulty and visible diagram quality.
 Review all 20 samples before choosing a model; do not compare only accepted ones.
+
+The laptop can keep the private review sheets updated while the VM runs:
+
+```bash
+python backend/scripts/watch_model_comparison.py --host USER@VM --key /path/to/existing/key
+```
+
+It makes no model calls, exports only to the ignored `tmp/` directory, and stops
+when both sets finish. HTTP 503/provider failures use saved exponential backoff,
+up to 15 minutes. Unchanged states stay quiet. A lost SSH connection cannot
+reset generation; rerun the copying command to resume downloading the results.

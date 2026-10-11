@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import random
+import re
 import shutil
 import sys
 import threading
@@ -108,6 +109,12 @@ def run_model(provider, state, path, once):
         save(path, state)
     try:
         while len(progress["questions"]) < len(state["slots"]):
+            remaining = progress.get("retry_at", 0) - time.time()
+            if remaining > 0:
+                if once:
+                    return
+                time.sleep(min(60, remaining))
+                continue
             if not available(client):
                 with LOCK:
                     progress["status"] = "waiting_for_quota_or_access"
@@ -129,7 +136,11 @@ def run_model(provider, state, path, once):
             rows = mg.parse_booklet(raw)
             with LOCK:
                 attempt = {"slot": index + 1, "time": time.time(),
-                    "parseable": bool(rows), "error_code": getattr(client, "last_error_code", "") if not raw else ""}
+                    "parseable": bool(rows), "protocol_version": 2,
+                    "error_code": getattr(client, "last_error_code", "") if not raw else ""}
+                if not raw and not attempt["error_code"]:
+                    status = re.search(r"HTTP (\d{3})", getattr(client, "last_error", ""))
+                    attempt["error_code"] = ("http_" + status[1]) if status else "provider_no_response"
                 if raw and not rows:
                     diagnostic = path.parent / f"{provider}-slot-{index+1}-attempt-{len(progress['attempts'])+1}.txt"
                     diagnostic.write_text(raw, encoding="utf-8")
@@ -137,6 +148,8 @@ def run_model(provider, state, path, once):
                     attempt["diagnostic"] = diagnostic.name
                 progress["attempts"].append(attempt)
                 if rows:
+                    progress["retry_at"] = 0
+                    progress["consecutive_failures"] = 0
                     node, source = slot["node"], slot["source"]
                     progress["questions"].append({**rows[0], "_id": index + 1,
                         "subject": slot["subject"], "topic": node["title"],
@@ -148,12 +161,20 @@ def run_model(provider, state, path, once):
             if rows:
                 print(f"{provider}: {len(progress['questions'])}/20 saved", flush=True)
             elif not raw:
+                progress["last_error_code"] = attempt["error_code"]
+                progress["consecutive_failures"] = progress.get("consecutive_failures", 0) + 1
+                if attempt["error_code"] in ("http_400", "http_404", "http_413", "provider_output_truncated"):
+                    progress["status"] = "needs_attention_request"
+                    save(path, state)
+                    return
+                progress["status"] = "waiting_for_provider"
+                progress["retry_at"] = time.time() + min(900, 60 * 2 ** min(4, progress["consecutive_failures"] - 1))
+                save(path, state)
                 if once:
                     return
-                time.sleep(60)  # Clients remember quota; no repeated terminal probes.
             else:
                 # Format problems must be visible, not infinite retries or biased selection.
-                failures = sum(a["slot"] == index + 1 for a in progress["attempts"])
+                failures = sum(a["slot"] == index + 1 and a.get("protocol_version") == 2 for a in progress["attempts"])
                 if failures >= 3:
                     progress["status"] = "needs_attention_format"
                     save(path, state)

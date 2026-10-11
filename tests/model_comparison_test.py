@@ -44,3 +44,29 @@ def test_comparison_can_use_configured_same_model_reviewer_fleet(monkeypatch):
     monkeypatch.setattr(comparison, "get_llm_client", lambda **kwargs: created.append(kwargs) or SimpleNamespace())
     comparison.fleet("gemini", config)
     assert [c['api_key'] for c in created] == ['google-a', 'google-b']
+
+
+def test_busy_provider_saves_retry_and_does_not_invent_a_question(tmp_path, monkeypatch):
+    import time
+    client = SimpleNamespace(_clients=[], last_error="HTTP 503 temporary high demand", last_error_code="",
+        generate=lambda *a, **kw: "")
+    monkeypatch.setattr(comparison, "fleet", lambda provider, settings: (client, "gemini-test"))
+    monkeypatch.setattr(comparison, "available", lambda c: True)
+    monkeypatch.setattr(comparison, "draft_prompt", lambda slot, difficulty: "JSON prompt")
+    state = {"slots": [{}], "models": {}, "difficulty": "hard"}
+    comparison.run_model("gemini", state, tmp_path / "state.json", True)
+    result = state['models']['gemini']
+    assert result['status'] == 'waiting_for_provider' and result['questions'] == []
+    assert result['last_error_code'] == 'http_503' and result['retry_at'] > time.time()
+
+
+def test_rejected_request_stops_instead_of_repeatedly_spending_quota(tmp_path, monkeypatch):
+    calls = []
+    def generate(*a, **kw):calls.append(1);return ""
+    client = SimpleNamespace(_clients=[], last_error="HTTP 413", last_error_code="", generate=generate)
+    monkeypatch.setattr(comparison, "fleet", lambda provider, settings: (client, "groq-test"))
+    monkeypatch.setattr(comparison, "available", lambda c: True)
+    monkeypatch.setattr(comparison, "draft_prompt", lambda slot, difficulty: "JSON prompt")
+    state = {"slots": [{}], "models": {}, "difficulty": "hard"}
+    comparison.run_model("groq", state, tmp_path / "state.json", False)
+    assert state['models']['groq']['status'] == 'needs_attention_request' and calls == [1]
