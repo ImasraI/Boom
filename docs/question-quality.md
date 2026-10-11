@@ -32,7 +32,10 @@ publishes questions or writes bank stock. The two currently configured mock
 models (Groq GPT-OSS 120B and Gemini Flash) get identical saved book excerpts,
 topics, high reasoning and hard difficulty: 7 math (2 geometry, 1 statistics,
 1 discrete, 3 calculus), 7 physics and 6 chemistry. Same-provider credential
-failover is allowed, cross-provider substitution is not. Every first parseable
+failover (including the configured Gemini reviewer fleet) is allowed,
+cross-provider substitution is not. A private quota ledger is initialized from
+the API's saved blocks, so this background process cannot overwrite newer API
+quota state. Every first parseable
 draft is retained, including flawed ones, for an honest human comparison.
 
 The checkpoint resumes without regenerating completed slots and honors saved

@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import random
+import shutil
 import sys
 import threading
 import time
@@ -53,6 +54,11 @@ def fleet(provider, settings):
         keys = [k.strip() for k in settings.POOL_GEMINI_API_KEYS.split(",") if k.strip()]
         if settings.POOL_LLM_PROVIDER == "gemini" and settings.POOL_LLM_API_KEY:
             keys.insert(0, settings.POOL_LLM_API_KEY)
+        # Evaluation is an explicit request to exercise this model, so its
+        # configured reviewer fleet is eligible too. Never use unrelated chat,
+        # vision, embedding credentials or substitute a different provider.
+        if getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "") == "gemini":
+            keys.extend(quota.pool_gemini_keys(settings, verification=True))
         model = settings.POOL_VERIFY_LLM_MODEL_NAME or settings.GEMINI_MODEL_NAME
     clients = [get_llm_client(provider=provider, api_key=k, model=model)
                for k in dict.fromkeys(keys)]
@@ -162,6 +168,15 @@ def main():
     folder = Path("data/model_evaluations") / args.run
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / "state.json"
+    # Copy known blocks once, then keep this process's quota ledger separate.
+    # A long-lived evaluation must not overwrite the API process's newer blocks.
+    settings = get_settings()
+    original_quota = Path(settings.POOL_QUOTA_STATE_PATH) if settings.POOL_QUOTA_STATE_PATH else None
+    private_quota = folder / "provider_quota.json"
+    if original_quota and original_quota.is_file() and not private_quota.exists():
+        shutil.copy2(original_quota, private_quota)
+        os.chmod(private_quota, 0o600)
+    settings.POOL_QUOTA_STATE_PATH = str(private_quota)
     # O_EXCL prevents duplicate workers; dead PIDs permit a safe checkpoint resume.
     lockfile = folder / "worker.pid"
     if lockfile.exists():

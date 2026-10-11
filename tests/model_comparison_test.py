@@ -33,3 +33,14 @@ def test_gemini_comparison_never_receives_primary_groq_key(monkeypatch):
     assert {c['api_key'] for c in created} == {"google-a", "google-b"}
     assert all(c['provider'] == 'gemini' and c['model'] == model for c in created)
     assert all(c.reasoning_effort == 'high' and c.minimum_completion_tokens == 8192 for c in fleet._clients)
+
+
+def test_comparison_can_use_configured_same_model_reviewer_fleet(monkeypatch):
+    config = SimpleNamespace(POOL_LLM_PROVIDER="groq", POOL_LLM_API_KEY="groq-private",
+        POOL_GEMINI_API_KEYS="google-a", POOL_VERIFY_LLM_MODEL_NAME="gemini-3.6-flash",
+        POOL_VERIFY_LLM_PROVIDER="gemini")
+    monkeypatch.setattr(comparison.quota, "pool_gemini_keys", lambda settings, verification: ["google-b"])
+    created = []
+    monkeypatch.setattr(comparison, "get_llm_client", lambda **kwargs: created.append(kwargs) or SimpleNamespace())
+    comparison.fleet("gemini", config)
+    assert [c['api_key'] for c in created] == ['google-a', 'google-b']
