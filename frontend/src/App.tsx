@@ -7,6 +7,7 @@ import { hydrateServerProfile, toSignupData } from "./profileSync";
 import { Screen, SignupData, NavFn, normalizeSignupData, emptySignupData } from "./types";
 import { PANELS, panelOf } from "./navConfig";
 import PanelTabs from "./components/PanelTabs";
+import ColosseumIcon from "./components/ColosseumIcon";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -35,7 +36,7 @@ const NAV_ITEMS: { screen: Screen; label: string; icon: React.ReactNode }[] = [
    { screen: "schedule", label: "برنامه هفتگی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
    { screen: "evaluation", label: "ارزیابی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> },
   { screen: "mock", label: "آزمون هوشمند", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
-  { screen: "arena", label: "دوئل رنکینگ", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h12l3 6-9 12L3 9z"/><path d="M3 9h18"/><path d="M12 21L8 9"/><path d="M12 21l4-12"/></svg> },
+  { screen: "arena", label: "کولوسئوم", icon: <ColosseumIcon /> },
    { screen: "profile", label: "پروفایل", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
 ];
 
@@ -147,7 +148,7 @@ function MobileTabBar({ screen, nav }: { screen: Screen; nav: (s: Screen) => voi
   const items: { screen: Screen; label: string; icon: React.ReactNode }[] = [
     { screen: "home", label: "خانه", icon: ICONS.home },
     { screen: "plan", label: "برنامه", icon: ICONS.plan },
-    { screen: "arena", label: "آرنا", icon: ICONS.arena },
+    { screen: "arena", label: "کولوسئوم", icon: ICONS.arena },
     { screen: "chat", label: "بوم AI", icon: CHAT_ICON },
     { screen: "profile", label: "پروفایل", icon: ICONS.profile },
   ];

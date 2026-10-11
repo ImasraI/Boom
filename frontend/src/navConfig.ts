@@ -19,9 +19,9 @@ export interface PanelDef {
 export const PANELS: Record<PanelKey, PanelDef> = {
   ranked: {
     key: "ranked",
-    label: "مسابقه",
+    label: "کولوسئوم",
     items: [
-      { screen: "arena", label: "مسابقه رنک‌دار" },
+      { screen: "arena", label: "کولوسئوم" },
       { screen: "mock", label: "آزمون هوشمند" },
       { screen: "leaderboard", label: "جدول امتیازات" },
     ],

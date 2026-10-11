@@ -3,6 +3,7 @@ import { NavFn, SignupData } from "../types"
 import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
+import ColosseumIcon from "../components/ColosseumIcon"
 import QuestionFigure from "../components/QuestionFigure"
 import type { QuestionFigureData } from "../questionFigures"
 
@@ -193,8 +194,9 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, wanted, onTogg
   return (
     <div className="min-h-screen bg-[var(--surface)]">
       <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-12 pb-5 text-center">
-        <p className="text-[11px] font-bold text-[var(--muted-2)] mb-1">دوئل رنکینگ بوم</p>
-        <h1 className="font-bold text-xl text-[var(--text)] mb-3">آرنا</h1>
+        <ColosseumIcon size={72} className="mx-auto mb-3 text-[var(--accent)]" />
+        <p className="text-[11px] font-bold text-[var(--muted-2)] mb-1">رقابت رنک‌دار بوم</p>
+        <h1 className="font-display font-bold text-xl text-[var(--text)] mb-3">کولوسئوم</h1>
         {me && <EloBadge elo={me.elo} title={me.title.name} color={me.title.color} size="lg" />}
         {me && (
           <p className="text-[12px] text-[var(--muted-2)] mt-2 font-bold">
@@ -276,7 +278,7 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, wanted, onTogg
 
         <button onClick={onJoin} disabled={busy}
           className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50">
-          {busy ? "در حال دریافت اطلاعات آرنا..." : "جستجوی حریف"}
+          {busy ? "در حال دریافت اطلاعات کولوسئوم..." : "جستجوی حریف"}
         </button>
         <button onClick={onScheduled}
           className="w-full py-3.5 rounded-2xl border border-[var(--border-strong)] text-[13px] font-bold text-[var(--text)] flex items-center justify-center gap-2">
@@ -396,7 +398,7 @@ function DuelRunner({ match, onDone, onExit }: {
         <div className="w-9 h-9 border-3 border-[var(--accent)] border-t-transparent rounded-full animate-spin" style={{ borderWidth: 3 }} />
         <p className="text-sm text-[var(--muted)]">در حال دریافت دفترچه مسابقه… زمان آزمون پس از دریافت سوال‌ها شروع می‌شود.</p>
         {bookletError && <p role="alert" className="text-sm text-red-500">{bookletError}</p>}
-        <button onClick={onExit} className="text-sm text-[var(--accent)]">بازگشت به آرنا</button>
+        <button onClick={onExit} className="text-sm text-[var(--accent)]">بازگشت به کولوسئوم</button>
       </div>
     )
   }
@@ -500,7 +502,7 @@ function MatchResult({ match, onHome, onBoard }: { match: MatchInfo; onHome: () 
 
       <div className="px-4 max-w-[430px] mx-auto w-full space-y-3">
         <button onClick={onHome} className="w-full py-3.5 rounded-2xl bg-[var(--accent)] text-white font-bold text-[13px]">
-          بازگشت به آرنا
+          بازگشت به کولوسئوم
         </button>
         <button onClick={onBoard} className="w-full py-3.5 rounded-2xl border border-[var(--border-strong)] text-[13px] font-bold text-[var(--muted)]">
           جدول امتیازات
@@ -1000,5 +1002,5 @@ export default function Arena({ nav, userData, initialPhase }: {
   return <><Lobby me={me} onJoin={join} onBoard={openBoard} busy={loadingLobby || !!lobbyError}
     filters={filters} wanted={wanted} onToggle={toggleWanted} onClear={() => setWanted([])}
     error={lobbyError || error} onScheduled={openScheduled} />
-    {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت آرنا</button></div>}</>
+    {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت کولوسئوم</button></div>}</>
 }
