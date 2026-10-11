@@ -91,7 +91,7 @@ class MockConfig(BaseModel):
     total_questions: Optional[int] = Field(default=None, ge=1, le=200)
     duration_minutes: Optional[int] = Field(default=None, ge=1)  # default: sum of subject minutes
     topics: List[str] = []  # restrict to these topics (e.g. from the week's mock)
-    difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard)$")
+    difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard|extreme)$")
     mode: str = Field(default="general", pattern="^(general|practice|practice_weak_areas)$")
     student: Optional[dict] = None
 
@@ -126,11 +126,11 @@ def _resolve_plan(config: "MockConfig") -> Tuple[bool, List[dict], str]:
         and not config.topics
         and config.mode == "general"
     )
-    plan = [dict(s) for s in _KONKUR_SUBJECTS[_major_key(major)]]
+    plan = mock_generation.default_plan(major)
     if config.subjects:
         plan = [s for s in plan if s["name"] in config.subjects] or plan
     if config.questions_per_subject:
-        plan = [{**s, "questions": min(config.questions_per_subject, s["questions"])}
+        plan = [{**s, "branches": {}, "questions": min(config.questions_per_subject, s["questions"])}
                 for s in plan]
     if config.total_questions:
         from app.rag.konkur_format import resize_plan
@@ -175,8 +175,8 @@ def _claim_pool_mock(db: Session, user_id: int, major_key_str: str,
             if len(questions) != len(json.loads(row.questions)):
                 row.status = "quarantined"
                 continue
-            if plan and (len(questions) != sum(s['questions'] for s in plan) or
-                    any(sum(q.get('subject') == s['name'] for q in questions) != s['questions'] for s in plan)):
+            from app.rag.exam_blueprint import matches_plan
+            if plan and not matches_plan(questions, plan, grade):
                 continue  # A five-question template cannot satisfy a full booklet.
             claimed = db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
                 GeneratedMock.status == "pending_use").values(
@@ -279,6 +279,8 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
     config = config.model_copy(update={"student": student})
     poolable, plan, major = _resolve_plan(config)
     grade = (config.student or {}).get("grade") or ""
+    if config.mode != 'general':
+        plan = [{**row, 'branches': {}, 'full_mock': False} for row in plan]
     weak = []
     if config.mode == "practice_weak_areas":
         weak = mock_generation.weak_areas(current_user.id)
@@ -346,8 +348,8 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
     if questions:
         questions = mock_generation.verify_and_repair_booklet(
             questions, current_user.id, difficulty=config.difficulty, report=report)
-    if questions and (is_daily_quota_error(provider_error) or any(
-            sum(q.get("subject") == row["name"] for q in questions) != row["questions"] for row in plan)):
+    from app.rag.exam_blueprint import matches_plan
+    if questions and (is_daily_quota_error(provider_error) or not matches_plan(questions, plan, grade, config.topics)):
         _persist_mock(db, user_id=current_user.id, questions=questions, duration=duration,
             major=major or "ریاضی فیزیک", grade=grade, difficulty=config.difficulty,
             title="سوال‌های تاییدشده از تولید ناتمام", status="bank_only")
@@ -358,7 +360,7 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
                 "message":"کلید سرویس آزمون رد شده یا دسترسی ندارد؛ مدیر سایت باید کلید معتبر تنظیم کند."})
         raise HTTPException(503, detail={"code": "provider_daily_quota",
                                          "message": DAILY_QUOTA_MESSAGE})
-    if not questions or any(sum(q.get("subject") == row["name"] for q in questions) != row["questions"] for row in plan):
+    if not questions or not matches_plan(questions, plan, grade, config.topics):
         require_pool_available()  # Include cooldown/reset details when every key is limited.
         raise HTTPException(status_code=502,
                             detail="مدل زبانی دفترچه معتبری تولید نکرد؛ دوباره تلاش کنید.")

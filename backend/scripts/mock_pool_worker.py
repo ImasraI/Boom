@@ -52,7 +52,7 @@ def main() -> None:
     parser.add_argument("--majors", default="",
                         help="comma list of major keys (default: all pooled)")
     parser.add_argument("--difficulties", default="",
-                        help="comma list: easy,konkur,hard (default: all)")
+                        help="comma list: easy,konkur,hard,extreme (default: all)")
     parser.add_argument("--interval", type=float, default=60.0,
                         help="seconds between sweeps in continuous mode")
     parser.add_argument("--once", action="store_true",

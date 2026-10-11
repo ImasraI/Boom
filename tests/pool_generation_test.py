@@ -64,12 +64,14 @@ def db():
 def _fake_questions(plan, fill=1.0, skip=()):
     """`fill` of every planned subject, already marked verified."""
     out = []
-    for row in plan:
+    for row in mg.exam_blueprint.coverage_rows(plan):
         if row["name"] in skip:
             continue
         for i in range(int(row["questions"] * fill)):
             out.append({
-                "subject": row["name"], "topic": "مبحث", "text": f"سوال {i}",
+                "subject": row["name"], "topic": "مبحث", "text": f"سوال {row.get('branch', '')} {i}",
+                "branch": row.get('branch', ''), "curriculum_id": f"{row.get('branch', row['name'])}-{i}",
+                "book": "book", "page": 20, "source_quote": "OCR", "grounding_status": "book_ocr",
                 "options": ["a", "b", "c", "d"], "answer": i % 4,
                 "explanation": "توضیح", "verification_status": "verified",
             })
@@ -86,9 +88,8 @@ def _patch_booklet(monkeypatch, questions):
         lambda qs, *a, **k: [{**q, "verification_status": "verified"} for q in qs])
 
 
-def test_short_but_complete_booklet_is_kept_with_a_scaled_duration(monkeypatch):
-    """A paper at 60% of the official plan is servable - it must NOT be
-    thrown away (the old exact-match rule rejected everything)."""
+def test_partial_full_mock_is_not_served_as_a_complete_booklet(monkeypatch):
+    """The new full format requires all 105 questions and branch quotas."""
     plan = mg.default_plan("riazi")
     questions = _fake_questions(plan, fill=0.6)
     _patch_booklet(monkeypatch, questions)
@@ -98,11 +99,10 @@ def test_short_but_complete_booklet_is_kept_with_a_scaled_duration(monkeypatch):
 
     planned_total = sum(r["questions"] for r in plan)
     full_duration = sum(r["minutes"] for r in plan)
-    assert len(kept) == len(questions)
+    assert kept == []
     assert len(kept_plan) == len(plan)
     # Never advertise more time than the questions the paper actually holds.
-    assert duration == max(1, round(full_duration * len(kept) / planned_total))
-    assert duration < full_duration
+    assert duration == full_duration
 
 
 def test_booklet_below_the_fill_floor_is_discarded(monkeypatch):

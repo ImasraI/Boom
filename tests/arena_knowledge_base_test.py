@@ -38,7 +38,7 @@ from app.routers import arena
 VERIFIED_SHELF_BOOKLET = json.dumps([
     {'verification_status':'verified','_id':i+1,'subject':subject,'topic':'',
      'text':f'q {subject} {i}','options':['a','b','c','d'],'answer':1,'explanation':''}
-    for subject, count in [('ریاضی',13),('فیزیک',11),('شیمی',10)]
+    for subject, count in [('ریاضی',4),('فیزیک',3),('شیمی',3)]
     for i in range(count)], ensure_ascii=False)
 
 
@@ -91,8 +91,8 @@ def test_cross_major_plan_is_the_shared_exam_material():
     out = kb.pair_plan("ریاضی فیزیک", "علوم تجربی")
     assert out["ok"] is True
     assert [row["name"] for row in out["plan"]] == ["ریاضی", "فیزیک", "شیمی"]
-    # Counts are the smaller of the two majors' official figures, // divisor.
-    assert [row["questions"] for row in out["plan"]] == [10, 10, 10]
+    # Ten total questions, allocated across shared exam subjects.
+    assert [row["questions"] for row in out["plan"]] == [4, 3, 3]
     # Never a subject only one side studies.
     assert "زیست‌شناسی" not in out["booklet_subjects"]
 
@@ -290,8 +290,8 @@ def test_matchmaking_skips_incompatible_opponents(db):
     # The reserved booklet is the INTERSECTION skeleton: the three shared
     # subjects, 10 questions each, on the overlap plan's own duration.
     assert _distinct(mock) == ["ریاضی", "فیزیک", "شیمی"]
-    assert len(_subjects(mock)) == 30
-    assert mock.duration_minutes == 38
+    assert len(_subjects(mock)) == 10
+    assert mock.duration_minutes == 13
     assert mock.grade == ""
     # Both matched entries left the queue; the incompatible one is still in it.
     queued = [e.student_id for e in db.query(ArenaQueueEntry).all()]
@@ -479,4 +479,4 @@ def test_match_payload_names_the_shared_subjects(db):
     body = _client(db, b).get(f"/api/arena/{match.id}").json()
     assert body["subjects"] == ["ریاضی", "فیزیک", "شیمی"]
     # The duel is short: 30 questions on the overlap plan's own duration.
-    assert body["mock"]["duration_minutes"] == 38
+    assert body["mock"]["duration_minutes"] == 13

@@ -116,7 +116,7 @@ def test_admin_reports_unlimited_capacity_and_actual_verified_stock(db):
     assert result['unlimited_storage'] and result['progress']['capacity'] is None
     assert result['progress']['duel_capacity'] is None
     assert sum(s['verified'] for s in result['inventory'])==3
-    assert next(s for s in result['catalog'] if s['key']=='riazi')['ranked_questions']==34
+    assert next(s for s in result['catalog'] if s['key']=='riazi')['ranked_questions']==10
 
 
 def test_ranked_subject_filter_does_not_search_for_subject_name_inside_lesson(db):

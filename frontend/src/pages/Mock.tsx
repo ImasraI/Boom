@@ -48,6 +48,7 @@ const DIFFICULTIES = [
   { id: "easy", label: "آسان" },
   { id: "konkur", label: "استاندارد کنکور" },
   { id: "hard", label: "سخت" },
+  { id: "extreme", label: "سخت‌ترین سطح" },
 ]
 
 function fmt(seconds: number) {
@@ -74,7 +75,7 @@ function ConfigView({ onStart, onBack, error }: {
   error: string
 }) {
   const [difficulty, setDifficulty] = useState("konkur")
-  const [count, setCount] = useState(5) // 0 = official full booklet; independent of style.
+  const [count, setCount] = useState(0) // Full mock by default; short counts remain for practice.
   const [topics, setTopics] = useState("")
   const [mode, setMode] = useState("general")
 
@@ -96,17 +97,17 @@ function ConfigView({ onStart, onBack, error }: {
         )}
         <div className="border-b border-[var(--border)] pb-4">
           <label className="text-[12px] font-bold text-[var(--muted)]">نوع دفترچه
-            <select value={mode} onChange={e => setMode(e.target.value)} className="block mt-2 w-full bg-[var(--surface)] border-b border-[var(--border-strong)] p-2 text-sm text-[var(--text)]">
+            <select value={mode} onChange={e => { setMode(e.target.value); setCount(e.target.value === "general" ? 0 : 10) }} className="block mt-2 w-full bg-[var(--surface)] border-b border-[var(--border-strong)] p-2 text-sm text-[var(--text)]">
               <option value="practice">تمرین از سوال‌های قبلی</option>
               <option value="practice_weak_areas">تمرین نقاط ضعف</option>
-              <option value="general">آزمون با استاندارد کنکور</option>
+              <option value="general">آزمون کامل کنکور</option>
             </select>
           </label>
-          <p className="text-[11px] text-[var(--muted-2)] mt-2">استاندارد کنکور، سبک سوال‌هاست؛ تعداد را جدا انتخاب کن. آزمون از سوال‌های آمادهٔ بانک و استخر استفاده می‌کند؛ تمرین، سوال‌های قبلی را در اولویت می‌گذارد.</p>
+          <p className="text-[11px] text-[var(--muted-2)] mt-2">آزمون کامل، همه درس‌های دفترچه رشته‌ات را پوشش می‌دهد. برای ریاضی‌فیزیک: ۴۰ ریاضی، ۳۵ فیزیک و ۳۰ شیمی. تمرین، سوال‌های قبلی را در اولویت می‌گذارد.</p>
         </div>
         <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">سطح دشواری</p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {DIFFICULTIES.map(d => (
               <button key={d.id} onClick={() => setDifficulty(d.id)}
                 className={`py-2.5 rounded-xl text-[12px] font-bold border transition-colors ${
@@ -120,7 +121,7 @@ function ConfigView({ onStart, onBack, error }: {
           </div>
         </div>
 
-        <div className="study-section p-4">
+        {mode !== "general" && <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">تعداد کل سوال‌ها</p>
           <div className="grid grid-cols-3 gap-2">
             {[5, 10, 0].map(n => (
@@ -134,17 +135,17 @@ function ConfigView({ onStart, onBack, error }: {
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
-        <div className="study-section p-4">
+        {mode !== "general" && <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2">مباحث هدف (اختیاری)</p>
           <textarea rows={2} value={topics} onChange={e => setTopics(e.target.value)}
             placeholder="مثلاً: حرکت‌شناسی، اثر داپلر، استوکیومتری — هر مبحث در یک خط"
             className="w-full border rounded-xl px-3 py-2.5 text-[13px] text-right bg-[var(--card)] text-[var(--text)] resize-none leading-relaxed" />
           <p className="text-[10px] text-[var(--muted-2)] mt-1.5">خالی بگذاری، سوالات از کل مباحث کنکوری می‌آید. برای تمرکز بر آزمون پیش رو، مباحث آن را وارد کن.</p>
-        </div>
+        </div>}
 
-        <button onClick={() => onStart({ mode, difficulty, stock_only: true, total_questions: count || undefined, topics: topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
+        <button onClick={() => onStart({ mode, difficulty, stock_only: true, total_questions: mode === "general" ? undefined : count || undefined, topics: mode !== "general" && topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
           className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all">
           ساخت دفترچه آزمون
         </button>

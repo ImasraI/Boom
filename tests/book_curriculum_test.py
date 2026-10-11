@@ -5,6 +5,23 @@ from app.rag import book_curriculum as books
 from app.rag import knowledge_graph as graph
 
 
+def test_major_name_in_science_book_does_not_change_subject():
+    assert books.subject_for_book('فیزیک 1 ریاضی خیلی سبز') == 'فیزیک'
+    assert books.subject_for_book('شیمی جامع ریاضی') == 'شیمی'
+    assert books.majors_for_book('فیزیک 1 ریاضی خیلی سبز', 'فیزیک') == ['riazi']
+
+
+def test_cached_science_headings_are_reclassified_using_saved_ocr_evidence():
+    book='فیزیک 1 ریاضی خیلی سبز'
+    node={'id':'wrong', 'subject':'ریاضی','title':'انرژی', 'year':10,'importance':3,
+          'majors':['riazi'], 'sources':[{'book':book,'page':7,'quote':'انرژی',
+          'grade_page':2,'grade_quote':'فیزیک پایه دهم'}]}
+    corrected=books.reclassify_cached_lessons(book,[node],{2:'فیزیک پایه دهم',7:'کار و انرژی'})
+    assert corrected[0]['subject']=='فیزیک'
+    assert corrected[0]['year']==10 and corrected[0]['id']!='wrong'
+    assert books.reclassify_cached_lessons(book,[node],{7:'متن نامرتبط'}) == []
+
+
 def lesson(title='تابع',page=7,year=11,**extra):
     return {'title':title,'page':page,'quote':title,'year':year,
             'grade_page':2,'grade_quote':'حسابان ۱ پایه یازدهم',**extra}

@@ -241,10 +241,10 @@ def pool_levels(db: Session = Depends(get_db)):
 class PoolRunIn(BaseModel):
     kind: str = Field(default="mock", pattern="^(mock|ranked|both)$")
     major: str = "riazi"
-    difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard)$")
+    difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard|extreme)$")
     count: int = Field(default=0, ge=0)  # 0: until canceled/provider stops
     grade: str = Field(default="دوازدهم", pattern="^(دهم|یازدهم|دوازدهم)$")
-    total_questions: int = Field(default=10, ge=0, le=200)  # 0: official full mock.
+    total_questions: int = Field(default=0, ge=0, le=200)  # 0: full mock; ranked always ten.
     subjects: list[str] = Field(default_factory=list, max_length=15)
     topics: list[str] = Field(default_factory=list, max_length=20)
 

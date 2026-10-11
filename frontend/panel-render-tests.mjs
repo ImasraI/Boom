@@ -23,18 +23,18 @@ test('Mock page and its shared math/report modules load with an empty profile', 
   const html = renderToStaticMarkup(React.createElement(Mock, {nav(){},userData:null}));
   assert.match(html, /تمرین از سوال‌های قبلی/);
   assert.match(html, /ساخت دفترچه آزمون/);
-  assert.match(html, /آزمون با استاندارد کنکور/);
-  assert.match(html, /تعداد کل سوال‌ها/);
-  assert.doesNotMatch(html, /آزمون کامل کنکور/);
+  assert.match(html, /آزمون کامل کنکور/);
+  assert.match(html, /سخت‌ترین سطح/);
+  assert.doesNotMatch(html, /تعداد کل سوال‌ها|مباحث هدف/);
   assert.doesNotMatch(html, /صفحه آماده نشد/);
 });
 
 test('Ranked page loads its controls before account and filter requests finish', async () => {
   const {default:Arena} = await vite.ssrLoadModule('/src/pages/Arena.tsx');
   const html = renderToStaticMarkup(React.createElement(Arena, {nav(){},userData:null}));
-  assert.match(html, /فیلتر دروس/);
+  assert.match(html, /دوئل استاندارد: ۱۰ سوال/);
   assert.match(html, /در حال دریافت اطلاعات کولوسئوم/);
-  assert.match(html, /تلاش دوباره برای دریافت کولوسئوم|در حال بارگذاری دروس/);
+  assert.doesNotMatch(html, /فیلتر دروس|type="checkbox"/);
   assert.doesNotMatch(html, /صفحه آماده نشد/);
 });
 
@@ -43,8 +43,14 @@ test('Admin pool renders unlimited and targeted production controls', async () =
   const html = renderToStaticMarkup(React.createElement(Admin, {nav(){}}));
   assert.match(html, /ذخیره بدون سقف/);
   assert.match(html, /کولوسئوم \+ آزمون آزمایشی و تمرین/);
-  assert.match(html, /تعداد کل سوال‌های آزمون آزمایشی/);
-  assert.match(html, /مباحث هدف/);
+  assert.match(html, /دفترچه کامل رشته/);
+  assert.match(html, /سخت‌ترین سطح/);
+  assert.match(html, /بخش‌های مدیریت/);
+  assert.match(html, /id="admin-generation"/);
+  assert.match(html, /id="admin-bank" hidden/);
+  assert.match(html, /id="admin-keys" hidden/);
+  assert.match(html, /id="admin-users" hidden/);
+  assert.match(html, /id="admin-sms" hidden/);
   assert.match(html, /راه‌اندازی مجدد سرور ادامه می‌دهد/);
   assert.match(html, /موجودی سوال‌های قابل استفاده/);
   assert.match(html, /کلیدهای سرویس ساخت آزمون/);

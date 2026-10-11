@@ -23,8 +23,12 @@ def setup(monkeypatch, tmp_path):
     path = tmp_path / ".env"
     path.write_text("SECRET_KEY='preserve-this-secret'\nPOOL_LLM_PROVIDER=groq\n"
                     "POOL_VERIFY_LLM_PROVIDER=gemini\n# keep this comment\n", encoding="utf-8")
-    for name in ("POOL_GROQ_API_KEYS", "POOL_GEMINI_API_KEYS", "POOL_VERIFY_GEMINI_API_KEYS",
-                 "POOL_LLM_API_KEY", "POOL_VERIFY_LLM_API_KEY", "LLM_API_KEY", "GEMINI_API_KEY"):
+    # security imports the developer's dotenv into os.environ. These tests
+    # exercise Gemini-only verification; local fallback flags/models/keys must
+    # not silently change their provider topology.
+    for name in Settings.model_fields:
+        if not (name.startswith(('POOL_', 'GEMINI_')) or name == 'LLM_API_KEY'):
+            continue
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(credentials, "_env_path", lambda: path)
     monkeypatch.setattr(credentials, "get_settings", lambda: Settings(_env_file=path))

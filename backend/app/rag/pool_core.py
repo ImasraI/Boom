@@ -34,7 +34,7 @@ for _label, _key in MAJOR_ALIASES.items():
 
 # Only majors with an official specialized plan can be pooled.
 POOL_MAJORS = [k for k in SPECIALIZED_SUBJECTS if k in CANONICAL_MAJOR]
-POOL_DIFFICULTIES = ["easy", "konkur", "hard"]
+POOL_DIFFICULTIES = ["easy", "konkur", "hard", "extreme"]
 
 # student_id sentinel for unassigned pool rows (no real user has id 0).
 POOL_OWNER_ID = 0
@@ -246,6 +246,10 @@ def _progress_reporter():
             note_verified(int(data.get("count") or 0))
         elif event == "provider_error":
             note_provider_error(str(data.get("message") or ""))
+        elif event == "grounding_error":
+            with _progress_lock:
+                if _progress['active']:
+                    _progress['last_error'] = str(data.get('message') or '')
 
     return report
 
@@ -355,6 +359,9 @@ def _build_from_stock(db, major_key, difficulty, plan, grade, topics, allow_gene
         if row and (row.id in reserved or row.uses or row.status != 'active' or not row.verified):
             continue
         fresh.append({**q, '_id':len(fresh) + 1})
+    from app.rag.exam_blueprint import matches_plan
+    if any(row.get('full_mock') for row in plan) and not matches_plan(fresh, plan, grade, topics or []):
+        return [], built_plan, duration
     short = mock_generation._shortfall(fresh, plan)
     if len(fresh) < sum(s['questions'] for s in plan) * mock_generation.POOL_MIN_FILL or any(
             produced == 0 for _, _, produced in short):
@@ -681,10 +688,19 @@ def generation_plan(major_key, *, ranked=False, subjects=None, total_questions=0
     from app.rag.konkur_format import resize_plan
     plan = (knowledge_base.pair_plan(CANONICAL_MAJOR[major_key], CANONICAL_MAJOR[major_key])['plan']
             if ranked else mock_generation.default_plan(major_key))
+    if ranked and subjects:
+        # Start from full subject weights, then allocate ten in total.
+        from app.rag.konkur_format import RANKED_QUESTIONS
+        source = [r for r in mock_generation.default_plan(major_key) if r['name'] in subjects]
+        if not source:
+            raise ValueError('No exam subjects match the selected major')
+        return [{**r, 'minutes': r['minutes'] * 3} for r in resize_plan(source, RANKED_QUESTIONS)]
     plan = [dict(row) for row in plan if not subjects or row['name'] in subjects]
     if not plan:
         raise ValueError('No exam subjects match the selected major')
-    return plan if ranked else resize_plan(plan, total_questions)
+    if ranked:
+        return plan
+    return resize_plan(plan, total_questions)
 
 
 def catalog():

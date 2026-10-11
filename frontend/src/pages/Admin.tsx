@@ -68,7 +68,7 @@ const FEATURE_FA: Record<string, string> = {
   today_tests: "آزمون امروز", mock_generate: "آزمون هوشمند", arena_join: "دوئل",
 };
 const DIFFICULTY_FA: Record<string, string> = {
-  easy: "آسان", konkur: "کنکور", hard: "سخت",
+  easy: "آسان", konkur: "کنکور", hard: "سخت", extreme: "سخت‌ترین سطح",
 };
 const PHASE_FA: Record<string, string> = {
   generating: "تولید سوال", verifying: "راستی‌آزمایی پاسخ‌ها", saving: "ذخیره دفترچه",
@@ -96,12 +96,13 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [busy, setBusy] = useState(false);
   const [restocking, setRestocking] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
+  const [section, setSection] = useState("generation");
   const [poolKind, setPoolKind] = useState("both");
   const [poolMajor, setPoolMajor] = useState("riazi");
   const [poolDifficulty, setPoolDifficulty] = useState("konkur");
   const [poolGrade, setPoolGrade] = useState("دوازدهم");
   const [poolCount, setPoolCount] = useState("0");
-  const [poolQuestions, setPoolQuestions] = useState(10);
+  const [poolQuestions, setPoolQuestions] = useState(0);
   const [poolSubjects, setPoolSubjects] = useState<string[]>([]);
   const [poolTopics, setPoolTopics] = useState("");
   const selectedMajor = pool?.catalog?.find(m => m.key === poolMajor);
@@ -230,8 +231,8 @@ export default function Admin({ nav }: { nav: NavFn }) {
       const res = await fetch(apiUrl("/api/admin/pool/restock"), {
         method: "POST", headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ kind: poolKind, major: poolMajor, difficulty: poolDifficulty, grade: poolGrade, count,
-          total_questions: poolQuestions, subjects: poolSubjects,
-          topics: poolTopics.split("\n").map(t => t.trim()).filter(Boolean) }),
+          total_questions: poolQuestions, subjects: poolQuestions ? poolSubjects : [],
+          topics: poolQuestions ? poolTopics.split("\n").map(t => t.trim()).filter(Boolean) : [] }),
       });
       if (!res.ok) throw new Error(await readApiError(res, "شروع restock ناموفق بود"));
       setRestocking(true);
@@ -285,13 +286,22 @@ export default function Admin({ nav }: { nav: NavFn }) {
       <div>
         <h1 className="font-display text-2xl text-[var(--text)]">پنل مدیریت</h1>
         <p className="text-xs text-[var(--muted-2)] mt-1">
-          تا زمان تأیید قالب پیامک، شماره‌های این لیست می‌توانند با کد ثابت ثبت‌نام کنند.
+          تولید آزمون، بانک سوال، کلیدهای مدل و دسترسی کاربران را از بخش مربوط مدیریت کن.
         </p>
       </div>
+
+      <nav aria-label="بخش‌های مدیریت" className="flex flex-wrap gap-x-5 gap-y-2 border-b border-[var(--border)] pb-2">
+        {[["generation", "تولید آزمون"], ["bank", "بانک سوال"], ["keys", "مدل‌ها و مصرف"], ["users", "کاربران"], ["sms", "ورود و پیامک"]].map(([id, label]) =>
+          <button key={id} type="button" aria-pressed={section === id} aria-controls={`admin-${id}`} onClick={() => setSection(id)}
+            className={`py-2 text-sm border-b-2 transition-colors ${section === id ? "border-[var(--accent)] text-[var(--accent)] font-bold" : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"}`}>
+            {label}
+          </button>)}
+      </nav>
 
       {msg && <p className="text-xs text-emerald-400">{msg}</p>}
       {err && <p className="text-xs text-red-400">{err}</p>}
 
+      <div id="admin-sms" hidden={section !== "sms"} className="space-y-6">
       {/* ------------------------------------------------ sms credit ---- */}
       <section className="study-section p-4 flex items-center gap-3">
         <div>
@@ -358,6 +368,8 @@ export default function Admin({ nav }: { nav: NavFn }) {
         )}
       </section>
 
+      </div>
+      <div id="admin-users" hidden={section !== "users"}>
       {/* --------------------------------------- users + usage/reset ---- */}
       <section className="study-section p-5">
         <div className="flex items-center gap-2 mb-3">
@@ -412,6 +424,8 @@ export default function Admin({ nav }: { nav: NavFn }) {
         )}
       </section>
 
+      </div>
+      <div id="admin-generation" hidden={section !== "generation"} className="space-y-6">
       {/* ------------------------------------------------ mock pool ---- */}
       <section className="study-section p-5">
         <div className="flex items-center gap-2 mb-3">
@@ -443,12 +457,15 @@ export default function Admin({ nav }: { nav: NavFn }) {
           <label>دشواری<select aria-label="دشواری برای تولید" value={poolDifficulty} onChange={e => setPoolDifficulty(e.target.value)} disabled={generating || poolKind === "ranked"} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{Object.entries(DIFFICULTY_FA).map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
           <label>پایه<select value={poolGrade} onChange={e => setPoolGrade(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{["دهم", "یازدهم", "دوازدهم"].map(g => <option key={g}>{g}</option>)}</select></label>
           <label>تعداد دفترچه؛ صفر = پیوسته<input aria-label="تعداد دفترچه" type="number" min={0} step={1} value={poolCount} onChange={e => setPoolCount(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]" /></label>
-          {poolKind !== "ranked" && <label>تعداد کل سوال‌های آزمون آزمایشی<select aria-label="تعداد سوال برای تولید" value={poolQuestions} onChange={e => setPoolQuestions(Number(e.target.value))} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]"><option value={5}>۵ سوال</option><option value={10}>۱۰ سوال</option><option value={0}>دفترچه کامل</option></select></label>}
+          {poolKind !== "ranked" && <label>اندازه دفترچه<select aria-label="تعداد سوال برای تولید" value={poolQuestions} onChange={() => { setPoolQuestions(0); setPoolSubjects([]); setPoolTopics(""); }} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">
+            {poolQuestions > 0 && <option value={poolQuestions}>تولید قبلی: {poolQuestions} سوال</option>}
+            <option value={0}>دفترچه کامل رشته</option>
+          </select></label>}
         </div>
-        {offeredSubjects.length > 0 && <fieldset className="border-b border-[var(--border)] pb-4 mb-4"><legend className="text-xs text-[var(--muted)] mb-2">درس‌ها؛ انتخاب خالی یعنی همه درس‌های آزمون</legend><div className="flex flex-wrap gap-4">{offeredSubjects.map(subject => <label key={subject} className="text-xs flex gap-2 items-center"><input type="checkbox" checked={poolSubjects.includes(subject)} disabled={generating} onChange={e => setPoolSubjects(previous => e.target.checked ? [...previous, subject] : previous.filter(s => s !== subject))} />{subject}</label>)}</div></fieldset>}
-        <label className="block text-xs text-[var(--muted)] mb-4">مباحث هدف؛ هر مبحث در یک خط، خالی یعنی همه مباحث<textarea aria-label="مباحث برای تولید" value={poolTopics} disabled={generating} onChange={e => setPoolTopics(e.target.value)} rows={2} className="block w-full bg-transparent border-b border-[var(--border-strong)] py-2 text-[var(--text)]" /></label>
+        {poolQuestions > 0 && offeredSubjects.length > 0 && <fieldset className="border-b border-[var(--border)] pb-4 mb-4"><legend className="text-xs text-[var(--muted)] mb-2">درس‌ها؛ انتخاب خالی یعنی همه درس‌های آزمون</legend><div className="flex flex-wrap gap-4">{offeredSubjects.map(subject => <label key={subject} className="text-xs flex gap-2 items-center"><input type="checkbox" checked={poolSubjects.includes(subject)} disabled={generating} onChange={e => setPoolSubjects(previous => e.target.checked ? [...previous, subject] : previous.filter(s => s !== subject))} />{subject}</label>)}</div></fieldset>}
+        {poolQuestions > 0 && <label className="block text-xs text-[var(--muted)] mb-4">مباحث هدف؛ هر مبحث در یک خط، خالی یعنی همه مباحث<textarea aria-label="مباحث برای تولید" value={poolTopics} disabled={generating} onChange={e => setPoolTopics(e.target.value)} rows={2} className="block w-full bg-transparent border-b border-[var(--border-strong)] py-2 text-[var(--text)]" /></label>}
         <p className="text-xs text-[var(--muted)] mb-4">حالت پیوسته سقف موجودی ندارد؛ پس از بازنشانی سهمیه و راه‌اندازی مجدد سرور ادامه می‌دهد. تمرین قبلی و تمرین نقاط ضعف از همین بانک با انتخاب مناسب هر دانش‌آموز ساخته می‌شوند.</p>
-        {poolKind !== "mock" && <p className="text-xs text-[var(--muted)] mb-4">رنکینگ با استاندارد کنکور و اندازهٔ کوتاه همان صفحه ساخته می‌شود{selectedMajor ? `: ${selectedMajor.ranked_questions} سوال در حالت همه درس‌ها` : ""}. تعداد بالا فقط برای آزمون آزمایشی است.</p>}
+        {poolKind !== "mock" && <p className="text-xs text-[var(--muted)] mb-4">کولوسئوم همیشه ۱۰ سوال با سطح استاندارد کنکور دارد. آزمون کامل ریاضی‌فیزیک: ۴۰ ریاضی (۱۲ هندسه، ۵ آمار و احتمال، ۶ گسسته، ۱۷ حسابان)، ۳۵ فیزیک و ۳۰ شیمی.</p>}
         <p className="text-sm text-[var(--text)] mb-4">{stockQuestions.toLocaleString("fa-IR")} سوال مشترک تاییدشده · {unusedQuestions.toLocaleString("fa-IR")} استفاده‌نشده · {(pool?.question_bank?.corrupt ?? 0).toLocaleString("fa-IR")} گزارش‌شده</p>
         <PoolStockNotice unavailable={pool?.shelves.reduce((sum, row) => sum + (row.needs_review ?? 0), 0) ?? 0} />
         {poolPollError && <p role="alert" className="text-xs text-red-400 mb-4">{poolPollError}</p>}
@@ -512,6 +529,12 @@ export default function Admin({ nav }: { nav: NavFn }) {
             </p>
           )}
         </div>
+      </section>
+      <PoolDraftQueue queue={pool?.draft_queue} drafting={pool?.run?.drafting} verification={pool?.run?.verification} running={pool?.run?.enabled} />
+      </div>
+      <div id="admin-bank" hidden={section !== "bank"} className="space-y-6">
+      <section className="study-section p-5">
+        <h2 className="font-bold text-sm mb-4">بانک سوال و دفترچه‌های آماده</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {pool?.shelves.map(s => {
             return (
@@ -532,6 +555,12 @@ export default function Admin({ nav }: { nav: NavFn }) {
           })}
         </div>
         <div className="mt-5 overflow-x-auto"><table className="w-full text-xs text-start"><caption className="text-start text-[var(--muted)] mb-3">موجودی سوال‌های قابل استفاده به تفکیک رشته، پایه و درس</caption><thead><tr>{["رشته / پایه", "درس / سطح", "تاییدشده", "جدید", "استفاده‌شده"].map(label => <th key={label} className="text-start border-b border-[var(--border)] py-2 px-2 font-medium">{label}</th>)}</tr></thead><tbody>{pool?.inventory?.map(row => <tr key={`${row.major}/${row.grade}/${row.difficulty}/${row.subject}`}><td className="border-b border-[var(--border)] py-2 px-2">{row.major} · {row.grade || "همه پایه‌ها"}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.subject} · {DIFFICULTY_FA[row.difficulty] ?? row.difficulty}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.verified}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.unused}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.used}</td></tr>)}</tbody></table>{!stockQuestions && <p className="text-xs text-[var(--muted)] py-3">هنوز سوال مشترک تاییدشده آماده نشده است.</p>}</div>
+      </section>
+      <CorruptQuestions />
+      </div>
+      <div id="admin-keys" hidden={section !== "keys"} className="space-y-6">
+      <PoolCredentials onChanged={() => { void load(); }} />
+      <section className="study-section p-5">
         <div className="mt-5 border-t border-[var(--border)] pt-4">
           <h3 className="text-sm font-bold">مصرف توکن امروز</h3>
           <p className="text-xs text-[var(--muted)] mt-2 leading-relaxed">
@@ -559,9 +588,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
           </p>
         )}
       </section>
-      <PoolDraftQueue queue={pool?.draft_queue} drafting={pool?.run?.drafting} verification={pool?.run?.verification} running={pool?.run?.enabled} />
-      <PoolCredentials onChanged={() => { void load(); }} />
-      <CorruptQuestions />
+      </div>
     </div>
   );
 }

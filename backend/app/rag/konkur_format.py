@@ -38,6 +38,10 @@ from typing import Dict, List
 # publishes a new format (check: sanjesh.org -> اطلاعیه تعداد سوالات).
 FORMAT_YEAR = "1405 (identical 1403-1405)"
 
+# The requested math-physics mock blueprint; other majors retain their formats.
+RIAZI_MATH_BLUEPRINT = {"geometry": 12, "statistics": 5, "discrete": 6, "calculus": 17}
+RANKED_QUESTIONS = 10
+
 # ---------------------------------------------------------------- عمومی ----
 # Not examined as a test booklet since Konkur 1402 (50% weight flows in via
 # final-exam GPA). Kept for study plans and the future final-mock feature;
@@ -132,6 +136,13 @@ def resize_plan(plan: List[dict], total: int) -> List[dict]:
     counts = [int(value) for value in shares]
     for i in sorted(range(len(plan)), key=lambda i: -(shares[i] - counts[i]))[:total - sum(counts)]:
         counts[i] += 1
-    return [{**row, 'questions': count,
-             'minutes': max(1, round(row['minutes'] * count / row['questions']))}
-            for row, count in zip(plan, counts) if count]
+    result = []
+    for row, count in zip(plan, counts):
+        if not count:
+            continue
+        if count != row['questions']:
+            row.pop('branches', None)  # Full-booklet quotas do not apply to short practice.
+            row.pop('full_mock', None)
+        result.append({**row, 'questions': count,
+                       'minutes': max(1, round(row['minutes'] * count / row['questions']))})
+    return result

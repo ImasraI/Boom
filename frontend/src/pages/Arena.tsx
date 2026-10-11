@@ -179,16 +179,13 @@ function EloBadge({ elo, title, color, size = "md" }: { elo: number; title?: str
 
 /* ---------------- Lobby ---------------- */
 
-function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, wanted, onToggle, onClear, error }: {
+function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, error }: {
   me: MeInfo | null
   onJoin: () => void
   onBoard: () => void
   onScheduled: () => void
   busy: boolean
   filters: FilterOptions | null
-  wanted: string[]
-  onToggle: (subject: string) => void
-  onClear: () => void
   error?: string
 }) {
   return (
@@ -210,7 +207,7 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, wanted, onTogg
           <p className="text-[13px] font-bold text-[var(--text)] mb-2">چطور کار می‌کند؟</p>
           <ul className="text-[12px] text-[var(--muted-2)] leading-relaxed space-y-1.5">
             <li>• وارد صف شو؛ تا وقتی حریف هم‌سطح پیدا نشود در صف می‌مانی — بدون ربات.</li>
-            <li>• هر دو یک دفترچه آزمون یکسان و کوتاه می‌گیرید، با زمان واقعی.</li>
+            <li>• هر دو یک دفترچه یکسان با ۱۰ سوال می‌گیرید، با زمان واقعی.</li>
             <li>• دفترچه از دانش مشترک شما ساخته می‌شود: رشته‌های مختلف فقط روی درس‌های مشترک مسابقه می‌دهند.</li>
             <li>• پایه تحصیلی کوچک‌تر تعیین می‌شود؛ سوال از مطالبی که هنوز نخوانده‌ای پرسیده نمی‌شود.</li>
             <li>• تصحیح با نمره منفی کنکور؛ امتیاز بیشتری بگیری، Elo بیشتری می‌گیری.</li>
@@ -218,59 +215,10 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, wanted, onTogg
           </ul>
         </div>
 
-        <div className="study-section p-4 text-right">
-          <div className="flex items-center justify-between mb-1.5">
-            <p className="text-[13px] font-bold text-[var(--text)]">فیلتر دروس (اختیاری)</p>
-            {wanted.length > 0 && (
-              <button onClick={onClear} className="text-[11px] font-bold text-[var(--accent)]">پاک کردن</button>
-            )}
-          </div>
-          <p className="text-[11px] text-[var(--muted-2)] leading-relaxed mb-3">
-            هر تیک یک شرط حریف است: فقط با کسانی وصل می‌شوی که آن درس را خوانده‌اند.
-            {filters?.major ? ` (رشته تو: ${filters.major}${filters.grade ? ` — پایه ${filters.grade}` : ""})` : ""}
-          </p>
-
-          {!filters ? (
-            <p className="text-[11px] text-[var(--muted-2)]">در حال بارگذاری دروس...</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {(filters.all || []).map(subject => {
-                const mine = (filters.mine || []).includes(subject)
-                const on = wanted.includes(subject)
-                return (
-                  <label key={subject}
-                    className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border text-[11px] font-bold transition-all ${
-                      !mine ? "border-[var(--border)] text-[var(--muted-2)] opacity-45"
-                        : on ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]"
-                        : "border-[var(--border)] text-[var(--muted)]"
-                    }`}>
-                    <input type="checkbox" checked={on} disabled={!mine}
-                      onChange={() => onToggle(subject)}
-                      className="w-3.5 h-3.5 accent-[var(--accent)] flex-shrink-0" />
-                    <span className="truncate">{subject}</span>
-                  </label>
-                )
-              })}
-            </div>
-          )}
-
-          {wanted.length > 0 && filters && (
-            <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-1">
-              {wanted.map(subject => (
-                <p key={subject} className="text-[11px] text-[var(--muted-2)] leading-relaxed">
-                  <span className="font-bold text-[var(--muted)]">{subject}</span>{" → "}
-                  حریف: {((filters.majors_with || {})[subject] || []).join("، ") || "—"}
-                  {!(filters.addressable || []).includes(subject) && (
-                    <span className="text-[10px]"> (درس آزمونی نیست؛ فقط حریف را محدود می‌کند)</span>
-                  )}
-                </p>
-              ))}
-              <p className="text-[10px] text-[var(--muted-2)] pt-1">
-                هر تیک صف را محدودتر می‌کند، پس پیدا شدن حریف می‌تواند بیشتر طول بکشد.
-              </p>
-            </div>
-          )}
-        </div>
+        <p className="text-xs text-[var(--muted)] border-b border-[var(--border)] pb-4 leading-relaxed">
+          دوئل استاندارد: ۱۰ سوال از درس‌های مشترک؛ انتخاب رشته و پایه از پروفایل شما انجام می‌شود.
+          {filters?.major && <span className="block mt-1">{filters.major} · {filters.grade}</span>}
+        </p>
 
         {!!error && (
           <p className="text-[12px] font-bold text-red-500 text-center leading-relaxed">{error}</p>
@@ -740,7 +688,7 @@ export default function Arena({ nav, userData, initialPhase }: {
   const [loadingLobby, setLoadingLobby] = useState(true)
   const [lobbyError, setLobbyError] = useState("")
   const [lobbyRetry, setLobbyRetry] = useState(0)
-  const [wanted, setWanted] = useState<string[]>([])
+  const wanted: string[] = []
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // Scheduled-duel lobby state.
   const [schedOpen, setSchedOpen] = useState<ScheduledOpen[]>([])
@@ -768,10 +716,6 @@ export default function Arena({ nav, userData, initialPhase }: {
       .finally(() => { if (alive) setLoadingLobby(false) })
     return () => { alive = false }
   }, [userData?.major, lobbyRetry])
-
-  function toggleWanted(subject: string) {
-    setWanted(w => (w.includes(subject) ? w.filter(s => s !== subject) : [...w, subject]))
-  }
 
   const stopPoll = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
@@ -822,7 +766,6 @@ export default function Arena({ nav, userData, initialPhase }: {
       if (!res.ok) throw new Error(await readApiError(res, "ورود به صف ناموفق بود"))
       const data = await res.json()
       // The server may drop ticks that are not in the player's own subjects.
-      if (Array.isArray(data.wanted)) setWanted(data.wanted)
       if (data.match_id) {
         const m = await loadMatch(data.match_id)
         if (m.status === "cancelled") throw new Error(m.generation_error || "مسابقه بدون تغییر رتبه لغو شد.")
@@ -1000,7 +943,7 @@ export default function Arena({ nav, userData, initialPhase }: {
     defaultWhen={localInputValue(dayAt(1, 10))} />
 
   return <><Lobby me={me} onJoin={join} onBoard={openBoard} busy={loadingLobby || !!lobbyError}
-    filters={filters} wanted={wanted} onToggle={toggleWanted} onClear={() => setWanted([])}
+    filters={filters}
     error={lobbyError || error} onScheduled={openScheduled} />
     {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت کولوسئوم</button></div>}</>
 }

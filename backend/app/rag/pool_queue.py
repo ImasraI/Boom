@@ -284,6 +284,8 @@ def run():
             if job_id is None: continue
             service._update(draft_cursor=cursor + 1)
             _worker_state("drafting", "generating", health)
+            pool_core.set_current(major, difficulty)
+            pool_core.add_planned(1)
             with SessionLocal() as db:
                 plan = json.loads(db.get(PoolDraftJob, job_id).plan)
             def save_batch(batch):
@@ -292,7 +294,8 @@ def run():
             try:
                 mock_generation.generate_booklet(0, plan, topics=config.get("topics") or [],
                     difficulty="konkur" if difficulty == pool_core.DUEL_DIFFICULTY else difficulty,
-                    grade=config["grade"], timeout=60, on_drafted=save_batch)
+                    grade=config["grade"], timeout=60, on_drafted=save_batch,
+                    report=pool_core._progress_reporter())
             except _Interrupted:
                 pass
             finally:

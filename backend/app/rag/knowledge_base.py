@@ -28,7 +28,7 @@ konkur_format.SPECIALIZED_SUBJECTS, the single source of truth for plans.
 
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from app.rag.konkur_format import SPECIALIZED_SUBJECTS, major_key
+from app.rag.konkur_format import SPECIALIZED_SUBJECTS, major_key, resize_plan, RANKED_QUESTIONS
 
 # --------------------------------------------------------------- subjects ---
 # The subjects a student of each major studies in school (the planner's
@@ -241,7 +241,7 @@ def pair_plan(major_a: str, major_b: str,
             continue
         row = {
             "name": booklet,
-            "questions": max(DUEL_MIN_QUESTIONS, questions // DUEL_DIVISOR),
+            "questions": questions,
             # Minutes stay official here; the caller scales the match duration
             # exactly like the duel shelves do (sum // divisor).
             "minutes": min(int(ra.get("minutes") or 0),
@@ -258,6 +258,11 @@ def pair_plan(major_a: str, major_b: str,
     if not plan:
         return {"ok": False, "plan": [], "booklet_subjects": [], "topics": [],
                 "reason": "بین رشته شما و این حریف درس آزمونی مشترکی نیست"}
+    plan = resize_plan(plan, RANKED_QUESTIONS)
+    for row in plan:
+        row['minutes'] *= DUEL_DIVISOR  # Duration helper uses historical //3.
+        if 'riazi' in (major_key(major_a), major_key(major_b)):
+            row.update(major='riazi', majors=sorted({major_key(major_a), major_key(major_b)}), book_grounded=True)
     return {"ok": True, "reason": "", "booklet_subjects": chosen,
             "topics": [s for s in ticked if booklet_subject_of(s)], "plan": plan}
 
@@ -287,10 +292,11 @@ def filter_options(major: str) -> Dict[str, object]:
         "majors_with": {s: majors_covering(s) for s in all_study_subjects()},
         "major": (major or "").strip(),
         "major_key": major_key(major or ""),
+        "ranked_questions": RANKED_QUESTIONS,
         "booklet": [
             {"name": row["name"], "questions": row["questions"],
-             "duel_questions": max(DUEL_MIN_QUESTIONS,
-                                   int(row["questions"]) // DUEL_DIVISOR)}
+             "duel_questions": next((r['questions'] for r in pair_plan(major, major)['plan']
+                                     if r['name'] == row['name']), 0)}
             for row in rows.values()
         ],
         "grades": list(GRADE_ORDER),

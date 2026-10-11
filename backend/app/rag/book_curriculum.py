@@ -63,7 +63,7 @@ def discover_books(root):
 def subject_for_book(name):
     if 'گسسته' in name and 'آمار' in name: return 'گسسته و آمار و احتمال'
     for needle, subject in [('حسابان','حسابان'),('هندسه','هندسه'),('گسسته','ریاضیات گسسته'),
-        ('آمار','آمار و احتمال'),('ریاضی','ریاضی'),('فیزیک','فیزیک'),('شیمی','شیمی'),
+        ('آمار','آمار و احتمال'),('فیزیک','فیزیک'),('شیمی','شیمی'),('ریاضی','ریاضی'),
         ('زیست','زیست‌شناسی'),('زمین','زمین‌شناسی'),('ادبیات','ادبیات فارسی'),
         ('عربی','عربی'),('تاریخ','تاریخ'),('جغرافیا','جغرافیا'),('اقتصاد','اقتصاد'),
         ('فلسفه','منطق و فلسفه'),('منطق','منطق و فلسفه'),('جامعه','علوم اجتماعی'),
@@ -105,7 +105,7 @@ def source_pages(paths):
         except (ValueError,OSError,TypeError): continue
         if page <= 4:
             snippet=text[:1800]
-        elif page<=18 and ('فهرست' in text or len(re.findall(r'(?:فصل|درس|گفتار)\b',text))>=4):
+        elif page <= 12 or (page<=18 and ('فهرست' in text or len(re.findall(r'(?:فصل|درس|گفتار)\b',text))>=4)):
             snippet=text[:6500]
         else:
             lines=[]
@@ -120,7 +120,7 @@ def source_pages(paths):
     for page,text in pages.items():
         if remaining < 200: break
         selected[page]=text[:remaining]; remaining-=len(selected[page])
-    fingerprint=hashlib.sha256(json.dumps(['headings-v4',signature]).encode()).hexdigest()
+    fingerprint=hashlib.sha256(json.dumps(['headings-v5',signature]).encode()).hexdigest()
     return selected,fingerprint
 
 
@@ -224,6 +224,13 @@ def validate_lessons(data, pages, book):
                 'major_page':major_page,'major_quote':major_quote}],
             'importance_basis':'model_estimate'})
     return lessons
+
+
+def reclassify_cached_lessons(book, nodes, pages):
+    if all(n['subject'] == subject_for_book(book) for n in nodes):
+        return nodes
+    rows = [{**n, **s} for n in nodes for s in n['sources'] if s['book'] == book]
+    return validate_lessons({'lessons': rows}, pages, book)
 
 
 def extract_book(client, book, pages):
@@ -366,6 +373,11 @@ def rebuild(client, *, root=None, limit=0, infer=True, cached_only=False, on_pro
         try: saved=json.loads(cache.read_text(encoding='utf-8'))
         except (OSError,ValueError): saved={}
         cached=saved.get('fingerprint')==fingerprint
+        if cached:
+            corrected=reclassify_cached_lessons(book,saved.get('nodes',[]),pages)
+            if corrected != saved.get('nodes',[]):
+                saved['nodes']=corrected
+                save_json(cache,saved)
         if not cached:
             if cached_only: continue
             if limit and calls>=limit: continue

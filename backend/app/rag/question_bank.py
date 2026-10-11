@@ -56,7 +56,7 @@ def index_mock(db, mock):
         stored = {k: v for k, v in q.items() if k not in ("bank_id", "_id", "id")}
         db.execute(insert(BankQuestion).values(
             fingerprint=fingerprint, owner_id=owner, major=mock.major or "",
-            grade=mock.grade or "", grade_level=grade_number(mock.grade),
+            grade=mock.grade or "", grade_level=q.get('source_year') if q.get('source_year') in (10, 11, 12) else grade_number(mock.grade),
             difficulty="konkur" if mock.difficulty == "duel" else (mock.difficulty or "konkur"),
             subject=q.get("subject") or "سایر", topic=q.get("topic") or "",
             content=json.dumps(stored, ensure_ascii=False),
@@ -121,7 +121,8 @@ def assemble(db, user_id, plan, majors, difficulty="konkur", grade="", topics=No
     wanted_topics = [str(t).strip().casefold() for t in (topics or []) if str(t).strip()]
     out = []
     selected = set()
-    for row in plan:
+    from app.rag.exam_blueprint import coverage_rows
+    for row in coverage_rows(plan):
         selection = query.where(BankQuestion.subject == row["name"])
         # Ranked plans carry subject-specific study filters. A physics tick
         # selects physics questions, not lessons literally named "physics".
@@ -133,8 +134,35 @@ def assemble(db, user_id, plan, majors, difficulty="konkur", grade="", topics=No
             selection = selection.where(or_(*(BankQuestion.topic.contains(t, autoescape=True) for t in row_topics)))
         if selected:
             selection = selection.where(BankQuestion.id.not_in(selected))
-        chosen = db.execute(selection.order_by(order, BankQuestion.uses.asc(), BankQuestion.id.desc())
-            .limit(int(row["questions"]))).scalars().all()
+        candidates = db.execute(selection.order_by(order, BankQuestion.uses.asc(), BankQuestion.id.desc())).scalars()
+        chosen = []
+        repeated = []
+        topics_seen = set()
+        # Quotas inspect persisted metadata, never guess a branch from a vague
+        # LLM topic string. Older bank rows remain available for short practice.
+        for candidate in candidates:
+            content = json.loads(candidate.content)
+            if row.get('branch') and content.get('branch') != row['branch']:
+                continue
+            if row.get('full_mock') and (content.get('grounding_status') != 'book_ocr' or
+                    not content.get('curriculum_id') or not content.get('book') or
+                    type(content.get('page')) is not int or not content.get('source_quote')):
+                continue
+            if row.get('full_mock') and content['curriculum_id'] in topics_seen:
+                repeated.append(candidate)
+                continue
+            chosen.append(candidate)
+            topics_seen.add(content.get('curriculum_id'))
+            if len(chosen) >= int(row['questions']):
+                break
+        if row.get('full_mock'):
+            from app.rag.exam_blueprint import lessons_for
+            expected_topics = min(int(row['questions']), len(lessons_for(row, grade, topics or [])))
+            if len(topics_seen) < expected_topics:
+                if not allow_partial:
+                    return []
+            else:
+                chosen.extend(repeated[:max(0, int(row['questions']) - len(chosen))])
         if len(chosen) < int(row["questions"]) and not allow_partial:
             return []
         for q in chosen:
