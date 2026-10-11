@@ -2,7 +2,9 @@
 
 Mock drafting and checking always use high reasoning effort where supported.
 Each request handles one question, with at least 8192 completion tokens and a
-300-second timeout. These tokens include hidden reasoning; the budget is not a
+300-second timeout. JSON output is explicitly requested. Gemini truncated JSON
+is retried with a larger budget (up to 65536) without reducing reasoning effort.
+These tokens include hidden reasoning; the budget is not a
 promise that every request uses all of it. Chat/planning retain their separate
 settings. Provider quotas are respected; keys do not increase a project's quota.
 

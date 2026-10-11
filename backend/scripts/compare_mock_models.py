@@ -66,6 +66,7 @@ def fleet(provider, settings):
         raise RuntimeError(f"No dedicated generation credentials for {provider}")
     for client in clients:
         client.reasoning_effort = "high"
+        client.json_mode = True
         client.minimum_completion_tokens = 8192
         client.temperature = 0.2
     # Same-provider failover only: samples must actually come from this model.
@@ -127,8 +128,14 @@ def run_model(provider, state, path, once):
                                       max_tokens=8192, timeout=300)
             rows = mg.parse_booklet(raw)
             with LOCK:
-                progress["attempts"].append({"slot": index + 1, "time": time.time(),
-                    "parseable": bool(rows), "error_code": getattr(client, "last_error_code", "") if not raw else ""})
+                attempt = {"slot": index + 1, "time": time.time(),
+                    "parseable": bool(rows), "error_code": getattr(client, "last_error_code", "") if not raw else ""}
+                if raw and not rows:
+                    diagnostic = path.parent / f"{provider}-slot-{index+1}-attempt-{len(progress['attempts'])+1}.txt"
+                    diagnostic.write_text(raw, encoding="utf-8")
+                    os.chmod(diagnostic, 0o600)
+                    attempt["diagnostic"] = diagnostic.name
+                progress["attempts"].append(attempt)
                 if rows:
                     node, source = slot["node"], slot["source"]
                     progress["questions"].append({**rows[0], "_id": index + 1,

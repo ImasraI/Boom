@@ -68,10 +68,35 @@ def test_high_reasoning_reaches_both_provider_payloads_without_changing_chat():
         assert clients[0]._prepare_payload([], 200)["reasoning_effort"] == "low"
         for client in clients:
             client.reasoning_effort = "high"
+            client.json_mode = True
             client.minimum_completion_tokens = 8192
             payload = client._prepare_payload([], 200)
             assert payload["reasoning_effort"] == "high"
             assert payload.get("max_completion_tokens", payload.get("max_tokens")) == 8192
+            assert payload["response_format"] == {"type": "json_object"}
     finally:
         for client in clients:
             client.client.close()
+
+
+def test_gemini_truncated_json_retries_with_more_output_and_keeps_high_reasoning(monkeypatch):
+    import httpx
+    import app.rag.llm as llm
+    requests = []
+    def reply(request):
+        payload = json.loads(request.content)
+        requests.append(payload)
+        return httpx.Response(200, json={"choices": [{"finish_reason": "length" if len(requests) == 1 else "stop",
+            "message": {"content": '{"answers":' if len(requests) == 1 else '{"answers":{"1":0}}'}}]})
+    monkeypatch.setattr(llm, "blocked_quota", lambda identity: None)
+    monkeypatch.setattr(llm, "blocked_access", lambda identity: None)
+    client = GeminiLLMClient(api_key="test", base_url="https://test.invalid", model="gemini-3.6-flash", temperature=0.0, max_tokens=8192)
+    client.client.close()
+    client.client = httpx.Client(transport=httpx.MockTransport(reply))
+    client.reasoning_effort = "high"; client.json_mode = True
+    try:
+        assert client.generate([{"role":"user","content":"Return JSON"}]) == '{"answers":{"1":0}}'
+        assert [r["max_tokens"] for r in requests] == [8192, 16384]
+        assert all(r["reasoning_effort"] == "high" for r in requests)
+    finally:
+        client.client.close()

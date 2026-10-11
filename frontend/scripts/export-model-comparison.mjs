@@ -30,6 +30,7 @@ h1{font-size:26px}h2{font-size:19px}article{border-top:1px solid #cabfaa;padding
 small{color:#6a5d4e}ol{padding-right:28px}li{padding:5px}p{margin:7px 0}svg{max-width:100%;height:auto;max-height:320px}figure{margin:18px 0}
 .katex{direction:ltr;unicode-bidi:embed}.katex-display{text-align:center;overflow-x:auto}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:8px}
 textarea{width:100%;min-height:70px;font-family:inherit;padding:10px;border:1px solid #bba;background:#fff}
+pre.reference{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:14px}
 select,button{font-family:inherit;padding:9px;margin:8px;background:#e8dfca;border:1px solid #aa9471}
 @media print{.review,button{display:none}body{margin:0;max-width:none;background:white;padding:10px}article{break-inside:avoid}}
 `;
@@ -53,7 +54,7 @@ try {
       <select><option value="">بررسی نشده</option><option value="3">درست و قابل استفاده</option><option value="2">نیاز به ویرایش</option><option value="1">نادرست / مبهم</option></select></label>
       <textarea placeholder="صحت پاسخ، گزینه‌ها، شکل، شباهت به کتاب و سختی"></textarea></div></article>`).join('');
     const key = result.questions.map(q => `<article><h2>سوال ${Number(q._id)} · گزینه ${Number(q.answer)+1}</h2>
-      ${text(q.explanation)}<details><summary>شاهد کتاب، برای کنترل مبحث</summary>${text(q.source_quote)}</details></article>`).join('');
+      ${text(q.explanation)}<details><summary>شاهد کتاب، برای کنترل مبحث</summary><pre class="reference">${escape(q.source_quote)}</pre></details></article>`).join('');
     const wrapper = (body, script='') => `<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>مقایسه مدل‌ها · ${provider}</title><style>${css}</style><body data-model="${provider}"><h1>${heading}</h1>${body}${script}</body></html>`;
     await fs.writeFile(path.join(output,`${provider}-questions.html`), wrapper(`<p>سطح سخت · استدلال high · نیازمند ارزیابی انسانی. این سوال‌ها وارد بانک سایت نشده‌اند.</p><button>ذخیره ارزیابی من</button>${articles}`,`<script>${reviewJS}</script>`));
     await fs.writeFile(path.join(output,`${provider}-answer-key.html`), wrapper(`<p>این کلید پیشنهادی مدل است؛ تایید صحت محسوب نمی‌شود.</p>${key}`));

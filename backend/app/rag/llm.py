@@ -358,6 +358,8 @@ class GroqLLMClient(BaseLLMClient):
             "messages": messages,
             "temperature": self.temperature,
         }
+        if getattr(self, "json_mode", False):
+            payload["response_format"] = {"type": "json_object"}
         if self._is_reasoning_model:
             # A small budget (e.g. the 150-token query rewrite) can be eaten
             # entirely by reasoning -> empty content with finish_reason=length.
@@ -647,6 +649,8 @@ class GeminiLLMClient(BaseLLMClient):
                               getattr(self, "minimum_completion_tokens", 0)),
             **({"reasoning_effort": getattr(self, "reasoning_effort", "none")}
                if self._is_thinking_model else {}),
+            **({"response_format": {"type": "json_object"}}
+               if getattr(self, "json_mode", False) else {}),
         }
 
     def generate(
@@ -715,7 +719,17 @@ class GeminiLLMClient(BaseLLMClient):
                 data = resp.json()
                 record_response('gemini', self.model, data)
                 if "choices" in data and len(data["choices"]) > 0:
-                    content = data["choices"][0].get("message", {}).get("content")
+                    choice = data["choices"][0]
+                    content = choice.get("message", {}).get("content")
+                    if choice.get("finish_reason") == "length" and getattr(self, "json_mode", False):
+                        # High reasoning shares this budget with the visible JSON.
+                        # A truncated object is not a usable question or verdict.
+                        if attempt < 4 and payload["max_tokens"] < 65536:
+                            payload["max_tokens"] = min(65536, payload["max_tokens"] * 2)
+                            continue
+                        self.last_error = "structured response truncated at output limit"
+                        self.last_error_code = "provider_output_truncated"
+                        return ""
                     if content:
                         self.last_usage = _usage_from_openai(data)
                         return content
@@ -1331,6 +1345,7 @@ def get_pool_llm_client() -> BaseLLMClient:
         labels.append(name)
     for client in clients:
         client.reasoning_effort = "high"
+        client.json_mode = True
         client.minimum_completion_tokens = max(8192, getattr(settings, "POOL_GENERATION_MAX_TOKENS", 0))
     if len(clients) == 1:
         return primary
@@ -1366,6 +1381,7 @@ def get_pool_verifier_client() -> BaseLLMClient:
         return MockLLMClient()
     for client in clients:
         client.temperature = 0.0
+        client.json_mode = True
         client.minimum_completion_tokens = max(8192, getattr(settings, "POOL_VERIFY_MAX_TOKENS", 0))
         client.reasoning_effort = "high"
     if len(clients) == 1:
