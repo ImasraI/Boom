@@ -27,7 +27,7 @@ def _now():
 
 
 def _lease():
-    return _now() + timedelta(minutes=10)
+    return _now() + timedelta(minutes=30)
 
 
 def snapshot():
@@ -139,7 +139,7 @@ def verify_step(job_id, client=None):
         if not job or job.status != "verifying" or job.lease_owner != _OWNER:
             return False
         rows = json.loads(job.questions)
-        positions = [i for i, q in enumerate(rows) if q.get("_queue_status") == "pending"][:10]
+        positions = [i for i, q in enumerate(rows) if q.get("_queue_status") == "pending"][:mock_generation._VERIFY_BATCH_SIZE]
     client = client if client is not None else get_pool_verifier_client()
     verdicts = mock_generation._verify_batch(client, [rows[i] for i in positions], 60)
     with SessionLocal() as db:
@@ -149,6 +149,9 @@ def verify_step(job_id, client=None):
         if verdicts is None:
             # A terminal quota/access refusal is remembered by the provider
             # client. Never discard candidates because a provider is unavailable.
+            for position in positions:
+                rows[position]["validation"] = {"version": 1, "status": "pending", "reason": "verifier_provider_or_protocol_error"}
+            job.questions = json.dumps(rows, ensure_ascii=False)
             job.status = "pending"; job.retry_at = _now() + timedelta(seconds=60)
             job.lease_owner = ""; job.lease_until = None
             db.commit()
@@ -156,6 +159,11 @@ def verify_step(job_id, client=None):
         accepted = []
         for index, position in enumerate(positions, start=1):
             q = rows[position]
+            if index in getattr(verdicts, "details", {}):
+                q["validation"] = verdicts.details[index]
+            if index in getattr(verdicts, "deferred", set()):
+                q["_review_retries"] = q.get("_review_retries", 0) + 1
+                continue
             valid = (verdicts.get(index) == q["answer"]
                      and not mock_generation._missing_visible_reference(q))
             q["_queue_status"] = "verified" if valid else "rejected"
@@ -170,7 +178,9 @@ def verify_step(job_id, client=None):
         job.questions = json.dumps(rows, ensure_ascii=False)
         job.status = ("pending" if any(q.get("_queue_status") == "pending" for q in rows)
                       else "completed" if job.verified_count else "rejected")
-        job.retry_at = None; job.lease_owner = ""; job.lease_until = None
+        retries = max((rows[i].get("_review_retries", 0) for i in positions), default=0)
+        job.retry_at = _now() + timedelta(seconds=min(21600, 60 * 2 ** min(retries, 8))) if retries else None
+        job.lease_owner = ""; job.lease_until = None
         db.commit()
         return bool(accepted)
 

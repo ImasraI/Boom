@@ -17,7 +17,7 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 _stage = ContextVar('pool_usage_stage', default='chat_planning')
 _lock = threading.Lock()
-STAGES = ('drafting', 'repair', 'verification', 'repair_verification', 'chat_planning')
+STAGES = ('drafting', 'repair', 'verification', 'repair_verification', 'quality_audit', 'model_evaluation', 'chat_planning')
 
 
 def current_stage():

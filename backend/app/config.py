@@ -62,11 +62,11 @@ class Settings(BaseSettings):
     POOL_VERIFY_FALLBACK_PROVIDERS: str = ""
     POOL_VERIFY_GROQ_USE_POOL_KEYS: bool = False
     POOL_VERIFY_GROQ_MODEL_NAME: str = "openai/gpt-oss-120b"
-    POOL_VERIFY_MAX_TOKENS: int = 0
-    POOL_VERIFY_REASONING_EFFORT: str = "low"
+    POOL_VERIFY_MAX_TOKENS: int = 8192
+    POOL_VERIFY_REASONING_EFFORT: str = "high"
     # Drafting workload limits; 0 preserves the previous subject calls.
-    POOL_GENERATION_BATCH_SIZE: int = 0
-    POOL_GENERATION_MAX_TOKENS: int = 0
+    POOL_GENERATION_BATCH_SIZE: int = 1
+    POOL_GENERATION_MAX_TOKENS: int = 8192
     POOL_GENERATION_CONTEXT_CHARS: int = 0
     POOL_GENERATION_REQUESTS_PER_MINUTE: int = 0
     # Extra providers to CONTINUE on when the pool provider runs out of its

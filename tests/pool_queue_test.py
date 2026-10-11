@@ -56,6 +56,8 @@ class Solver:
         if self.refused:
             self.last_error_code = "provider_daily_quota"
             return ""
+        if self.prompts[-1].startswith("QUALITY_AUDIT_V1"):
+            return json.dumps({"valid": self.answer == 0, "reason": "independent review result"})
         return json.dumps({"answers": {str(i): self.answer for i in range(1, 11)}})
 
 
@@ -103,7 +105,10 @@ def test_blind_verification_rejects_disagreement_and_publishes_only_accepted(set
     solver = Solver(answer=0)
     assert queue.claim_job() == job_id
     assert queue.verify_step(job_id, solver)
-    assert all("explanation-hidden-from-solver" not in prompt for prompt in solver.prompts)
+    for _ in range(4):
+        assert queue.claim_job() == job_id
+        assert queue.verify_step(job_id, solver)
+    assert all("explanation-hidden-from-solver" not in p for p in solver.prompts if not p.startswith("QUALITY_AUDIT_V1"))
     with SessionLocal() as db:
         assert db.get(PoolDraftJob, job_id).verified_count == 5
         assert db.get(PoolDraftJob, job_id).status == "completed"
@@ -126,9 +131,9 @@ def test_provider_refusal_preserves_pending_questions_and_prior_verified_batches
     queue.claim_job(); assert not queue.verify_step(job_id, Solver(refused=True))
     with SessionLocal() as db:
         job = db.get(PoolDraftJob, job_id)
-        assert job.status == "pending" and job.verified_count == 10 and job.rejected_count == 0
+        assert job.status == "pending" and job.verified_count == 1 and job.rejected_count == 0
         assert job.retry_at > queue._now()
-    assert queue.snapshot()["pending_questions"] == 1
+    assert queue.snapshot()["pending_questions"] == 10
     assert queue.claim_job() is None  # Do not immediately repeat a refused call.
 
 
@@ -167,7 +172,9 @@ def test_pending_queue_runs_drafting_when_verifier_is_daily_limited(setup, monke
 
 def test_verified_questions_assemble_into_ready_exact_size_booklet(setup):
     settings, tag = setup
-    job_id = draft(tag, 5); queue.claim_job(); queue.verify_step(job_id, Solver())
+    job_id = draft(tag, 5)
+    for _ in range(5):
+        queue.claim_job(); queue.verify_step(job_id, Solver())
     cfg = config(); cfg["count"] = 1
     pool_service._save({"enabled": True, "config": cfg, "produced": 0})
     assert queue._assemble()
@@ -183,6 +190,44 @@ def test_no_automatic_import_of_old_quarantined_booklets(setup):
     settings, tag = setup
     queue.recover_interrupted()
     assert queue.snapshot()["pending_booklets"] == 0
+
+
+@pytest.mark.parametrize("replies", [
+    ['{"answers":{}}'],
+    ['{"answers":{"1":0}}', 'not json'],
+    ['{"answers":{"1":1}}', '{"valid":true,"reason":"stored key independently checked"}'],
+])
+def test_protocol_and_reviewer_disagreements_persist_for_retry(setup, replies):
+    settings, tag = setup
+    job_id = draft(tag)
+    queue.claim_job()
+    class Reviewer:
+        def generate(self, *args, **kwargs):
+            return replies.pop(0)
+    assert not queue.verify_step(job_id, Reviewer())
+    with SessionLocal() as db:
+        job = db.get(PoolDraftJob, job_id)
+        q = json.loads(job.questions)[0]
+        assert job.status == "pending" and job.rejected_count == job.verified_count == 0
+        assert q["validation"]["status"] == q["_queue_status"] == "pending"
+        assert q["validation"]["reason"] and job.retry_at > queue._now()
+        assert not db.scalar(select(BankQuestion.id).where(BankQuestion.content.contains(tag)))
+
+
+def test_definitive_quality_failure_saves_reason_and_solver_answer(setup):
+    settings, tag = setup
+    job_id = draft(tag)
+    queue.claim_job()
+    class Reviewer:
+        replies = iter(['{"answers":{"1":0}}', '{"valid":false,"reason":"missing mass in gravitational work"}'])
+        def generate(self, *args, **kwargs):
+            return next(self.replies)
+    assert not queue.verify_step(job_id, Reviewer())
+    with SessionLocal() as db:
+        job = db.get(PoolDraftJob, job_id)
+        q = json.loads(job.questions)[0]
+        assert job.rejected_count == 1 and q["validation"]["solver_answer"] == 0
+        assert q["validation"]["reason"] == "missing mass in gravitational work"
 
 
 def test_verifier_health_uses_groq_fallback_without_resetting_gemini_limits(setup):

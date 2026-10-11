@@ -91,10 +91,16 @@ class CountingSolver:
                 answers[str(pos)] = 1  # stored keys are 0
             else:
                 answers[str(pos)] = 0
+        self._last_answers = {int(k): v for k, v in answers.items()}
         return json.dumps({"answers": answers})
 
 
 def _patch_solver(monkeypatch, solver):
+    # This suite isolates batching/failover; quality review has its own integration tests.
+    monkeypatch.setattr(mg, "_VERIFY_BATCH_SIZE", 10)
+    monkeypatch.setattr(mg.question_quality, "audit", lambda client, q, timeout: {
+        "valid": getattr(client, "_last_answers", {}).get(q.get("_id", 1), 0) == q["answer"],
+        "reason": "scripted independent review"})
     monkeypatch.setattr(mg, "get_pool_llm_client", lambda: solver)
     monkeypatch.setattr(mg, "get_pool_verifier_client", lambda: solver)
     return solver

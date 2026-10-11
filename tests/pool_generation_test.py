@@ -179,7 +179,8 @@ def test_generate_booklet_reports_question_counts(monkeypatch):
 
     assert len(rows) == 1
     assert ("booklet", {"target": 4}) in events
-    assert ("generated", {"count": 1, "subject": "ریاضی", "target": 4}) in events
+    assert sum(data['count'] for event, data in events if event == 'generated') == 1
+    assert all(data['target'] == 1 for event, data in events if event == 'generated')
     assert [d["name"] for e, d in events if e == "phase"] == ["generating"]
 
 

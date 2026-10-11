@@ -352,7 +352,7 @@ class GroqLLMClient(BaseLLMClient):
         messages: List[LLMMessage],
         max_tokens: Optional[int] = None,
     ):
-        budget = max_tokens or self.max_tokens
+        budget = max(max_tokens or self.max_tokens, getattr(self, "minimum_completion_tokens", 0))
         payload = {
             "model": self.model,
             "messages": messages,
@@ -363,8 +363,8 @@ class GroqLLMClient(BaseLLMClient):
             # entirely by reasoning -> empty content with finish_reason=length.
             # reasoning_effort=low keeps analysis short and a generous floor
             # guarantees room for the visible answer.
-            payload["reasoning_effort"] = "low"
-            payload["max_completion_tokens"] = max(budget, 1024)
+            payload["reasoning_effort"] = getattr(self, "reasoning_effort", "low")
+            payload["max_completion_tokens"] = max(budget, 1024, getattr(self, "minimum_completion_tokens", 0))
         else:
             payload["max_tokens"] = budget
         return payload
@@ -1329,6 +1329,9 @@ def get_pool_llm_client() -> BaseLLMClient:
             continue
         clients.append(client)
         labels.append(name)
+    for client in clients:
+        client.reasoning_effort = "high"
+        client.minimum_completion_tokens = max(8192, getattr(settings, "POOL_GENERATION_MAX_TOKENS", 0))
     if len(clients) == 1:
         return primary
     logger.info("Pool LLM failover chain: %s", " -> ".join(labels))
@@ -1363,9 +1366,8 @@ def get_pool_verifier_client() -> BaseLLMClient:
         return MockLLMClient()
     for client in clients:
         client.temperature = 0.0
-        client.minimum_completion_tokens = max(0, getattr(settings, "POOL_VERIFY_MAX_TOKENS", 0))
-        effort = getattr(settings, "POOL_VERIFY_REASONING_EFFORT", "low")
-        client.reasoning_effort = effort if effort in {"none","low","medium","high"} else "low"
+        client.minimum_completion_tokens = max(8192, getattr(settings, "POOL_VERIFY_MAX_TOKENS", 0))
+        client.reasoning_effort = "high"
     if len(clients) == 1:
         return clients[0]
     return FallbackLLMClient(clients, labels, switch_on_rate_limit=True)

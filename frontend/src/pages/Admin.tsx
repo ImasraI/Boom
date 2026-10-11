@@ -77,6 +77,7 @@ const PHASE_FA: Record<string, string> = {
 const TOKEN_STAGE_FA: Record<string, string> = {
   drafting: "تولید سوال", repair: "بازسازی سوال ردشده", verification: "راستی‌آزمایی",
   repair_verification: "راستی‌آزمایی جایگزین", chat_planning: "چت و برنامه‌ریزی",
+  quality_audit: "بازبینی کیفیت و توضیح", model_evaluation: "مقایسه مدل‌ها",
 };
 
 export default function Admin({ nav }: { nav: NavFn }) {

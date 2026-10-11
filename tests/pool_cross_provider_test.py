@@ -32,6 +32,11 @@ def isolated_settings(monkeypatch):
     monkeypatch.setattr(app.config, "get_settings", lambda: config)
     monkeypatch.setattr(llm, "get_settings", lambda: config)
     monkeypatch.setattr(mg, "get_settings", lambda: config)
+    # Isolate provider routing/batching from the independently tested quality audit.
+    monkeypatch.setattr(mg, "_VERIFY_BATCH_SIZE", 10)
+    monkeypatch.setattr(mg.question_quality, "audit", lambda client, q, timeout: {
+        "valid": getattr(client, "last_answers", {}).get(q.get("_id", 1), 0) == q["answer"],
+        "reason": "scripted independent review"})
     monkeypatch.setattr(quota, "_state_file", lambda: None)
     quota._BLOCKS.clear(); quota._LOADED_PATHS.clear(); pool_pacing._NEXT_START.clear()
     yield config
@@ -49,6 +54,8 @@ class Replies:
         self.prompts.append(messages[-1]["content"])
         self.budgets.append(max_tokens)
         reply = next(self.replies)
+        data = json.loads(reply) if reply else {}
+        self.last_answers = {int(k): v for k,v in data.get("answers", {}).items()}
         if not reply:
             self.last_error = "HTTP 429 daily quota exhausted"
         return reply
@@ -71,7 +78,7 @@ def test_factories_separate_credentials_models_and_reasoning(isolated_settings):
     assert [c.client.headers["Authorization"] for c in verifier._clients] == [
         "Bearer gemini-verify-secret","Bearer gemini-verify-backup"]
     payload = verifier.active._prepare_payload([], max_tokens=200)
-    assert payload["reasoning_effort"] == "low" and payload["max_tokens"] == 2400
+    assert payload["reasoning_effort"] == "high" and payload["max_tokens"] == 8192
     assert payload["temperature"] == 0.0
     draft.client.close()
     for child in verifier._clients:
@@ -79,7 +86,7 @@ def test_factories_separate_credentials_models_and_reasoning(isolated_settings):
 
 
 def test_checks_and_replacement_checks_use_verifier_only(monkeypatch):
-    verifier = Replies(['{"answers":{"1":1}}', '{"answer":2}'])
+    verifier = Replies(['{"answers":{"1":1}}', '{"answers":{"1":2}}'])
     fresh = question(2, answer=2)
     fresh["text"] = "سوال جایگزین مستقل"
     drafter = Replies([json.dumps({"questions":[fresh]})])
@@ -160,16 +167,16 @@ def test_rejected_verifier_blocks_drafting_and_keeps_accepted_questions(monkeypa
 def test_batched_drafts_retrieve_once_and_preserve_grade_and_subject(monkeypatch):
     calls=[]
     drafter=Replies([json.dumps({"questions":[question(i) for i in ids]})
-                      for ids in ((1,2),(3,4),(5,))])
+                      for ids in ((1,),(2,),(3,),(4,),(5,))])
     monkeypatch.setattr(mg,"retrieve_book_context",lambda *a,**k:calls.append(a) or "C"*3000)
     monkeypatch.setattr(mg,"get_pool_llm_client",lambda:drafter)
     out=mg.generate_booklet(7,[{"name":"شیمی","questions":5,"minutes":10}],
                            ["تعادل"],"konkur",6000,60,grade="یازدهم")
-    assert len(out)==5 and len(calls)==1 and len(drafter.prompts)==3
+    assert len(out)==5 and len(calls)==1 and len(drafter.prompts)==5
     assert all(q["subject"]=="شیمی" for q in out)
     assert all("یازدهم" in p and "تعادل" in p for p in drafter.prompts)
     assert [q["_id"] for q in out]==list(range(1,6))
-    assert drafter.budgets==[2400]*3
+    assert drafter.budgets==[8192]*5
     assert "C"*1800 in drafter.prompts[0] and "C"*1801 not in drafter.prompts[0]
     assert "سوال مستقل 1" in drafter.prompts[1]
 
@@ -179,7 +186,7 @@ def test_daily_draft_failure_stops_remaining_batches(monkeypatch):
     monkeypatch.setattr(mg,"retrieve_book_context",lambda *a,**k:"source")
     monkeypatch.setattr(mg,"get_pool_llm_client",lambda:drafter)
     out = mg._generate_subject_questions(7,{"name":"ریاضی","questions":8},[],"konkur",6000,60)
-    assert [q['text'] for q in out] == ['سوال مستقل 1', 'سوال مستقل 2']
+    assert [q['text'] for q in out] == ['سوال مستقل 1']
     assert all(q.get('verification_status') != 'verified' for q in out)
     assert len(drafter.prompts)==2
 
@@ -198,7 +205,7 @@ def test_draft_quota_preserves_finished_subjects_for_independent_verification(mo
     kept, _, _ = mg.build_pool_booklet('riazi', plan=plan, on_verified=harvested.extend)
     assert kept == []  # Incomplete papers never become ready mocks.
     assert len(drafter.prompts) == 2 and len(solver.prompts) == 1
-    assert len(harvested) == 2 and all(q['verification_status']=='verified' for q in harvested)
+    assert len(harvested) == 1 and all(q['verification_status']=='verified' for q in harvested)
 
 
 def test_failed_repair_keeps_other_independent_batch_verdicts(monkeypatch):
@@ -225,7 +232,7 @@ def test_daily_limit_during_short_batch_retry_keeps_parseable_candidates(monkeyp
 def test_solver_receives_chart_data_without_generator_metadata(monkeypatch):
     q=question()
     q["figure"]={"type":"bar_chart","data":{"categories":["A","B"],"values":[12,19]}}
-    solver=Replies(['{"answer":0}'])
+    solver=Replies(['{"answers":{"1":0}}'])
     assert mg._verify_question(solver,q,30)==0
     for prompt in [solver.prompts[0],mg._verify_batch_prompt([q])]:
         assert "bar_chart" in prompt and "19" in prompt
@@ -238,7 +245,7 @@ def test_missing_table_is_repaired_even_when_solver_guesses_stated_answer(monkey
     bad['figure']={'type':'none','data':{}}
     fresh=question(2)
     fresh['text']='یک سوال کامل بدون جدول'
-    solver=Replies(['{"answers":{"1":0}}','{"answer":0}'])
+    solver=Replies(['{"answers":{"1":0}}','{"answers":{"1":0}}'])
     drafter=Replies([json.dumps({'questions':[fresh]})])
     monkeypatch.setattr(mg,'get_pool_verifier_client',lambda:solver)
     monkeypatch.setattr(mg,'get_pool_llm_client',lambda:drafter)
