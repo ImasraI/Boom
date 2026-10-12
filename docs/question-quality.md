@@ -66,3 +66,11 @@ It makes no model calls, exports only to the ignored `tmp/` directory, and stops
 when both sets finish. HTTP 503/provider failures use saved exponential backoff,
 up to 15 minutes. Unchanged states stay quiet. A lost SSH connection cannot
 reset generation; rerun the copying command to resume downloading the results.
+
+Pool drafting preserves quota waits across restarts and resumes after the saved
+retry time. Quota refusals do not count as malformed-draft strikes. Three empty
+drafts wait 15 minutes with a visible error, rather than pausing permanently.
+Groq JSON validation failures can recover only safe serialization changes;
+incomplete output is retried with the same quality settings. Request-capacity
+refusals try the next explicitly configured pool credential without reducing
+reasoning or the completion budget. No question bypasses independent review.
