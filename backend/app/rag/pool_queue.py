@@ -95,7 +95,12 @@ def _weekly_draft_plan(db, config, major, plan, *, include_pending=True):
         if len(represented) < expected:
             count = min(count, len(represented))
         options.append((count / row['questions'], count, row, represented, expected, nodes))
-    _, count, row, represented, expected, nodes = min(options, key=lambda option: option[0])
+    subject_counts = {}
+    for _, count, row, *_ in options:
+        subject_counts[row['name']] = subject_counts.get(row['name'], 0) + count
+    quotas = {row['name']: row['questions'] for row in plan}
+    _, count, row, represented, expected, nodes = min(options, key=lambda option: (
+        option[0], subject_counts[option[2]['name']] / quotas[option[2]['name']]))
     needed = row['questions'] - count % row['questions']
     drafted = {**row, 'branches': {}, 'questions': needed}
     if len(represented) < expected:

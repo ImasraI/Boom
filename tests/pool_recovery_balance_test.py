@@ -154,17 +154,26 @@ def test_old_or_rejected_pending_candidates_do_not_count_as_stock(isolated,scope
     assert selected[0]['name']=='فیزیک'
 
 
-def test_saved_partial_drafts_move_to_the_next_branch_without_redrafting_math(isolated):
+def test_saved_partial_drafts_cover_other_subjects_before_returning_to_math(isolated):
     first=queue.create_job(config(),'riazi','duel')
     queue.append_batch(first,[question('geometry')]);queue.finish_draft(first)
     second=queue.create_job(config(),'riazi','duel')
-    queue.append_batch(second,[question('discrete')]);queue.finish_draft(second)
+    queue.append_batch(second,[question(cid,i) for i,cid in enumerate(['physics-10','physics-12','physics-10'])]);queue.finish_draft(second)
     third=queue.create_job(config(),'riazi','duel')
     with isolated() as db:
         rows=[json.loads(db.get(PoolDraftJob,job).plan) for job in (first,second,third)]
-    assert [p[0]['branch'] for p in rows]==['geometry','discrete','calculus']
-    assert [p[0]['questions'] for p in rows]==[1,1,2]
+    assert [p[0]['name'] for p in rows]==['ریاضی','فیزیک','شیمی']
+    assert rows[0][0]['branch']=='geometry'
+    assert [p[0]['questions'] for p in rows]==[1,3,3]
     assert all(len(p)==1 and sum(r['questions'] for r in p)<10 for p in rows)
+
+
+def test_empty_physics_wins_a_tie_with_calculus_when_math_is_already_overstocked(isolated):
+    with isolated() as db:
+        for i in range(2):save_bank(db,question('geometry',i))
+        for i in range(11):save_bank(db,question('discrete',i))
+        wanted=queue._weekly_draft_plan(db,config(),'riazi',plan())
+    assert wanted[0]['name']=='فیزیک' and wanted[0]['questions']==3
 
 
 def test_append_rejects_wrong_branch_or_source_and_overwrites_untrusted_scope(isolated):
