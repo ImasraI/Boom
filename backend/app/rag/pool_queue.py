@@ -9,9 +9,9 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select, update, text
 from fastapi import HTTPException
 
-from app.auth.database import PoolDraftJob, SessionLocal
+from app.auth.database import PoolDraftJob, BankQuestion, SessionLocal
 from app.config import get_settings
-from app.rag import mock_generation, pool_core, question_bank
+from app.rag import mock_generation, pool_core, question_bank, exam_blueprint
 from app.rag.llm import get_pool_verifier_client
 from app.rag.provider_quota import pool_generation_status, pool_verification_status, is_terminal_provider_error
 from app.utils.logger import get_logger
@@ -53,6 +53,58 @@ def snapshot(scope=None):
         "rejected_questions": sum(rejected or 0 for _, _, _, _, rejected in rows)}
 
 
+def _weekly_draft_plan(db, config, major, plan, *, include_pending=True):
+    """Spend the next draft on the least stocked subject/branch, not math again.
+
+    Verified unused stock and saved pending candidates both contribute. Pending
+    questions only guide drafting; they are never playable until reviewed.
+    Each durable job is a small tranche, not necessarily a complete paper.
+    """
+    reserved = pool_core._reserved_stock_ids(db)
+    candidates = [json.loads(q.content) for q in db.scalars(select(BankQuestion).where(
+        BankQuestion.owner_id == 0, BankQuestion.verified == True,
+        BankQuestion.status == 'active', BankQuestion.uses == 0,
+        BankQuestion.major == pool_core.CANONICAL_MAJOR[major], BankQuestion.difficulty == 'konkur',
+        BankQuestion.grade_level <= question_bank.grade_number(config.get('grade', '')),
+        BankQuestion.id.not_in(reserved),
+        func.json_extract(BankQuestion.content, '$.weekly_ranked_scope') == config['weekly_scope']))]
+    pending = db.scalars(select(PoolDraftJob).where(PoolDraftJob.status.in_(_OPEN),
+        PoolDraftJob.major == major, PoolDraftJob.difficulty == pool_core.DUEL_DIFFICULTY,
+        func.json_extract(PoolDraftJob.config, '$.weekly_scope') == config['weekly_scope']))
+    if include_pending:
+        for job in pending:
+            candidates.extend(q for q in json.loads(job.questions) if q.get('_queue_status') == 'pending')
+    seen = set()
+    unique = []
+    for question in candidates:
+        identity = question_bank._fingerprint(question, 0)
+        if identity not in seen:
+            seen.add(identity); unique.append(question)
+    options = []
+    for row in exam_blueprint.coverage_rows(plan):
+        eligible = [q for q in unique if q.get('subject') == row['name'] and
+            (not row.get('branch') or q.get('branch') == row['branch']) and
+            q.get('weekly_ranked_scope') == config['weekly_scope'] and
+            q.get('curriculum_id') in row.get('curriculum_ids', []) and
+            (not row.get('full_mock') or (q.get('grounding_status') == 'book_ocr' and
+             q.get('book') and type(q.get('page')) is int and q.get('source_quote')))]
+        represented = {q['curriculum_id'] for q in eligible}
+        nodes = exam_blueprint.lessons_for(row, config.get('grade', ''))
+        expected = min(row['questions'], len(nodes))
+        count = len(eligible)
+        if len(represented) < expected:
+            count = min(count, len(represented))
+        options.append((count / row['questions'], count, row, represented, expected, nodes))
+    _, count, row, represented, expected, nodes = min(options, key=lambda option: option[0])
+    needed = row['questions'] - count % row['questions']
+    drafted = {**row, 'branches': {}, 'questions': needed}
+    if len(represented) < expected:
+        # New chapter coverage takes priority over more copies of one lesson.
+        ids = [node['id'] for node in nodes if node['id'] not in represented]
+        if ids: drafted['curriculum_ids'] = ids
+    return [drafted]
+
+
 def create_job(config, major, difficulty):
     from app.rag.weekly_ranked import prepare_config
     config = prepare_config(config)
@@ -68,6 +120,8 @@ def create_job(config, major, difficulty):
         count = db.scalar(slots)
         if count >= max(1, get_settings().POOL_DRAFT_QUEUE_CAPACITY):
             return None
+        if config.get('weekly_scope'):
+            plan = _weekly_draft_plan(db, config, major, plan)
         job = PoolDraftJob(config=json.dumps(config, ensure_ascii=False), major=major,
             difficulty=difficulty, grade=config.get("grade", ""), plan=json.dumps(plan, ensure_ascii=False),
             status="drafting", lease_owner=_OWNER, lease_until=_lease())
@@ -90,11 +144,15 @@ def append_batch(job_id, batch):
                 continue
             seen.add(identity)
             clean = {k: v for k, v in q.items() if k not in ("bank_id", "id", "_queue_status")}
-            scoped = next((r for r in json.loads(job.plan) if r.get('weekly_ranked_scope') and r['name']==q.get('subject')),None)
+            scoped_rows = [r for r in json.loads(job.plan) if r.get('weekly_ranked_scope')]
+            scoped = next((r for r in scoped_rows if r['name'] == q.get('subject') and
+                q.get('curriculum_id') in r['curriculum_ids'] and
+                (not r.get('branch') or r['branch'] == q.get('branch'))), None)
+            if scoped_rows and not scoped:
+                continue
             if scoped:
-                if q.get('curriculum_id') not in scoped['curriculum_ids']:
-                    continue
                 clean['weekly_ranked_scope'] = scoped['weekly_ranked_scope']
+                clean['maze_scope'] = scoped.get('maze_scope', {}).get(q['curriculum_id'], [])
             rows.append({**clean, "_id": len(rows) + 1, "verification_status": "pending", "_queue_status": "pending"})
         job.questions = json.dumps(rows, ensure_ascii=False)
         job.question_count = len(rows)
@@ -140,6 +198,22 @@ def claim_job(scope=None):
         if scope:
             query = query.where(func.json_extract(PoolDraftJob.config, '$.weekly_scope') == scope)
         job_id = db.scalar(query.order_by(PoolDraftJob.id).limit(1))
+        if scope and job_id is not None:
+            first = db.get(PoolDraftJob, job_id)
+            config = json.loads(first.config)
+            if config.get('weekly_plan'):
+                wanted = _weekly_draft_plan(db, config, first.major,
+                                           config['weekly_plan'], include_pending=False)[0]
+                # Complete the weakest shelf first; old extra math candidates
+                # remain durable and will be reviewed when their turn comes.
+                for candidate in db.scalars(select(PoolDraftJob).where(PoolDraftJob.id.in_(query)).order_by(PoolDraftJob.id)):
+                    if any(q.get('_queue_status') == 'pending' and
+                           q.get('_review_after', '') <= _now().isoformat() and
+                           q.get('subject') == wanted['name'] and
+                           q.get('curriculum_id') in wanted['curriculum_ids'] and
+                           (not wanted.get('branch') or q.get('branch') == wanted['branch'])
+                           for q in json.loads(candidate.questions)):
+                        job_id = candidate.id; break
         if job_id is None:
             return None
         claimed = db.execute(update(PoolDraftJob).where(PoolDraftJob.id == job_id,
@@ -370,7 +444,7 @@ def run():
                 except HTTPException:
                     continue  # The next pass displays the missing schedule.
             stats = snapshot(config.get('weekly_scope'))
-            if stats["pending_booklets"] >= stats["capacity"] or (config["count"] and
+            if stats["pending_booklets"] >= stats["capacity"] or (config["count"] and not config.get('weekly_scope') and
                     state["produced"] + stats["pending_booklets"] >= config["count"]):
                 _worker_state("drafting", "waiting_for_queue")
                 service._wake.wait(5); service._wake.clear(); continue
@@ -387,7 +461,8 @@ def run():
                 job_id = create_job(config, major, difficulty)
             except HTTPException:
                 continue  # Schedule changed between reservation and drafting.
-            if job_id is None: continue
+            if job_id is None:
+                service._wake.wait(5); service._wake.clear(); continue
             service._update(draft_cursor=cursor + 1)
             _worker_state("drafting", "generating", health)
             pool_core.set_current(major, difficulty)

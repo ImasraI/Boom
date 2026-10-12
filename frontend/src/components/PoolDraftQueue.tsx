@@ -9,6 +9,9 @@ export interface QueueStats {
   rejected_booklets: number;
   verified_questions: number;
   rejected_questions: number;
+  scope?: string;
+  other_pending_booklets?: number;
+  other_pending_questions?: number;
 }
 export interface PoolWorkerState {
   status: string;
@@ -33,6 +36,8 @@ export default function PoolDraftQueue({ queue, drafting, verification, running 
   const n = (value: number) => value.toLocaleString("fa-IR");
   return <section className="study-section p-5 space-y-4" aria-labelledby="draft-queue-title">
     <h2 id="draft-queue-title" className="font-bold">صف پیش‌نویس‌های آزمون</h2>
+    {queue.scope === 'weekly_ranked' && <p className="text-xs text-[var(--accent)]">آمار این صف فقط برای آزمون آیندهٔ ماز است.</p>}
+    {!!queue.other_pending_booklets && <p className="text-xs text-[var(--muted)]">{n(queue.other_pending_booklets)} پیش‌نویس و {n(queue.other_pending_questions ?? 0)} سؤال از تولیدهای قبلی محفوظ است و در این تولید بررسی نمی‌شود.</p>}
     <p className="text-xs text-[var(--muted)] leading-relaxed">
       طراحی و بررسی پاسخ هم‌زمان اجرا می‌شوند. پیش‌نویس‌ها در سرور ذخیره می‌شوند و تا تأیید وارد تمرین یا رنکینگ نمی‌شوند.
       سقف صف برای جلوگیری از مصرف بی‌وقفهٔ سهمیه است؛ بانک سؤال‌های تأییدشده سقف ندارد.

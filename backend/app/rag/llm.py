@@ -263,6 +263,26 @@ def _retry_after_seconds(response: httpx.Response, fallback: float,
         return fallback
 
 
+def _daily_retry_seconds(response: httpx.Response) -> float:
+    """Groq's daily-token message can outlast its short minute-limit header."""
+    waits = []
+    try:
+        raw = float(response.headers.get('retry-after', ''))
+        if 0 < raw <= 86400: waits.append(raw)
+    except (TypeError, ValueError):
+        pass
+    try:
+        message = str(response.json().get('error', {}).get('message', ''))
+        match = re.search(r'try again in\s*((?:\d+(?:\.\d+)?\s*[dhms]\s*)+)', message, re.I)
+        if match:
+            seconds = sum(float(amount) * {'d':86400, 'h':3600, 'm':60, 's':1}[unit.lower()]
+                          for amount, unit in re.findall(r'(\d+(?:\.\d+)?)\s*([dhms])', match[1], re.I))
+            if 0 < seconds <= 86400: waits.append(seconds)
+    except (ValueError, TypeError, AttributeError):
+        pass
+    return max(60, max(waits)) if waits else 86400
+
+
 # Providers spell out WHY a request was rejected in the error body, but the
 # clients used to log only "HTTP 429" - an exhausted free-tier quota then
 # looked like a hung pool sweep.
@@ -482,8 +502,8 @@ class GroqLLMClient(BaseLLMClient):
                     self.last_error = "HTTP 429" + (f" ({reason})" if reason else "")
                     if terminal:
                         self.last_error_code = "provider_daily_quota"
-                        delay = _retry_after_seconds(e.response, fallback=86400, cap=86400)
-                        block_daily_quota(self._quota_identity, self.last_error, retry_seconds=max(60, delay))
+                        delay = _daily_retry_seconds(e.response)
+                        block_daily_quota(self._quota_identity, self.last_error, retry_seconds=delay)
                         logger.error(
                             "Groq call blocked: %s - not retrying, a per-day "
                             "quota cannot clear inside this request.",

@@ -12,6 +12,17 @@ workers. During a weekly run, older full-mock drafts remain saved but do not con
 its queue capacity or verifier priority. Missing or expired schedule data pauses
 the run with an actionable message.
 
+Draft jobs are small batches chosen from the least stocked subject or math branch.
+The scheduler counts usable verified stock and pending candidates, and prioritizes
+missing chapters. A provider refusal does not reset drafting to math. Finite targets
+count assembled ready papers, not these partial draft jobs. The admin queue counters
+show only the current Maze scope; older pending work is listed separately.
+
+Groq daily-token errors can contain a longer retry interval in the message than
+in the rate-limit header. The worker honors the longer interval across clients.
+Credential health is model-specific: adding a key already used by verification
+does not create new capacity for that same provider/model.
+
 The schedule is reviewed data in `backend/data/cache/mock_schedules/*.json`, not
 model memory. Version 1 records the provider, major, grade, source PDF SHA-256,
 review status, Jalali dates, per-book school years, topics and exact scope quotes.

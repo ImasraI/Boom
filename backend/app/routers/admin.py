@@ -221,6 +221,13 @@ def pool_levels(db: Session = Depends(get_db)):
         duel_capacity=None,
     )
     run = pool_service.snapshot()
+    queue = pool_queue.snapshot()
+    if run.get('config', {}).get('kind') == 'weekly_ranked' and run.get('weekly_scope'):
+        current = pool_queue.snapshot(run['weekly_scope'])
+        current['other_pending_booklets'] = queue['pending_booklets'] - current['pending_booklets']
+        current['other_pending_questions'] = queue['pending_questions'] - current['pending_questions']
+        current['scope'] = 'weekly_ranked'
+        queue = current
     return {
         "target": target,
         "shelves": shelves,
@@ -231,7 +238,7 @@ def pool_levels(db: Session = Depends(get_db)):
         "token_usage": pool_usage.summary(),
         "provider_health": pool_quota_status(),
         "question_bank": question_bank.counts(db),
-        "draft_queue": pool_queue.snapshot(),
+        "draft_queue": queue,
         "unlimited_storage": True,
         "cancel_requested": pool_core.cancel_requested(),
         "progress": progress,
