@@ -121,3 +121,43 @@ def test_format_recovery_preserves_commas_inside_text_and_options():
     row = mg.parse_booklet(raw)[0]
     assert row['text'] == 'رشته a, } و b, ] را مقایسه کن'
     assert row['options'][:2] == ['a, }', 'b, ]'] and row['answer'] == 0
+
+
+@pytest.mark.parametrize('raw', [
+    r'{"questions":[{"text":"$\{1,2\}$","options":["3","4","5","6"],"answer":0,}]}',
+    '{"answers":{"1":0}}',
+])
+def test_groq_json_mode_failure_recovers_only_safe_serialization(raw, monkeypatch):
+    import httpx
+    import app.rag.llm as llm
+    monkeypatch.setattr(llm, 'blocked_quota', lambda identity: None)
+    monkeypatch.setattr(llm, 'blocked_access', lambda identity: None)
+    client = GroqLLMClient(api_key='test-json', model='openai/gpt-oss-120b', temperature=0.2, max_tokens=8192)
+    client.client.close()
+    client.client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(400,
+        json={'error': {'code': 'json_validate_failed', 'failed_generation': raw}})))
+    client.json_mode = True; client.reasoning_effort = 'high'
+    try:
+        assert json.loads(client.generate([{'role':'user','content':'JSON'}])) == quality.json_value(raw)
+        assert not client.last_error and not client.last_error_code
+    finally: client.client.close()
+
+
+def test_groq_incomplete_json_retries_without_downgrading_then_returns_clear_error(monkeypatch):
+    import httpx
+    import app.rag.llm as llm
+    monkeypatch.setattr(llm, 'blocked_quota', lambda identity: None)
+    monkeypatch.setattr(llm, 'blocked_access', lambda identity: None)
+    monkeypatch.setattr(llm.time, 'sleep', lambda seconds: None)
+    requests = []
+    def reply(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(400, json={'error':{'code':'json_validate_failed','failed_generation':'{"questions":['}})
+    client = GroqLLMClient(api_key='test-json', model='openai/gpt-oss-120b', temperature=0.2, max_tokens=8192)
+    client.client.close(); client.client = httpx.Client(transport=httpx.MockTransport(reply))
+    client.json_mode = True; client.reasoning_effort = 'high'
+    try:
+        assert client.generate([{'role':'user','content':'JSON'}]) == ''
+        assert client.last_error_code == 'provider_json_error' and len(requests) == 4
+        assert all(r['reasoning_effort']=='high' and r['max_completion_tokens']==8192 for r in requests)
+    finally: client.client.close()

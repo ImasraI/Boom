@@ -413,6 +413,8 @@ class GroqLLMClient(BaseLLMClient):
                     content = choice["message"]["content"]
                     if content:
                         self.last_usage = _usage_from_openai(data)
+                        self.last_error = ''
+                        self.last_error_code = ''
                         return content
                     finish = choice.get("finish_reason")
                     last = ""
@@ -433,6 +435,34 @@ class GroqLLMClient(BaseLLMClient):
             except httpx.HTTPStatusError as e:
                 last = ""
                 status = e.response.status_code
+                if status == 400 and getattr(self, 'json_mode', False):
+                    try:
+                        error_data = e.response.json()
+                        error = error_data.get('error', {})
+                    except (ValueError, AttributeError):
+                        error = {}
+                    if isinstance(error, dict) and error.get('code') == 'json_validate_failed':
+                        # JSON mode can reject an otherwise complete math draft
+                        # for invalid LaTeX escapes. Recover serialization only;
+                        # the normal question parser and both reviewers still run.
+                        from app.rag.question_quality import json_value
+                        recovered = json_value(error.get('failed_generation'))
+                        if isinstance(recovered, (dict, list)):
+                            content = json.dumps(recovered, ensure_ascii=False)
+                            record_response('groq', self.model, {
+                                'usage': error_data.get('usage'),
+                                'choices': [{'message': {'content': content}}]})
+                            self.last_usage = _usage_from_openai(error_data)
+                            self.last_error = ''
+                            self.last_error_code = ''
+                            logger.info('Recovered Groq JSON serialization; normal validation still required.')
+                            return content
+                        self.last_error = 'Groq JSON output was incomplete or invalid'
+                        self.last_error_code = 'provider_json_error'
+                        logger.warning('Groq JSON validation failed (attempt %d); retrying unchanged quality settings.', attempt + 1)
+                        if attempt < 3:
+                            time.sleep(wait_s)
+                        continue
                 if status in (401, 403):
                     self.last_error = f"HTTP {status}"
                     self.last_error_code = "provider_access_denied"
