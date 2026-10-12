@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select, update, text
+from fastapi import HTTPException
 
 from app.auth.database import PoolDraftJob, SessionLocal
 from app.config import get_settings
@@ -30,11 +31,14 @@ def _lease():
     return _now() + timedelta(minutes=30)
 
 
-def snapshot():
+def snapshot(scope=None):
     with SessionLocal() as db:
-        rows = db.execute(select(PoolDraftJob.status, func.count(),
+        query = select(PoolDraftJob.status, func.count(),
             func.sum(PoolDraftJob.question_count), func.sum(PoolDraftJob.verified_count),
-            func.sum(PoolDraftJob.rejected_count)).group_by(PoolDraftJob.status)).all()
+            func.sum(PoolDraftJob.rejected_count)).group_by(PoolDraftJob.status)
+        if scope:
+            query = query.where(func.json_extract(PoolDraftJob.config, '$.weekly_scope') == scope)
+        rows = db.execute(query).all()
     pending = sum(count for status, count, *_ in rows if status in _OPEN)
     return {"enabled": get_settings().POOL_DRAFT_QUEUE_ENABLED,
         "capacity": max(1, get_settings().POOL_DRAFT_QUEUE_CAPACITY),
@@ -50,13 +54,18 @@ def snapshot():
 
 
 def create_job(config, major, difficulty):
-    plan = pool_core.generation_plan(major, ranked=difficulty == pool_core.DUEL_DIFFICULTY,
+    from app.rag.weekly_ranked import prepare_config
+    config = prepare_config(config)
+    plan = config.get('weekly_plan') or pool_core.generation_plan(major, ranked=difficulty == pool_core.DUEL_DIFFICULTY,
         subjects=config.get("subjects"), **({"total_questions": config.get("total_questions", 0)}
             if difficulty != pool_core.DUEL_DIFFICULTY else {}))
     with SessionLocal() as db:
         # Reserve a queue slot atomically, including across API processes.
         db.execute(text("BEGIN IMMEDIATE"))
-        count = db.scalar(select(func.count()).select_from(PoolDraftJob).where(PoolDraftJob.status.in_(_OPEN)))
+        slots = select(func.count()).select_from(PoolDraftJob).where(PoolDraftJob.status.in_(_OPEN))
+        if config.get('weekly_scope'):
+            slots = slots.where(func.json_extract(PoolDraftJob.config, '$.weekly_scope') == config['weekly_scope'])
+        count = db.scalar(slots)
         if count >= max(1, get_settings().POOL_DRAFT_QUEUE_CAPACITY):
             return None
         job = PoolDraftJob(config=json.dumps(config, ensure_ascii=False), major=major,
@@ -81,6 +90,11 @@ def append_batch(job_id, batch):
                 continue
             seen.add(identity)
             clean = {k: v for k, v in q.items() if k not in ("bank_id", "id", "_queue_status")}
+            scoped = next((r for r in json.loads(job.plan) if r.get('weekly_ranked_scope') and r['name']==q.get('subject')),None)
+            if scoped:
+                if q.get('curriculum_id') not in scoped['curriculum_ids']:
+                    continue
+                clean['weekly_ranked_scope'] = scoped['weekly_ranked_scope']
             rows.append({**clean, "_id": len(rows) + 1, "verification_status": "pending", "_queue_status": "pending"})
         job.questions = json.dumps(rows, ensure_ascii=False)
         job.question_count = len(rows)
@@ -119,11 +133,13 @@ def recover_interrupted():
         db.commit()
 
 
-def claim_job():
+def claim_job(scope=None):
     with SessionLocal() as db:
-        job_id = db.scalar(select(PoolDraftJob.id).where(PoolDraftJob.status == "pending",
+        query = select(PoolDraftJob.id).where(PoolDraftJob.status == "pending",
             (PoolDraftJob.retry_at.is_(None) | (PoolDraftJob.retry_at <= _now())))
-            .order_by(PoolDraftJob.id).limit(1))
+        if scope:
+            query = query.where(func.json_extract(PoolDraftJob.config, '$.weekly_scope') == scope)
+        job_id = db.scalar(query.order_by(PoolDraftJob.id).limit(1))
         if job_id is None:
             return None
         claimed = db.execute(update(PoolDraftJob).where(PoolDraftJob.id == job_id,
@@ -203,6 +219,11 @@ def _assemble():
     with _ASSEMBLE_LOCK:
         if not _active(): return False
         state = service.snapshot(); config = state["config"]
+        if config.get('kind')=='weekly_ranked':
+            from app.rag.weekly_ranked import prepare_config
+            config = prepare_config(config)
+            if state.get('weekly_scope') != config['weekly_scope']:
+                state = service._update(weekly_scope=config['weekly_scope'], produced=0)
         if config["count"] and state["produced"] >= config["count"]: return False
         shelves = service._shelves(config)
         cursor = state.get("assemble_cursor", 0)
@@ -213,6 +234,8 @@ def _assemble():
                 kwargs = dict(grade=config["grade"], subjects=config.get("subjects"), topics=config.get("topics"))
                 if difficulty != pool_core.DUEL_DIFFICULTY:
                     kwargs["total_questions"] = config.get("total_questions", 0)
+                if config.get('weekly_plan'):
+                    kwargs['plan'] = config['weekly_plan']
                 success = pool_core.assemble_stock(db, major, difficulty, **kwargs)
             if success:
                 with service._LOCK:
@@ -239,7 +262,12 @@ def _verify_loop(stop):
             if health["blocked"]:
                 _worker_state("verification", "waiting_for_quota", health)
                 _VERIFY_WAKE.wait(60); _VERIFY_WAKE.clear(); continue
-            job_id = claim_job()
+            config = service.snapshot()['config']
+            scope = None
+            if config.get('kind') == 'weekly_ranked':
+                from app.rag.weekly_ranked import prepare_config
+                scope = prepare_config(config)['weekly_scope']
+            job_id = claim_job(scope)
             if job_id is None:
                 _worker_state("verification", "waiting_for_drafts", health)
                 _VERIFY_WAKE.wait(5); _VERIFY_WAKE.clear(); continue
@@ -248,6 +276,9 @@ def _verify_loop(stop):
             if not stop.is_set():
                 _assemble()
             service._wake.set()
+        except HTTPException:
+            _worker_state('verification', 'waiting_for_schedule')
+            _VERIFY_WAKE.wait(60); _VERIFY_WAKE.clear()
         except Exception:
             logger.exception("Queued verification failed; saved candidates retained")
             _worker_state("verification", "error")
@@ -320,13 +351,25 @@ def run():
             state = service.snapshot(); config = state["config"]
             if config["count"] and state["produced"] >= config["count"]:
                 service._update(enabled=False, status="finished"); break
-            if _assemble(): continue
+            try:
+                if _assemble(): continue
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail,dict) else {'message':str(exc.detail)}
+                service._update(status='waiting_for_schedule',last_error=detail['message'])
+                _worker_state('drafting','waiting_for_schedule')
+                service._wake.wait(60);service._wake.clear();continue
             if _draft_waiting(state):
                 service._wake.wait(60); service._wake.clear(); continue
             if state.get('drafting_paused'):
                 failures = 0
             service._update(status="queue_running", last_error="", retry_at=None)
-            stats = snapshot()
+            if config.get('kind') == 'weekly_ranked':
+                from app.rag.weekly_ranked import prepare_config
+                try:
+                    config = prepare_config(config)
+                except HTTPException:
+                    continue  # The next pass displays the missing schedule.
+            stats = snapshot(config.get('weekly_scope'))
             if stats["pending_booklets"] >= stats["capacity"] or (config["count"] and
                     state["produced"] + stats["pending_booklets"] >= config["count"]):
                 _worker_state("drafting", "waiting_for_queue")
@@ -340,7 +383,10 @@ def run():
             shelves = service._shelves(config)
             cursor = state.get("draft_cursor", state.get("cursor", 0))
             major, difficulty = shelves[cursor % len(shelves)]
-            job_id = create_job(config, major, difficulty)
+            try:
+                job_id = create_job(config, major, difficulty)
+            except HTTPException:
+                continue  # Schedule changed between reservation and drafting.
             if job_id is None: continue
             service._update(draft_cursor=cursor + 1)
             _worker_state("drafting", "generating", health)

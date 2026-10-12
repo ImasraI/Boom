@@ -21,6 +21,7 @@ const labels: Record<string, string> = {
   waiting_for_quota: "منتظر سهمیهٔ سرویس", waiting_for_queue: "منتظر خالی شدن صف",
   waiting_for_drafts: "منتظر پیش‌نویس", error: "خطا؛ پیش‌نویس‌ها حفظ شده‌اند",
   waiting_for_retry: "تولید ناموفق؛ منتظر تلاش دوباره",
+  waiting_for_schedule: "منتظر برنامهٔ معتبر ماز",
 };
 export default function PoolDraftQueue({ queue, drafting, verification, running }: {
   queue?: QueueStats;

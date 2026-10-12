@@ -132,6 +132,7 @@ class Settings(BaseSettings):
     # rematches while still capping AI cost. Failed accepts are refunded
     # (see arena.accept_scheduled), so only real bookings count.
     AI_DAILY_ARENA_JOIN: int = 5
+    ARENA_WEEKLY_MAZE_ENABLED: bool = True
     # Rough daily per-user token budget across ALL AI features (prompt +
     # completion). ~200k tokens ≈ a full mock booklet + a few dozen chats.
     # Set 0 (or negative) in .env for unlimited.

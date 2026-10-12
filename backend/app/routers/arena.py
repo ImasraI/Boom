@@ -46,6 +46,7 @@ from app.auth.limits import consume_ai_use, feature_quota, release_ai_use
 from app.rag import knowledge_base as kb, mock_generation, pool_core
 from app.rag.konkur_format import major_key
 from app.rag.provider_quota import DAILY_QUOTA_MESSAGE, pool_quota_status, require_pool_available
+from app.rag.weekly_ranked import exam_day
 from app.config import get_settings
 from app.routers.mocks import _score
 from app.utils.logger import get_logger
@@ -190,11 +191,33 @@ def _knowledge_base(db: Session, user_id: int,
 
 def _wanted_of(entry: ArenaQueueEntry) -> list:
     """The tick list stored on a queue entry (never raises on junk)."""
+    if get_settings().ARENA_WEEKLY_MAZE_ENABLED:
+        return []
     try:
         raw = json.loads(entry.wanted or "[]")
     except (ValueError, TypeError):
         raw = []
     return [str(s) for s in raw] if isinstance(raw, list) else []
+
+
+def _pair_plan(major_a,major_b,wanted_a=None,wanted_b=None,grade='',as_of=None):
+    if not get_settings().ARENA_WEEKLY_MAZE_ENABLED:
+        return kb.pair_plan(major_a,major_b,wanted_a,wanted_b)
+    if 'riazi' not in (_major_key_of(major_a),_major_key_of(major_b)):
+        return kb.pair_plan(major_a,major_b)
+    if _major_key_of(major_a)!='riazi' or _major_key_of(major_b)!='riazi' or (grade and kb.grade_scope(grade,'دوازدهم')!='دوازدهم'):
+        return {'ok':False,'plan':[],'reason':'رنکینگ هفتگی فعلاً مخصوص دوازدهم ریاضی‌فیزیک است.'}
+    from app.rag.weekly_ranked import preview
+    weekly=preview(as_of)
+    if not weekly['available']:
+        return {'ok':False,'plan':[],'reason':weekly['message'],'code':weekly['code']}
+    return {'ok':True,'plan':weekly['plan'],'topics':[],'booklet_subjects':[r['name'] for r in weekly['plan']],
+            'weekly':True,'date':weekly['date'],'reason':''}
+
+
+def _ensure_pair(pair):
+    if not pair['ok']:
+        raise HTTPException(409,detail={'code':pair.get('code','weekly_ranked_ineligible'),'message':pair['reason']})
 
 
 def _try_pair(db: Session, entry: ArenaQueueEntry):
@@ -229,8 +252,8 @@ def _try_pair(db: Session, entry: ArenaQueueEntry):
     other = None
     pair = None
     for candidate in candidates:
-        verdict = kb.pair_plan(entry.major or "", candidate.major or "",
-                               mine, _wanted_of(candidate))
+        verdict = _pair_plan(entry.major or "", candidate.major or "",
+                               mine, _wanted_of(candidate),grade=kb.grade_scope(entry.grade or '',candidate.grade or ''))
         if verdict["ok"]:
             other, pair = candidate, verdict
             break
@@ -303,7 +326,7 @@ def _reserve_match(db: Session, entry: ArenaQueueEntry, other: ArenaQueueEntry,
         mock = pooled
         logger.info("Arena match served from duel pool (mock %d).", mock.id)
     else:
-        if not get_settings().POOL_ALLOW_LIVE_GENERATION:
+        if pair.get('weekly') or not get_settings().POOL_ALLOW_LIVE_GENERATION:
             raise HTTPException(409, detail={"code":"pool_empty", "message":
                 "برای درس‌ها و پایه مشترک شما هنوز دفترچه رنکینگ آماده نیست. پس از تکمیل بانک سوال دوباره وارد شو."})
         require_pool_available()  # No network call; never reserve an unplayable daily-quota match.
@@ -437,16 +460,17 @@ def join_queue(
     db: Session = Depends(get_db),
 ):
     major, grade = _knowledge_base(db, current_user.id, payload.student)
-    wanted = kb.clean_wanted(major, payload.wanted)
-    if not get_settings().POOL_ALLOW_LIVE_GENERATION:
+    wanted = [] if get_settings().ARENA_WEEKLY_MAZE_ENABLED else kb.clean_wanted(major,payload.wanted)
+    pair = _pair_plan(major,major,wanted,wanted,grade=grade)
+    _ensure_pair(pair)
+    if pair.get('weekly') or not get_settings().POOL_ALLOW_LIVE_GENERATION:
         from app.rag import question_bank
-        pair = kb.pair_plan(major, major, wanted, wanted)
         ready = question_bank.assemble(db, current_user.id, pair['plan'],
             [pool_core.CANONICAL_MAJOR[_major_key_of(major)]], grade=grade,
             topics=pair.get('topics'), shared_only=True)
         if not ready:
             raise HTTPException(409, detail={"code":"pool_empty", "message":
-                "برای این رشته، پایه و درس‌های انتخابی هنوز سوال رنکینگ کافی آماده نیست. انتخاب درس‌ها را تغییر بده یا پس از تکمیل بانک سوال برگرد."})
+                "سؤال‌های تأییدشدهٔ آزمون آیندهٔ ماز هنوز کافی نیستند؛ مدیر باید بانک رنکینگ هفتگی را آماده کند."})
     if pool_quota_status()["blocked"]:
         # Do not queue a player when neither generation nor any verified
         # shared stock can supply a match. Legacy indexed/not-yet-indexed
@@ -467,7 +491,7 @@ def join_queue(
     # queue entry must remember what this player may be tested on, because
     # the opponent's entry is the only thing matchmaking can compare it with.
     major, grade = _knowledge_base(db, current_user.id, payload.student)
-    wanted = kb.clean_wanted(major, payload.wanted)
+    wanted = [] if get_settings().ARENA_WEEKLY_MAZE_ENABLED else kb.clean_wanted(major,payload.wanted)
     ignored = [str(s).strip() for s in (payload.wanted or [])
                if str(s).strip() and str(s).strip() not in wanted]
     if ignored:
@@ -879,7 +903,8 @@ def create_scheduled(
     if starts_at > now + _MAX_SCHEDULE_AHEAD:
         raise HTTPException(status_code=422, detail="حداکثر ۱۴ روز جلوتر می‌توان برنامه گذاشت")
     major, grade = _knowledge_base(db, current_user.id, payload.student)
-    wanted = kb.clean_wanted(major, payload.wanted)
+    wanted = [] if get_settings().ARENA_WEEKLY_MAZE_ENABLED else kb.clean_wanted(major,payload.wanted)
+    _ensure_pair(_pair_plan(major,major,grade=grade,as_of=exam_day(starts_at)))
     with _LOCK:
         # One open offer per host: a second one would let one player flood
         # the list (and both would book the same acceptor's evening).
@@ -948,8 +973,9 @@ def accept_scheduled(
         # Same fairness rule as live matchmaking: shared exam material.
         major, grade = _knowledge_base(db, current_user.id,
                                        (payload.student if payload else None))
-        pair = kb.pair_plan(invite.major or "", major,
-                            _wanted_of(invite), kb.clean_wanted(major, (payload.wanted if payload else None)))
+        shared_grade=kb.grade_scope(invite.grade or '',grade)
+        pair = _pair_plan(invite.major or "",major,_wanted_of(invite),
+                         (payload.wanted if payload else None),grade=shared_grade,as_of=exam_day(invite.starts_at))
         if not pair["ok"]:
             _refund_and_raise(current_user.id, 409, pair["reason"])
 
@@ -960,17 +986,17 @@ def accept_scheduled(
         mock = None
         if same_major and unfiltered:
             mock = pool_core.claim_duel_booklet(
-                db, invite.host_id, current_user.id, _major_key_of(major), grade=grade, plan=pair['plan'])
+                db, invite.host_id, current_user.id, _major_key_of(major), grade=shared_grade, plan=pair['plan'])
         if mock is None:
             mock = pool_core.reused_duel(db, invite.host_id, _major_key_of(major),
-                grade=grade, plan=pair["plan"], topics=pair.get("topics"))
+                grade=shared_grade, plan=pair["plan"], topics=pair.get("topics"))
         if mock is None:
-            if not get_settings().POOL_ALLOW_LIVE_GENERATION:
+            if pair.get('weekly') or not get_settings().POOL_ALLOW_LIVE_GENERATION:
                 _refund_and_raise(current_user.id, 409, {"code":"pool_empty", "message":
                     "برای درس‌ها و پایه مشترک شما هنوز دفترچه آماده نیست. پس از تکمیل بانک سوال مسابقه را رزرو کن."})
             shared = "، ".join(pair["booklet_subjects"])
             mock = _new_duel_placeholder(
-                db, invite.host_id, pair["plan"], invite.major or major, grade,
+                db, invite.host_id, pair["plan"], invite.major or major, shared_grade,
                 f"دوئل زمان‌دار — {shared} — {invite.starts_at.strftime('%Y-%m-%d %H:%M')}")
         match = ArenaMatch(
             student_a_id=invite.host_id,
@@ -1239,6 +1265,12 @@ def duel_filters(
     empty - the authoritative major and grade live in the profile.
     """
     resolved, grade = _knowledge_base(db, current_user.id, {"major": major})
+    if get_settings().ARENA_WEEKLY_MAZE_ENABLED:
+        from app.rag.weekly_ranked import preview
+        weekly=preview()
+        return {'all':[],'mine':[],'addressable':[],'booklet_of':{},'majors_with':{},
+            'major':resolved,'grade':grade,'weekly':{k:weekly.get(k) for k in
+                ('available','date','document','topics','message','code')}}
     return {**kb.filter_options(resolved), "grade": grade}
 
 

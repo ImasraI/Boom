@@ -11,6 +11,7 @@ os.environ["POOL_GENERATION_REQUESTS_PER_MINUTE"] = "0"
 # Legacy generation tests explicitly exercise the optional live branch.
 os.environ["POOL_ALLOW_LIVE_GENERATION"] = "true"
 os.environ["POOL_DRAFT_QUEUE_ENABLED"] = "false"
+os.environ["ARENA_WEEKLY_MAZE_ENABLED"] = "false"  # Legacy arena fixtures; weekly tests explicitly enable it.
 
 
 @pytest.fixture(autouse=True)

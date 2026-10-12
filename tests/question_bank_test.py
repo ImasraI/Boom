@@ -103,7 +103,7 @@ def test_stock_inventory_excludes_unverified_corrupt_and_private_questions(db):
 
 def test_ranked_stock_only_rejects_insufficient_subject_stock_before_charge(db, monkeypatch):
     make_mock(db,count=1)
-    monkeypatch.setattr(arena,'get_settings',lambda:SimpleNamespace(POOL_ALLOW_LIVE_GENERATION=False))
+    monkeypatch.setattr(arena,'get_settings',lambda:SimpleNamespace(POOL_ALLOW_LIVE_GENERATION=False, ARENA_WEEKLY_MAZE_ENABLED=False))
     monkeypatch.setattr(arena,'consume_ai_use',lambda *a:pytest.fail('Do not charge an unavailable duel'))
     with pytest.raises(HTTPException) as error:
         arena.join_queue(arena.JoinPayload(student={'major':MAJORS[0],'grade':'دوازدهم'}),db.get(User,1),db)

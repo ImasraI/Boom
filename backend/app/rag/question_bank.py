@@ -130,6 +130,8 @@ def assemble(db, user_id, plan, majors, difficulty="konkur", grade="", topics=No
         row_topics = ([str(t).strip().casefold() for t in row['topics']
                        if str(t).strip() and str(t).strip() != row['name']]
                       if 'topics' in row else wanted_topics)
+        if row.get('curriculum_ids') is not None:
+            row_topics = []
         if row_topics:
             selection = selection.where(or_(*(BankQuestion.topic.contains(t, autoescape=True) for t in row_topics)))
         if selected:
@@ -142,6 +144,10 @@ def assemble(db, user_id, plan, majors, difficulty="konkur", grade="", topics=No
         # LLM topic string. Older bank rows remain available for short practice.
         for candidate in candidates:
             content = json.loads(candidate.content)
+            if row.get('curriculum_ids') is not None and content.get('curriculum_id') not in row['curriculum_ids']:
+                continue
+            if row.get('weekly_ranked_scope') and content.get('weekly_ranked_scope') != row['weekly_ranked_scope']:
+                continue
             if row.get('branch') and content.get('branch') != row['branch']:
                 continue
             if row.get('full_mock') and (content.get('grounding_status') != 'book_ocr' or

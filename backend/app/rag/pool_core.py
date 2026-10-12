@@ -508,14 +508,14 @@ def duel_pool_deficit(db, major_key: str, target: int) -> int:
 
 
 def generate_one_duel(db, major_key: str, *, grade="", subjects=None, topics=None,
-                      allow_generation=True) -> bool:
+                      allow_generation=True, plan=None) -> bool:
     """Generate one scaled + verified duel booklet into the duel shelf.
 
     Same shared generation path as standard pool rows (build_pool_booklet),
     on the scaled plan; verification included, because a wrong key in a
     ranked duel moves Elo. Failures are logged and swallowed like the others.
     """
-    plan = generation_plan(major_key, ranked=True, subjects=subjects)
+    plan = plan or generation_plan(major_key, ranked=True, subjects=subjects)
     duration = max(10, sum(s["minutes"] for s in plan) // 3)
     try:
         questions, _plan, scaled_duration = _build_from_stock(
@@ -647,7 +647,8 @@ def claim_duel_booklet(db, user_a: int, user_b: int, major_key: str, *, grade=""
                 GeneratedMock.status == "pending_use").values(status="quarantined"))
             continue
         content = json.loads(row.questions)
-        if plan and (any(sum(q.get('subject') == s['name'] for q in content) != s['questions'] for s in plan) or len(content) != sum(s['questions'] for s in plan)):
+        from app.rag.exam_blueprint import matches_plan
+        if plan and not matches_plan(content,plan,grade):
             continue  # A subject-specific template is bank stock, not a full duel.
         questions = question_bank.active_questions(db, row)
         if len(questions) != len(json.loads(row.questions)):

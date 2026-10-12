@@ -943,6 +943,8 @@ def _draft_subject_batch(client, row, count, row_topics, difficulty, context,
             prompt += "\n\nاین سوال‌ها قبلاً ساخته شده‌اند؛ سوال تکراری نساز:\n" + previous
         if row.get('source_slots'):
             prompt += '\nبرای هر سوال source_id یکی از منابع بالا را بنویس؛ تعداد هر مبحث را دقیق رعایت کن. سوال فاقد منبع معتبر پذیرفته نمی‌شود.'
+        if row.get('weekly_ranked_scope'):
+            prompt += '\nحدود آزمون آینده ماز برای هر source_id در زیر است. سوال باید دقیقاً در همین حدود باشد، حتی اگر شاهد کتاب مطالب بیشتری دارد. مطالب بعد از «قبل از» یا «تا ابتدای» را استفاده نکن:\n' + json.dumps(row.get('maze_scope',{}),ensure_ascii=False)
         raw = _draft_generate(client, prompt, budget, timeout)
         if not (raw or "").strip():
             reason = getattr(client, "last_error", "") or "provider returned no response"
@@ -970,6 +972,8 @@ def _draft_subject_batch(client, row, count, row_topics, difficulty, context,
                 counts[q['source_id']] = counts.get(q['source_id'], 0) + 1
                 node = source['node']
                 grounded.append({**q, 'topic': node['title'], 'curriculum_id': node['id'],
+                    **({'weekly_ranked_scope':row['weekly_ranked_scope'],
+                        'maze_scope':row.get('maze_scope',{}).get(node['id'],[])} if row.get('weekly_ranked_scope') else {}),
                     'branch': exam_blueprint.math_branch(node['subject'], node['title']),
                     'book': source['source']['book'], 'page': source['source']['page'],
                     'source_quote': source['source']['quote'], 'grounding_status': 'book_ocr',

@@ -53,6 +53,8 @@ def _update(**values):
 
 def start(config):
     global _thread
+    if config.get('kind') == 'weekly_ranked' and not get_settings().POOL_DRAFT_QUEUE_ENABLED:
+        raise HTTPException(409, 'برای تولید هفتگی صف مستقل تولید و بررسی را فعال کنید.')
     with _LOCK:
         if snapshot().get('enabled') or pool_core.progress_snapshot()['active']:
             raise HTTPException(409, 'یک تولید یا انتظار سهمیه در حال اجرا است؛ ابتدا آن را متوقف کن.')
@@ -204,6 +206,6 @@ def _shelves(config):
     for major in config['majors']:
         if config['kind'] in ('mock', 'both'):
             shelves.extend((major, difficulty) for difficulty in config['difficulties'])
-        if config['kind'] in ('ranked', 'both'):
+        if config['kind'] in ('ranked', 'both', 'weekly_ranked'):
             shelves.append((major, pool_core.DUEL_DIFFICULTY))
     return shelves

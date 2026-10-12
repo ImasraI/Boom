@@ -61,6 +61,10 @@ def matches_plan(questions, plan, grade="", topics=()):
                     (not row.get('branch') or q.get('branch') == row['branch'])]
         if len(selected) != row['questions']:
             return False
+        if row.get('curriculum_ids') is not None and any(q.get('curriculum_id') not in row['curriculum_ids'] for q in selected):
+            return False
+        if row.get('weekly_ranked_scope') and any(q.get('weekly_ranked_scope') != row['weekly_ranked_scope'] for q in selected):
+            return False
         if row.get('full_mock'):
             expected = min(row['questions'], len(lessons_for(row, grade, topics)))
             if len({q.get('curriculum_id') for q in selected}) < expected:
@@ -84,9 +88,11 @@ def lessons_for(row, grade="", topics=(), catalog=None):
             continue
         if row.get('branch') and branch != row['branch']:
             continue
+        if row.get('curriculum_ids') is not None and node['id'] not in row['curriculum_ids']:
+            continue
         if node.get('year', 0) > grade_number(grade) or not node.get('sources'):
             continue
-        if wanted and not any(t in norm(node['title']) or t == norm(subject) for t in wanted):
+        if wanted and row.get('curriculum_ids') is None and not any(t in norm(node['title']) or t == norm(subject) for t in wanted):
             continue
         candidates.append(node)
     return candidates
@@ -144,11 +150,17 @@ def book_excerpt(node, limit=1500):
         if not book or Path(book).name != book or '/' in book or '\\' in book:
             continue
         paths = {}
+        ranks = {}
         for folder in (root / book, root / (book + '.pdf')):
             for path in [*folder.glob('page_*.txt'), *(folder / 'pages').glob('page_*.json')]:
-                old = paths.get(path.stem)
-                if old is None or path.stat().st_size > old.stat().st_size:
+                reviewed = False
+                if path.suffix=='.json':
+                    try: reviewed=json.loads(path.read_text(encoding='utf-8-sig')).get('reviewed') is True
+                    except (OSError,ValueError,AttributeError): pass
+                rank = (reviewed, path.stat().st_size)
+                if path.stem not in ranks or rank > ranks[path.stem]:
                     paths[path.stem] = path
+                    ranks[path.stem] = rank
         signature = tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) for p in sorted(paths.values()))
         words = [norm(w) for w in node['title'].split() if len(norm(w)) > 2]
         # Noisy OCR often drops "فهرست". Several catalogue headings on one
@@ -164,6 +176,10 @@ def book_excerpt(node, limit=1500):
             contents = page <= 18 and ('فهرست' in text or
                 sum(heading in normalized for heading in headings if len(heading) >= 4) >= 4)
             if score and enough_words and not contents:
+                # A reviewed chapter passage is more reliable than a distant
+                # answer-key page that repeats its heading in noisy OCR.
+                if any(p.stem == f'page_{page:04d}' and ranks[p.stem][0] for p in paths.values()):
+                    score += 100
                 ranked.append((score, page, text))
         if not ranked:
             continue

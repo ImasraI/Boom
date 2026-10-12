@@ -1,7 +1,7 @@
 """Read saved mock-plan outlines; keep dates, topics and book numbers distinct."""
 import json
 import re
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from app.config import get_settings
 from app.planner.resources import _norm, _subject, _grade
@@ -9,12 +9,12 @@ from app.planner.resources import _norm, _subject, _grade
 
 def next_mock_outline(student, week_start):
     from app.routers.boom_ai import _jalali, _J_MONTHS
+    candidates = _structured_outlines(student, week_start)
     path = Path(get_settings().RAW_DIR).parent / "cache" / "mock_extraction.json"
     try:
         cache = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    candidates = []
+        return min(candidates, key=lambda c: c['date']) if candidates else None
     selected = [_norm(value) for value in student.get("testExams", []) if isinstance(value, str)]
     aliases = {"ماز": ("ماز", "maz"), "قلم چی": ("قلم چی", "قلمچی", "kanoon"),
                "گزینه دو": ("گزینه دو", "gozine"), "سنجش": ("سنجش", "sanjesh")}
@@ -77,3 +77,51 @@ def next_mock_outline(student, week_start):
                 candidates.append({"date": actual, "document": key.split("|", 1)[1],
                                    "topics": {s: list(dict.fromkeys(t)) for s, t in topics.items()}})
     return min(candidates, key=lambda c: c["date"]) if candidates else None
+
+
+def _structured_outlines(student, start):
+    """Reviewed table rows keep dates, school years and columns together."""
+    import hashlib
+    from app.routers.boom_ai import _jalali
+    root = Path(get_settings().RAW_DIR)
+    directory = root.parent / 'cache' / 'mock_schedules'
+    selected = [_norm(v) for v in student.get('testExams', []) if isinstance(v, str)]
+    results = []
+    for path in sorted(directory.glob('*.json')):
+        try:
+            data = json.loads(path.read_text(encoding='utf-8'))
+            if data.get('version') != 1 or data.get('reviewed') is not True:
+                continue
+            if selected and not any(p in ('ماز','maz','maze') for p in selected):
+                continue
+            if data.get('provider') != 'ماز' or data.get('major') != 'riazi' or _grade(student) != data.get('grade'):
+                continue
+            if not any(word in _norm(student.get('major','ریاضی')) for word in ('ریاضی','riazi')):
+                continue
+            filename = data['document']
+            if not isinstance(filename, str) or Path(filename).name != filename or '/' in filename or '\\' in filename:
+                continue
+            source = root / 'plans' / filename
+            if source.is_file() and hashlib.sha256(source.read_bytes()).hexdigest() != data.get('source_sha256'):
+                continue  # Changed PDFs require fresh extraction/review.
+            for row in data['exams']:
+                jy, jm, jd = map(int,row['jalali_date'].split('-'))
+                if not 1400 <= jy <= 1600 or not 1 <= jm <= 12 or not 1 <= jd <= 31:
+                    continue
+                actual = next((day for offset in range(370)
+                    if _jalali((day := date(jy+621,3,20)+timedelta(days=offset)).year,day.month,day.day)==(jy,jm,jd)),None)
+                if actual is None or actual < start:
+                    continue
+                topics = {}
+                for section in row['sections']:
+                    if section.get('year') not in (10,11,12) or not isinstance(section.get('topics'),list):
+                        continue
+                    topics.setdefault(_subject(section['subject']),[]).extend(section['topics'])
+                if topics:
+                    results.append({'date':actual,'document':data['document'],
+                        'topics':{s:list(dict.fromkeys(t)) for s,t in topics.items()},
+                        'sections':row['sections'],'source_page':row['source_page'],
+                        'source_digest':data['source_sha256']})
+        except (OSError,ValueError,TypeError,KeyError):
+            continue
+    return results

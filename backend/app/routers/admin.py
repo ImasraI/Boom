@@ -239,7 +239,7 @@ def pool_levels(db: Session = Depends(get_db)):
 
 
 class PoolRunIn(BaseModel):
-    kind: str = Field(default="mock", pattern="^(mock|ranked|both)$")
+    kind: str = Field(default="mock", pattern="^(mock|ranked|both|weekly_ranked)$")
     major: str = "riazi"
     difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard|extreme)$")
     count: int = Field(default=0, ge=0)  # 0: until canceled/provider stops
@@ -259,6 +259,12 @@ def pool_restock(db: Session = Depends(get_db), payload: PoolRunIn | None = None
     poll GET /api/admin/pool to watch the shelves fill.
     """
     payload = payload or PoolRunIn()
+    if payload.kind=='weekly_ranked':
+        from app.rag.weekly_ranked import require_plan
+        require_plan()
+        return pool_service.start({'kind':'weekly_ranked','majors':['riazi'],
+            'difficulties':['konkur'],'count':payload.count,'grade':'دوازدهم',
+            'total_questions':10,'subjects':[],'topics':[]})
     if payload.major not in pool_core.POOL_MAJORS and payload.major != "all":
         raise HTTPException(422, detail="رشته معتبر نیست")
     majors = pool_core.POOL_MAJORS if payload.major == "all" else [payload.major]
@@ -277,6 +283,25 @@ def pool_restock(db: Session = Depends(get_db), payload: PoolRunIn | None = None
     return pool_service.start({'kind':payload.kind, 'majors':majors,
         'difficulties':[payload.difficulty], 'count':payload.count, 'grade':payload.grade,
         'total_questions':payload.total_questions, 'subjects':payload.subjects, 'topics':payload.topics})
+
+
+@router.get('/pool/weekly-ranked')
+def weekly_ranked_preview(db: Session = Depends(get_db)):
+    import json
+    from app.rag.weekly_ranked import preview
+    from app.rag.exam_blueprint import matches_plan
+    result=preview()
+    ready=0
+    if result['available']:
+        for mock in db.scalars(select(GeneratedMock).where(GeneratedMock.student_id==0,
+                GeneratedMock.status=='pending_use',GeneratedMock.difficulty==pool_core.DUEL_DIFFICULTY)):
+            questions=question_bank.active_questions(db,mock)
+            ids = [q['bank_id'] for q in questions if q.get('bank_id')]
+            if ids and db.scalar(select(BankQuestion.id).where(BankQuestion.id.in_(ids), BankQuestion.uses > 0).limit(1)):
+                continue
+            if pool_core.verified_booklet(json.dumps(questions)) and matches_plan(questions,result['plan'],'دوازدهم'):
+                ready+=1
+    return {**result,'ready_matches':ready,'players_supported_one_round':ready*2}
 
 
 @router.get("/questions/corrupt")

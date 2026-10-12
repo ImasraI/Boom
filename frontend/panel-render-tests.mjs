@@ -32,7 +32,7 @@ test('Mock page and its shared math/report modules load with an empty profile', 
 test('Ranked page loads its controls before account and filter requests finish', async () => {
   const {default:Arena} = await vite.ssrLoadModule('/src/pages/Arena.tsx');
   const html = renderToStaticMarkup(React.createElement(Arena, {nav(){},userData:null}));
-  assert.match(html, /دوئل استاندارد: ۱۰ سوال/);
+  assert.match(html, /۱۰ سوال از آزمون آیندهٔ ماز/);
   assert.match(html, /در حال دریافت اطلاعات کولوسئوم/);
   assert.doesNotMatch(html, /فیلتر دروس|type="checkbox"/);
   assert.doesNotMatch(html, /صفحه آماده نشد/);

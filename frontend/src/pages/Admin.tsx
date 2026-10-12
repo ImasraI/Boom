@@ -4,6 +4,7 @@ import type { NavFn } from "../types";
 import CorruptQuestions from "../components/CorruptQuestions";
 import PoolCredentials from "../components/PoolCredentials";
 import PoolDraftQueue, { type QueueStats, type PoolWorkerState } from "../components/PoolDraftQueue";
+import WeeklyRankedPool from "../components/WeeklyRankedPool";
 
 interface AllowEntry { id: number; phone: string; note: string; created_at: string | null }
 interface Usage { features: Record<string, number>; tokens_used_today: number }
@@ -427,6 +428,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
 
       </div>
       <div id="admin-generation" hidden={section !== "generation"} className="space-y-6">
+      {section === "generation" && <WeeklyRankedPool running={generating} onStarted={() => void load()} />}
       {/* ------------------------------------------------ mock pool ---- */}
       <section className="study-section p-5">
         <div className="flex items-center gap-2 mb-3">
@@ -453,7 +455,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
           )}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border-y border-[var(--border)] py-4 mb-4 text-xs text-[var(--muted)]">
-          <label>مصرف دفترچه<select aria-label="نوع دفترچه برای تولید" value={poolKind} onChange={e => { setPoolKind(e.target.value); setPoolSubjects([]); }} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]"><option value="mock">آزمون آزمایشی و تمرین</option><option value="ranked">دوئل کولوسئوم</option><option value="both">کولوسئوم + آزمون آزمایشی و تمرین</option></select></label>
+          <label>مصرف دفترچه<select aria-label="نوع دفترچه برای تولید" value={poolKind} onChange={e => { setPoolKind(e.target.value); setPoolSubjects([]); }} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{poolKind === "weekly_ranked" && <option value="weekly_ranked">کولوسئوم هفتگی · ماز</option>}<option value="mock">آزمون آزمایشی و تمرین</option><option value="ranked">دوئل کولوسئوم</option><option value="both">کولوسئوم + آزمون آزمایشی و تمرین</option></select></label>
           <label>رشته<select aria-label="رشته برای تولید" value={poolMajor} onChange={e => { setPoolMajor(e.target.value); setPoolSubjects([]); }} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{pool?.catalog?.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}<option value="all">همه رشته‌ها</option></select></label>
           <label>دشواری<select aria-label="دشواری برای تولید" value={poolDifficulty} onChange={e => setPoolDifficulty(e.target.value)} disabled={generating || poolKind === "ranked"} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{Object.entries(DIFFICULTY_FA).map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select></label>
           <label>پایه<select value={poolGrade} onChange={e => setPoolGrade(e.target.value)} disabled={generating} className="block w-full bg-[var(--surface)] border-b border-[var(--border-strong)] py-2 text-[var(--text)]">{["دهم", "یازدهم", "دوازدهم"].map(g => <option key={g}>{g}</option>)}</select></label>
