@@ -20,6 +20,7 @@ const labels: Record<string, string> = {
   generating: "در حال طراحی سؤال", verifying: "در حال بررسی پاسخ",
   waiting_for_quota: "منتظر سهمیهٔ سرویس", waiting_for_queue: "منتظر خالی شدن صف",
   waiting_for_drafts: "منتظر پیش‌نویس", error: "خطا؛ پیش‌نویس‌ها حفظ شده‌اند",
+  waiting_for_retry: "تولید ناموفق؛ منتظر تلاش دوباره",
 };
 export default function PoolDraftQueue({ queue, drafting, verification, running }: {
   queue?: QueueStats;

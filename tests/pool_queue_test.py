@@ -276,3 +276,74 @@ def test_verifier_factory_switches_provider_and_groq_keys_on_limits(setup, monke
     client = llm.get_pool_verifier_client()
     assert client.generate([{"role": "user", "content": "blind solve"}])
     assert created == [("gemini", "verifier-key"), ("groq", "draft-key"), ("groq", "backup-key")]
+
+
+def test_quota_empty_drafts_wait_without_permanent_failure_strikes(setup, monkeypatch):
+    monkeypatch.setattr(queue, 'pool_generation_status', lambda: {'blocked': False, 'provider': 'groq'})
+    pool_service._save({'enabled': True, 'config': config(), 'produced': 0})
+    assert queue._draft_failure(2, 'daily quota exhausted') == 0
+    state = pool_service.snapshot()
+    assert state['status'] == state['drafting']['status'] == 'waiting_for_quota'
+    assert state['drafting_paused'] and state['last_error'] and state['retry_at']
+    assert queue._draft_waiting(state)
+    # Restarting does not lose the wait; the saved provider ledger remains
+    # checked by the run loop before another call once this wait expires.
+    state['drafting_retry_at'] = (queue._now() - timedelta(seconds=1)).isoformat()
+    pool_service._save(state)
+    assert not queue._draft_waiting(state)
+    assert not pool_service.snapshot()['drafting_paused']
+
+
+def test_empty_protocol_strikes_back_off_and_keep_error_visible(setup, monkeypatch):
+    monkeypatch.setattr(queue, 'pool_generation_status', lambda: {'blocked': False, 'provider': 'groq'})
+    pool_service._save({'enabled': True, 'config': config(), 'produced': 0})
+    for count in range(3):
+        assert queue._draft_failure(count, '') == count + 1
+    state = pool_service.snapshot()
+    assert state['status'] == 'waiting_for_retry' and state['last_error']
+    assert queue._draft_waiting(state)
+    assert pool_service.snapshot()['last_error'] == state['last_error']
+    assert state['drafting']['retry_at'] == state['retry_at']
+
+
+def test_known_terminal_quota_wait_uses_provider_reset(setup, monkeypatch):
+    monkeypatch.setattr(queue, 'pool_generation_status', lambda: {
+        'blocked': True, 'provider': 'groq', 'retry_after': 7200})
+    pool_service._save({'enabled': True, 'config': config(), 'produced': 0})
+    queue._draft_failure(2, '')
+    retry = queue.datetime.fromisoformat(pool_service.snapshot()['drafting_retry_at']).replace(tzinfo=None)
+    assert retry > queue._now() + timedelta(seconds=7190)
+
+
+def test_legacy_pause_is_visible_instead_of_false_running_state(setup):
+    pool_service._save({'enabled': True, 'config': config(), 'produced': 0,
+                        'status': 'queue_running', 'drafting_paused': True})
+    assert queue._draft_waiting(pool_service.snapshot())
+    assert pool_service.snapshot()['status'] == 'drafting_paused'
+    assert pool_service.snapshot()['last_error']
+
+
+def test_run_resumes_after_saved_quota_wait_without_restarting_selection(setup, monkeypatch):
+    settings, tag = setup
+    monkeypatch.setattr(queue, 'pool_generation_status', lambda: {'blocked': False, 'provider': 'groq'})
+    monkeypatch.setattr(queue, 'pool_verification_status', lambda: {'blocked': True, 'provider': 'gemini'})
+    monkeypatch.setattr(queue, '_assemble', lambda: False)
+    calls = []
+    def generate(*args, on_drafted, report, **kwargs):
+        calls.append(1)
+        if len(calls) <= 3:
+            report('provider_error', {'message': 'daily quota exhausted'})
+            return []
+        on_drafted([question(tag)])
+        pool_service.cancel()
+        return []
+    def elapsed_wait(seconds):
+        state = pool_service.snapshot()
+        assert state['status'] == 'waiting_for_quota' and state['last_error']
+        pool_service._update(drafting_retry_at=(queue._now() - timedelta(seconds=1)).isoformat())
+    monkeypatch.setattr(queue.mock_generation, 'generate_booklet', generate)
+    monkeypatch.setattr(pool_service._wake, 'wait', elapsed_wait)
+    pool_service._save({'enabled': True, 'status': 'starting', 'config': config(), 'produced': 0})
+    queue.run()
+    assert len(calls) == 4 and queue.snapshot()['pending_questions'] == 1
+    assert pool_service.snapshot()['config'] == config()

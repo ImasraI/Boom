@@ -101,7 +101,7 @@ def shutdown():
 def notify_credentials_changed():
     """Recheck a waiting run without resetting its quota history or selection."""
     if snapshot().get("drafting_paused"):
-        _update(drafting_paused=False)
+        _update(drafting_paused=False, drafting_retry_at=None, retry_at=None, last_error='')
     _wake.set()
     from app.rag import pool_queue
     pool_queue.wake()

@@ -12,7 +12,7 @@ from app.auth.database import PoolDraftJob, SessionLocal
 from app.config import get_settings
 from app.rag import mock_generation, pool_core, question_bank
 from app.rag.llm import get_pool_verifier_client
-from app.rag.provider_quota import pool_generation_status, pool_verification_status
+from app.rag.provider_quota import pool_generation_status, pool_verification_status, is_terminal_provider_error
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -258,6 +258,46 @@ class _Interrupted(Exception):
     pass
 
 
+def _draft_failure(failures, error):
+    """Quota refusals are availability waits, not malformed draft strikes."""
+    from app.rag import pool_service as service
+    health = pool_generation_status()
+    unavailable = health['blocked'] or is_terminal_provider_error(error)
+    failures = 0 if unavailable else failures + 1
+    if unavailable or failures >= 3:
+        seconds = max(60, int(health.get('retry_after') or (60 if unavailable else 900)))
+        retry = (_now() + timedelta(seconds=seconds)).replace(tzinfo=timezone.utc).isoformat()
+        # Persist only our own messages, never arbitrary provider response text.
+        message = ('سرویس تولید موقتاً در دسترس نیست؛ پس از بازنشانی سهمیه ادامه می‌یابد.'
+                   if unavailable else 'سه تولید متوالی سؤال قابل ذخیره نساخت؛ ۱۵ دقیقه دیگر دوباره بررسی می‌شود.')
+        status = 'waiting_for_quota' if unavailable else 'waiting_for_retry'
+        service._update(status=status, last_error=message, retry_at=retry,
+            drafting_paused=True, drafting_retry_at=retry,
+            drafting={'status': status, 'retry_at': retry, 'provider': health.get('provider')})
+    return failures
+
+
+def _draft_waiting(state):
+    """Keep saved waits across restarts, then recheck the credential ledger."""
+    from app.rag import pool_service as service
+    if not state.get('drafting_paused'):
+        return False
+    retry = state.get('drafting_retry_at')
+    if retry:
+        until = datetime.fromisoformat(retry).replace(tzinfo=None)
+        if until <= _now():
+            service._update(drafting_paused=False, drafting_retry_at=None,
+                            retry_at=None, last_error='')
+            return False
+    # Old runs had a permanent pause without a reason. Make it visible until
+    # an explicit restart/credential change, instead of advertising progress.
+    if not retry:
+        service._update(status='drafting_paused', last_error=state.get('last_error') or
+                        'تولید متوقف شده است؛ برای ادامه تولید را دوباره شروع کنید.')
+        _worker_state('drafting', 'error')
+    return True
+
+
 def run():
     from app.rag import pool_service as service
     verifier = None
@@ -280,11 +320,12 @@ def run():
             state = service.snapshot(); config = state["config"]
             if config["count"] and state["produced"] >= config["count"]:
                 service._update(enabled=False, status="finished"); break
-            service._update(status="queue_running", last_error="", retry_at=None)
             if _assemble(): continue
-            if state.get("drafting_paused"):
-                _worker_state("drafting", "error")
+            if _draft_waiting(state):
                 service._wake.wait(60); service._wake.clear(); continue
+            if state.get('drafting_paused'):
+                failures = 0
+            service._update(status="queue_running", last_error="", retry_at=None)
             stats = snapshot()
             if stats["pending_booklets"] >= stats["capacity"] or (config["count"] and
                     state["produced"] + stats["pending_booklets"] >= config["count"]):
@@ -293,6 +334,8 @@ def run():
             health = pool_generation_status()
             if health["blocked"]:
                 _worker_state("drafting", "waiting_for_quota", health)
+                service._update(status='waiting_for_quota', last_error=health['message'],
+                                retry_at=health.get('retry_at'))
                 service._wake.wait(60); service._wake.clear(); continue
             shelves = service._shelves(config)
             cursor = state.get("draft_cursor", state.get("cursor", 0))
@@ -308,21 +351,25 @@ def run():
             def save_batch(batch):
                 append_batch(job_id, batch)
                 if not _active(): raise _Interrupted()
+            draft_error = ''
+            progress_report = pool_core._progress_reporter()
+            def report(event, data):
+                nonlocal draft_error
+                if event == 'provider_error':
+                    draft_error = data.get('message', '')
+                progress_report(event, data)
             try:
                 mock_generation.generate_booklet(0, plan, topics=config.get("topics") or [],
                     difficulty="konkur" if difficulty == pool_core.DUEL_DIFFICULTY else difficulty,
                     grade=config["grade"], timeout=60, on_drafted=save_batch,
-                    report=pool_core._progress_reporter())
+                    report=report)
             except _Interrupted:
                 pass
             finally:
                 finish_draft(job_id)
             with SessionLocal() as db:
                 empty = db.get(PoolDraftJob, job_id).question_count == 0
-            failures = failures + 1 if empty else 0
-            if failures >= 3 and not pool_generation_status()["blocked"]:
-                _worker_state("drafting", "error")
-                service._update(drafting_paused=True)
+            failures = _draft_failure(failures, draft_error) if empty else 0
     except Exception:
         logger.exception("Queued drafting failed; saved candidates retained")
         service._update(enabled=False, status="failed", last_error="خطای تولید؛ پیش‌نویس‌های ذخیره‌شده حفظ شدند.")
