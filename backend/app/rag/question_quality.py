@@ -6,16 +6,28 @@ from fractions import Fraction
 from app.rag import pool_usage
 
 
-def json_object(raw):
+def json_value(raw):
     if not isinstance(raw, str):
         return None
     raw = raw.strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
     try:
-        data = json.loads(raw)
+        return json.loads(raw)
     except (ValueError, TypeError):
-        return None
+        # Preserve legitimate escape pairs (including \\\\) and repair ONLY
+        # illegal JSON escapes such as the LaTeX literal \{. No key, number,
+        # quote, option or answer is inferred or rewritten.
+        escaped = re.sub(r'\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})|\\',
+                         lambda m: '\\\\' if m[0] == '\\' else m[0], raw)
+        try:
+            return json.loads(escaped)
+        except (ValueError, TypeError):
+            return None
+
+
+def json_object(raw):
+    data = json_value(raw)
     return data if isinstance(data, dict) else None
 
 

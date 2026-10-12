@@ -70,3 +70,14 @@ def test_rejected_request_stops_instead_of_repeatedly_spending_quota(tmp_path, m
     state = {"slots": [{}], "models": {}, "difficulty": "hard"}
     comparison.run_model("groq", state, tmp_path / "state.json", False)
     assert state['models']['groq']['status'] == 'needs_attention_request' and calls == [1]
+
+
+def test_saved_first_reply_is_recovered_after_format_parser_fix(tmp_path):
+    import json
+    q = {"subject":"ریاضی","topic":"تابع","text":"حاصل دو به علاوه دو؟", "options":["4","3","2","1"], "answer":0}
+    (tmp_path/'gemini-slot-1-attempt-1.txt').write_text(json.dumps([q]),encoding='utf-8')
+    (tmp_path/'gemini-slot-1-attempt-2.txt').write_text(json.dumps([{**q, 'answer':1}]),encoding='utf-8')
+    progress={'attempts':[{'slot':1,'diagnostic':'gemini-slot-1-attempt-1.txt'},
+                          {'slot':1,'diagnostic':'gemini-slot-1-attempt-2.txt'}]}
+    recovered=comparison.recover_saved_reply('gemini',progress,tmp_path,0)
+    assert recovered['answer']==0 and progress['attempts'][0]['recovered_with_parser_version']==2

@@ -374,23 +374,24 @@ def parse_booklet(raw: str) -> List[dict]:
     if m:
         candidates.append(m.group(0))
     for cand in candidates:
-        try:
-            data = json.loads(re.sub(r",\s*([}\]])", r"\1", cand.strip()))
-        except (json.JSONDecodeError, TypeError):
-            continue
-        rows = data.get("questions") if isinstance(data, dict) else None
+        data = question_quality.json_value(re.sub(r",\s*([}\]])", r"\1", cand.strip()))
+        rows = data if isinstance(data, list) else data.get("questions") if isinstance(data, dict) else None
         if not isinstance(rows, list):
             continue
         out = []
         for r in rows:
             if not isinstance(r, dict):
                 continue
-            options = [str(o) for o in (r.get("options") or [])][:4]
-            if len(options) != 4:
+            raw_options = r.get("options")
+            if not isinstance(raw_options, list) or len(raw_options) != 4:
                 continue
-            try:
-                ans = int(r.get("answer"))
-            except (TypeError, ValueError):
+            options = [str(o) for o in raw_options]
+            value = r.get("answer")
+            if type(value) is int:
+                ans = value
+            elif isinstance(value, str) and value.strip().translate(_FA_AR_DIGITS) in ('0', '1', '2', '3'):
+                ans = int(value.strip().translate(_FA_AR_DIGITS))
+            else:
                 continue
             if not (0 <= ans <= 3):
                 continue

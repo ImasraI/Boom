@@ -99,6 +99,31 @@ def draft_prompt(slot, difficulty):
         f"\nفقط یک سوال از همین مبحث بساز؛ source_id باید {node['id']} باشد.")
 
 
+def saved_question(row, slot, index):
+    node, source = slot["node"], slot["source"]
+    return {**row, "_id": index + 1, "subject": slot["subject"], "topic": node["title"],
+        "book": source["book"], "page": source["page"], "source_quote": source["quote"],
+        "curriculum_id": node["id"], "branch": slot["branch"], "grounding_status": "book_ocr",
+        "verification_status": "human_review_pending"}
+
+
+def recover_saved_reply(provider, progress, folder, index):
+    """Recover the earliest usable draft after parser fixes, without new tokens."""
+    for attempt in progress["attempts"]:
+        filename = attempt.get("diagnostic", "")
+        if attempt["slot"] != index + 1 or not re.fullmatch(
+                f"{provider}-slot-{index+1}-attempt-[0-9]+\\.txt", filename):
+            continue
+        try:
+            rows = mg.parse_booklet((folder / filename).read_text(encoding="utf-8"))
+        except OSError:
+            continue
+        if rows:
+            attempt["recovered_with_parser_version"] = 2
+            return rows[0]
+    return None
+
+
 def run_model(provider, state, path, once):
     settings = get_settings()
     client, model = fleet(provider, settings)
@@ -109,6 +134,17 @@ def run_model(provider, state, path, once):
         save(path, state)
     try:
         while len(progress["questions"]) < len(state["slots"]):
+            index = len(progress["questions"])
+            recovered = recover_saved_reply(provider, progress, path.parent, index)
+            if recovered:
+                with LOCK:
+                    progress["questions"].append(saved_question(recovered, state["slots"][index], index))
+                    progress["retry_at"] = 0
+                    progress["consecutive_failures"] = 0
+                    progress["last_error_code"] = ""
+                    save(path, state)
+                print(f"{provider}: {len(progress['questions'])}/20 saved (recovered original reply)", flush=True)
+                continue
             remaining = progress.get("retry_at", 0) - time.time()
             if remaining > 0:
                 if once:
@@ -150,13 +186,8 @@ def run_model(provider, state, path, once):
                 if rows:
                     progress["retry_at"] = 0
                     progress["consecutive_failures"] = 0
-                    node, source = slot["node"], slot["source"]
-                    progress["questions"].append({**rows[0], "_id": index + 1,
-                        "subject": slot["subject"], "topic": node["title"],
-                        "book": source["book"], "page": source["page"],
-                        "source_quote": source["quote"], "curriculum_id": node["id"],
-                        "branch": slot["branch"], "grounding_status": "book_ocr",
-                        "verification_status": "human_review_pending"})
+                    progress["last_error_code"] = ""
+                    progress["questions"].append(saved_question(rows[0], slot, index))
                 save(path, state)
             if rows:
                 print(f"{provider}: {len(progress['questions'])}/20 saved", flush=True)

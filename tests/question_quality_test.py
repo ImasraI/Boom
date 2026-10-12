@@ -100,3 +100,17 @@ def test_gemini_truncated_json_retries_with_more_output_and_keeps_high_reasoning
         assert all(r["reasoning_effort"] == "high" for r in requests)
     finally:
         client.client.close()
+
+
+def test_array_draft_and_illegal_latex_escape_are_normalized_without_changing_key():
+    raw = r'[{"subject":"ریاضی","topic":"تابع","text":"مجموع مجموعه $\{1,2,3\}$ چند است؟","options":["6","3","2","1"],"answer":0,"explanation":"$1+2+3=6$ و $\\frac{12}{2}=6$"}]'
+    result = mg.parse_booklet(raw)
+    assert len(result) == 1 and result[0]['answer'] == 0
+    assert result[0]['options'] == ['6', '3', '2', '1']
+    assert r'\{1,2,3\}' in result[0]['text'] and r'\frac{12}{2}' in result[0]['explanation']
+
+
+@pytest.mark.parametrize('changes', [{'answer':True}, {'answer':1.9}, {'options':'1234'},
+    {'options':['1','2','3','4','5']}])
+def test_draft_protocol_does_not_truncate_keys_or_choices(changes):
+    assert mg.parse_booklet(json.dumps({'questions':[question(**changes)]})) == []
