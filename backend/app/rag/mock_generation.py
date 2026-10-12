@@ -374,7 +374,7 @@ def parse_booklet(raw: str) -> List[dict]:
     if m:
         candidates.append(m.group(0))
     for cand in candidates:
-        data = question_quality.json_value(re.sub(r",\s*([}\]])", r"\1", cand.strip()))
+        data = question_quality.json_value(cand.strip())
         rows = data if isinstance(data, list) else data.get("questions") if isinstance(data, dict) else None
         if not isinstance(rows, list):
             continue

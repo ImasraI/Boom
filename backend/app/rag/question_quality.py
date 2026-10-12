@@ -20,6 +20,10 @@ def json_value(raw):
         # quote, option or answer is inferred or rewritten.
         escaped = re.sub(r'\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4})|\\',
                          lambda m: '\\\\' if m[0] == '\\' else m[0], raw)
+        # Match complete quoted strings first, so commas inside a math/text
+        # value are untouched. Only JSON's outside-string trailing commas go.
+        escaped = re.sub(r'"(?:\\.|[^"\\])*"|,\s*(?=[}\]])',
+                         lambda m: m[0] if m[0].startswith('"') else '', escaped)
         try:
             return json.loads(escaped)
         except (ValueError, TypeError):

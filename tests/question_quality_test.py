@@ -114,3 +114,10 @@ def test_array_draft_and_illegal_latex_escape_are_normalized_without_changing_ke
     {'options':['1','2','3','4','5']}])
 def test_draft_protocol_does_not_truncate_keys_or_choices(changes):
     assert mg.parse_booklet(json.dumps({'questions':[question(**changes)]})) == []
+
+
+def test_format_recovery_preserves_commas_inside_text_and_options():
+    raw = r'{"questions":[{"subject":"ریاضی","text":"رشته a, } و b, ] را مقایسه کن","options":["a, }","b, ]","3","4",],"answer":0,},]}'
+    row = mg.parse_booklet(raw)[0]
+    assert row['text'] == 'رشته a, } و b, ] را مقایسه کن'
+    assert row['options'][:2] == ['a, }', 'b, ]'] and row['answer'] == 0
