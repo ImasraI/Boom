@@ -469,6 +469,8 @@ class GroqLLMClient(BaseLLMClient):
                     block_access(self._quota_identity, status)
                     return ""
                 self.last_error = f"HTTP {status}"
+                if status == 413:
+                    self.last_error_code = 'provider_request_too_large'
                 logger.warning(
                     "Groq request failed (attempt %d): %s", attempt + 1, e,
                 )
@@ -1285,7 +1287,8 @@ class FallbackLLMClient(BaseLLMClient):
             reason = getattr(client, "last_error", "") or ""
             code = getattr(client, "last_error_code", "")
             exhausted = (code in {"provider_daily_quota", "provider_access_denied"}
-                         or (self.switch_on_rate_limit and code == "provider_rate_limit")
+                           or (self.switch_on_rate_limit and code in {
+                               "provider_rate_limit", "provider_request_too_large"})
                          or self._exhausted(reason))
             if position + 1 >= len(indices) or not exhausted:
                 self.last_error = reason or (

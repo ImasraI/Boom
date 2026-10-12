@@ -161,3 +161,30 @@ def test_groq_incomplete_json_retries_without_downgrading_then_returns_clear_err
         assert client.last_error_code == 'provider_json_error' and len(requests) == 4
         assert all(r['reasoning_effort']=='high' and r['max_completion_tokens']==8192 for r in requests)
     finally: client.client.close()
+
+
+def test_pool_request_capacity_failure_switches_explicit_keys_without_lowering_reasoning(monkeypatch):
+    import httpx
+    import app.rag.llm as llm
+    monkeypatch.setattr(llm, 'blocked_quota', lambda identity: None)
+    monkeypatch.setattr(llm, 'blocked_access', lambda identity: None)
+    clients = [GroqLLMClient(api_key='test-capacity-'+str(i),model='openai/gpt-oss-120b',
+                            temperature=0.2,max_tokens=8192) for i in range(2)]
+    requests = []
+    def refused(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(413,json={'error':{'message':'Request exceeds this project capacity'}})
+    def accepted(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200,json={'choices':[{'message':{'content':'{"answers":{"1":0}}'}}]})
+    for client, reply in zip(clients,(refused,accepted)):
+        client.client.close();client.client=httpx.Client(transport=httpx.MockTransport(reply))
+        client.reasoning_effort='high';client.json_mode=True
+    fleet=llm.FallbackLLMClient(clients,['first','second'],switch_on_rate_limit=True)
+    try:
+        assert fleet.generate([{'role':'user','content':'JSON'}]) == '{"answers":{"1":0}}'
+        assert not fleet.last_error and clients[0].last_error_code=='provider_request_too_large'
+        assert len(requests)==2 and all(r['reasoning_effort']=='high' for r in requests)
+        assert all(r['max_completion_tokens']==8192 for r in requests)
+    finally:
+        for client in clients:client.client.close()
