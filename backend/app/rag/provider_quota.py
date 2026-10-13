@@ -161,6 +161,16 @@ def pool_gemini_keys(settings, *, verification: bool = False) -> list[str]:
                              if key.strip()))
 
 
+def pool_gemini_generation_keys(settings) -> list[str]:
+    primary = (settings.POOL_LLM_PROVIDER or '').strip().lower() or settings.LLM_PROVIDER.strip().lower()
+    if primary == 'gemini':
+        return pool_gemini_keys(settings)
+    # Cross-provider drafting uses only explicitly registered generation keys.
+    # POOL_LLM_API_KEY belongs to the primary provider; GEMINI_API_KEY belongs
+    # to other workflows and is not an implicit pool fallback credential.
+    return list(dict.fromkeys(k.strip() for k in (getattr(settings, 'POOL_GEMINI_API_KEYS', '') or '').split(',') if k.strip()))
+
+
 def groq_keys(settings, *, pool: bool = False) -> list[str]:
     primary = ((getattr(settings, "POOL_LLM_API_KEY", "") if pool else "")
                or settings.LLM_API_KEY or "")
@@ -204,8 +214,16 @@ def pool_verification_status(settings=None) -> dict:
 def pool_generation_status(settings=None) -> dict:
     from app.config import get_settings
     settings = settings if settings is not None else get_settings()
-    return {**_stage_quota_status(settings), "stage": "generation",
-            "provider": (settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER).strip().lower()}
+    primary = (settings.POOL_LLM_PROVIDER or '').strip().lower() or settings.LLM_PROVIDER.strip().lower()
+    state = {**_stage_quota_status(settings), 'stage':'generation', 'provider':primary}
+    fallbacks = {p.strip().lower() for p in (settings.POOL_LLM_FALLBACK_PROVIDERS or '').split(',')}
+    if state['blocked'] and primary != 'gemini' and 'gemini' in fallbacks and pool_gemini_generation_keys(settings):
+        backup = {**_stage_quota_status(settings, provider_override='gemini'),
+                  'stage':'generation', 'provider':'gemini', 'fallback':True}
+        if not backup['blocked'] or (backup.get('retry_after') and
+                (not state.get('retry_after') or backup['retry_after'] < state['retry_after'])):
+            return backup
+    return state
 
 
 def _has_pool_fallback(settings) -> bool:
@@ -229,13 +247,12 @@ def pool_quota_status(settings=None) -> dict:
 
     if settings is None:
         settings = get_settings()
-    generation = _stage_quota_status(settings)
+    generation = pool_generation_status(settings)
     if generation["blocked"]:
-        return {**generation, "stage": "generation",
-                "provider": (settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER).strip().lower()}
+        return generation
     if (getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "") or "").strip():
         return pool_verification_status(settings)
-    return generation
+    return generation if generation.get('fallback') else {'blocked':False}
 
 
 def _stage_quota_status(settings, *, verification: bool = False, provider_override=None) -> dict:
@@ -245,22 +262,23 @@ def _stage_quota_status(settings, *, verification: bool = False, provider_overri
         if provider == "groq" and settings.POOL_VERIFY_LLM_PROVIDER.strip().lower() != "groq":
             override_model = getattr(settings, "POOL_VERIFY_GROQ_MODEL_NAME", "openai/gpt-oss-120b")
     else:
-        provider = ((settings.POOL_LLM_PROVIDER or "").strip()
+        primary = ((settings.POOL_LLM_PROVIDER or "").strip()
                     or (settings.LLM_PROVIDER or "").strip()).lower()
-        override_model = settings.POOL_LLM_MODEL_NAME
+        provider = provider_override or primary
+        override_model = settings.POOL_LLM_MODEL_NAME if provider == primary else ''
     if provider not in {"gemini", "groq"}:
         return {"blocked": False}
     model = ((override_model or "").strip() or
              (settings.GEMINI_MODEL_NAME if provider == "gemini" else settings.LLM_MODEL_NAME).strip())
     base = settings.GEMINI_BASE_URL if provider == "gemini" else "https://api.groq.com/openai/v1"
-    keys = (pool_gemini_keys(settings, verification=verification) if provider == "gemini"
+    keys = ((pool_gemini_keys(settings, verification=True) if verification else pool_gemini_generation_keys(settings)) if provider == "gemini"
             else verifier_groq_keys(settings) if verification else groq_keys(settings, pool=True))
     identities = [quota_identity(base, model, key) for key in keys]
     entries = [(blocked_quota(identity), blocked_access(identity)) for identity in identities]
     cooldowns = [rate_limited(identity) for identity in identities]
     # Explicitly configured alternatives may still answer. Never enable the
     # chat provider implicitly: stocking shelves must not drain chat's quota.
-    fallback = not verification and _has_pool_fallback(settings)
+    fallback = not verification and not provider_override and _has_pool_fallback(settings)
     if entries and not fallback and all(daily or access or seconds > 0
             for (daily, access), seconds in zip(entries, cooldowns)):
         waits = [seconds for (daily, access), seconds in zip(entries, cooldowns)

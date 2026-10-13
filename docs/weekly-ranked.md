@@ -23,6 +23,12 @@ in the rate-limit header. The worker honors the longer interval across clients.
 Credential health is model-specific: adding a key already used by verification
 does not create new capacity for that same provider/model.
 
+An operator can set `POOL_LLM_FALLBACK_PROVIDERS=gemini` to continue drafting
+with the explicit `POOL_GEMINI_API_KEYS` fleet when Groq is limited. Fallback
+drafts use `GEMINI_MODEL_NAME`, high reasoning, the same book grounding and
+independent checks. Chat, vision and verifier keys are not implicitly borrowed.
+Keys shared between the explicit fleets also share that provider/model's quota.
+
 The schedule is reviewed data in `backend/data/cache/mock_schedules/*.json`, not
 model memory. Version 1 records the provider, major, grade, source PDF SHA-256,
 review status, Jalali dates, per-book school years, topics and exact scope quotes.

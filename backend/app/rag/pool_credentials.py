@@ -55,10 +55,13 @@ def _keys(settings, provider, stage):
     active_provider = ((settings.POOL_VERIFY_LLM_PROVIDER if stage == "verification"
                         else settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER) or "").lower().strip()
     active = active_provider == provider or (stage == "verification" and provider in provider_quota.verifier_providers(settings))
+    if stage == 'generation' and provider == 'gemini':
+        active = active or 'gemini' in {p.strip().lower() for p in settings.POOL_LLM_FALLBACK_PROVIDERS.split(',')}
     if active:
         keys = ((provider_quota.verifier_groq_keys(settings) if stage == "verification"
                  else provider_quota.groq_keys(settings, pool=True)) if provider == "groq"
-                else provider_quota.pool_gemini_keys(settings, verification=stage == "verification"))
+                else (provider_quota.pool_gemini_keys(settings, verification=True) if stage == 'verification'
+                      else provider_quota.pool_gemini_generation_keys(settings)))
     else:
         keys = getattr(settings, _FIELDS[(provider, stage)], "").split(",")
     return list(dict.fromkeys(key.strip() for key in keys if key.strip())), active

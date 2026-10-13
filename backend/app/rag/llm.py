@@ -29,6 +29,7 @@ from app.rag.pool_usage import record_response, record_stream
 from app.rag.provider_quota import (
     DAILY_QUOTA_MESSAGE, block_daily_quota, blocked_quota, pool_gemini_keys, quota_identity,
     block_access, blocked_access, block_rate_limit, rate_limited, groq_keys,
+    pool_gemini_generation_keys,
 )
 from app.utils.logger import get_logger
 
@@ -1387,6 +1388,14 @@ def get_pool_llm_client() -> BaseLLMClient:
             labels = ["groq"] + [f"groq backup {i}" for i in range(1, len(clients))]
     for name in wanted:
         if name in labels:
+            continue
+        if name == 'gemini':
+            keys = pool_gemini_generation_keys(settings)
+            for index, key in enumerate(keys):
+                clients.append(get_llm_client(provider='gemini', api_key=key, model=settings.GEMINI_MODEL_NAME))
+                labels.append('gemini' if index == 0 else f'gemini backup {index}')
+            if not keys:
+                logger.warning('Gemini generation fallback has no explicit pool credentials; skipped.')
             continue
         client = get_llm_client(provider=name)
         if isinstance(client, MockLLMClient):
