@@ -10,6 +10,7 @@ interface CredentialGroup {
   daily_limited: number;
   access_denied: number;
   cooling_down: number;
+  shared_with_other_stage?: number;
 }
 interface CredentialStatus {
   groups: CredentialGroup[];
@@ -32,7 +33,7 @@ const choices = [
 
 export function PoolCredentialBlocker({ health }: { health?: CredentialHealth }) {
   if (health?.fallback && !health.blocked) return <p role="status" className="text-xs text-[var(--accent)] leading-relaxed">
-    بررسی پاسخ با Groq پشتیبان انجام می‌شود؛ سهمیهٔ آن با تولید سؤال مشترک است. Gemini پس از رفع محدودیت دوباره در اولویت قرار می‌گیرد.
+    بررسی پاسخ با Groq پشتیبان انجام می‌شود. Gemini پس از رفع محدودیت دوباره در اولویت قرار می‌گیرد.
   </p>;
   if (!health?.blocked) return null;
   const verifying = health.stage === "verification";
@@ -106,6 +107,9 @@ export default function PoolCredentials({ onChanged }: { onChanged: () => void }
           بدون محدودیت ثبت‌شده: {group.available.toLocaleString("fa-IR")} · سقف روزانه: {group.daily_limited.toLocaleString("fa-IR")} ·
           توقف موقت: {group.cooling_down.toLocaleString("fa-IR")} · بدون دسترسی: {group.access_denied.toLocaleString("fa-IR")}
         </p>
+        {group.shared_with_other_stage !== undefined && <p className="text-[var(--muted)]">
+          کلید یکسان ثبت‌شده در هر دو مرحله: {group.shared_with_other_stage.toLocaleString("fa-IR")}
+        </p>}
       </div>)}
     </div>}
     <form onSubmit={save} className="border-t border-[var(--border)] pt-4 space-y-3">
@@ -129,7 +133,7 @@ export default function PoolCredentials({ onChanged }: { onChanged: () => void }
         </button>
       </div>
       <p className="text-xs text-[var(--muted)] leading-relaxed">
-        وضعیت بر اساس خطاهای ثبت‌شدهٔ سرویس است و تأیید اعتبار کلید نیست. کلیدهای یک پروژه ممکن است سهمیهٔ مشترک داشته باشند؛ افزودن کلید سقف آن پروژه را افزایش نمی‌دهد.
+        وضعیت بر اساس خطاهای ثبت‌شدهٔ سرویس است و تأیید اعتبار کلید نیست. تعداد کلیدها، تعداد ظرفیت‌های مستقل نیست. سهمیهٔ Groq برای هر سازمان (فضای کاری) و سهمیهٔ Gemini برای هر پروژه است؛ سازمان یا پروژهٔ کلیدهای شما از روی کلید مشخص نمی‌شود. کلیدهای تولید و بررسی را جدا ثبت کنید؛ جداسازی کلیدها سهمیهٔ سرویس را افزایش نمی‌دهد.
       </p>
       {message && <p role="status" className="text-sm text-[var(--accent)]">{message}</p>}
       {error && <p role="alert" className="text-sm text-red-400">{error}</p>}

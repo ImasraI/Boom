@@ -69,9 +69,12 @@ def _keys(settings, provider, stage):
 
 def snapshot():
     settings = get_settings()
+    fleets = {pair: _keys(settings, *pair) for pair in _FIELDS}
     groups = []
     for provider, stage in _FIELDS:
-        keys, active = _keys(settings, provider, stage)
+        keys, active = fleets[(provider, stage)]
+        other_stage = "verification" if stage == "generation" else "generation"
+        shared = len(set(keys) & set(fleets[(provider, other_stage)][0]))
         primary_provider = ((settings.POOL_VERIFY_LLM_PROVIDER if stage == 'verification'
                              else settings.POOL_LLM_PROVIDER or settings.LLM_PROVIDER) or '').strip().lower()
         model = ((settings.POOL_VERIFY_LLM_MODEL_NAME if stage == "verification"
@@ -93,7 +96,10 @@ def snapshot():
                 counts["cooling_down"] += 1
             else:
                 counts["available"] += 1
-        groups.append(dict(provider=provider, stage=stage, active=active, total=len(keys), **counts))
+        groups.append(dict(provider=provider, stage=stage, active=active, total=len(keys),
+                           shared_with_other_stage=shared,
+                           quota_scope="organization" if provider == "groq" else "project",
+                           independent_quota_groups=None, **counts))
     return {"groups": groups, "health": provider_quota.pool_quota_status(settings=settings)}
 
 
@@ -122,6 +128,10 @@ def add(provider, stage, key):
                           if k.strip()))
             if key in existing or key in extras:
                 return {"added": False, **snapshot()}
+            other_stage = "verification" if stage == "generation" else "generation"
+            other_keys, _ = _keys(settings, provider, other_stage)
+            if key in other_keys:
+                raise HTTPException(409, "این کلید برای مرحلهٔ دیگر ثبت شده است؛ برای جدا نگه داشتن تولید و بررسی پاسخ، کلید دیگری وارد کنید.")
             value = ",".join([*extras, key])
             original = path.read_text(encoding="utf-8") if path.exists() else ""
             pattern = re.compile(r"^[ \t]*(?:export[ \t]+)?" + field + r"[ \t]*=.*$", re.MULTILINE)

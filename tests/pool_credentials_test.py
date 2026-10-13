@@ -170,6 +170,38 @@ def test_file_error_never_echoes_secret(setup, monkeypatch):
     assert not list(path.parent.glob(".env.pool-keys-*"))
 
 
+@pytest.mark.parametrize("provider,first,second", [
+    ("groq", "generation", "verification"),
+    ("gemini", "verification", "generation"),
+])
+def test_cross_stage_duplicate_rejected_without_writing_or_echoing(setup, provider, first, second):
+    path, app, client = setup
+    allow_admin(app)
+    key = secret(provider)
+    credentials.add(provider, first, key)
+    before = path.read_bytes()
+    response = client.post("/api/admin/pool/credentials", json={
+        "provider": provider, "stage": second, "key": key})
+    assert response.status_code == 409
+    assert key not in response.text
+    assert path.read_bytes() == before
+
+
+def test_snapshot_distinguishes_same_keys_from_unknown_organization_ownership(setup):
+    path, app, client = setup
+    key = secret()
+    path.write_text(path.read_text() + f"POOL_GROQ_API_KEYS='{key}'\n"
+                    "POOL_VERIFY_FALLBACK_PROVIDERS=groq\nPOOL_VERIFY_GROQ_USE_POOL_KEYS=True\n")
+    result = credentials.snapshot()
+    groq = [g for g in result["groups"] if g["provider"] == "groq"]
+    assert all(g["shared_with_other_stage"] == 1 for g in groq)
+    assert all(g["independent_quota_groups"] is None for g in groq)
+    assert all(g["quota_scope"] == "organization" for g in groq)
+    assert key not in json.dumps(result)
+    path.write_text(path.read_text().replace("POOL_VERIFY_GROQ_USE_POOL_KEYS=True", "POOL_VERIFY_GROQ_USE_POOL_KEYS=False"))
+    assert all(g["shared_with_other_stage"] == 0 for g in credentials.snapshot()["groups"] if g["provider"] == "groq")
+
+
 def test_new_keys_are_used_by_new_pool_clients_without_restart(setup, monkeypatch):
     from app.rag import llm
     path, app, client = setup
