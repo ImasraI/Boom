@@ -206,12 +206,12 @@ def test_rate_limiter_window():
     rl.hit("other-ip", limit=3, window_s=60)  # independent buckets
 
 
-def test_client_ip_prefers_forwarded_for():
+def test_client_ip_ignores_untrusted_forwarded_for():
     req = SimpleNamespace(
         headers={"x-forwarded-for": "5.6.7.8, 9.9.9.9"},
         client=SimpleNamespace(host="1.2.3.4"),
     )
-    assert limits.client_ip(req) == "5.6.7.8"
+    assert limits.client_ip(req) == "1.2.3.4"
     assert limits.client_ip(_fake_request()) == "1.2.3.4"
 
 

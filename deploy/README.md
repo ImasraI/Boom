@@ -55,6 +55,14 @@ Resolve each FAIL before release. This script is read-only: it does not send SMS
 
 Install the reviewed unit from `deploy/boom-backend.service`, then `sudo systemctl daemon-reload` and `sudo systemctl restart boom-backend`. Keep **one Uvicorn worker**, because arena matchmaking and rate-limit state are process-local. Caddy should proxy to `127.0.0.1:8000`; do not expose that port publicly. The unit uses the actual case-sensitive VM path `Boom`, not `boom`. Run from backend so `.env` and image paths resolve correctly.
 
+Install `deploy/Caddyfile` with Caddy 2.8 or newer. It trusts only Cloudflare's
+published proxy ranges and reads `CF-Connecting-IP` from those peers. Refresh
+the ranges when Cloudflare changes them. Caddy forwards a validated client IP
+without its TCP port; Uvicorn trusts proxy headers only from localhost. The
+application uses the resulting request client address, never raw forwarded
+headers. SMS requests and password logins have independent budgets; a genuine
+429 includes the remaining wait in seconds and a `Retry-After` header.
+
 Schema additions are applied by `ensure_schema()` on API startup. Verify `/api/health` publicly and `/api/profile/calendar` with an authenticated test account after restart; the latter should no longer return 404.
 
 Keep one pool worker: either `POOL_WORKER_INPROCESS=true`, or a dedicated worker with this flag false. A separate `POOL_LLM_PROVIDER` / `POOL_LLM_API_KEY` prevents mock generation from exhausting chat quotas. Failed providers must remain failures, never fake booklets.

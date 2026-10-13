@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import threading
 import time
+import math
 from collections import defaultdict, deque
 
 from fastapi import HTTPException, Request
@@ -250,9 +251,11 @@ class _RateLimiter:
             while dq and now - dq[0] > window_s:
                 dq.popleft()
             if len(dq) >= limit:
+                retry_after = max(1, math.ceil(window_s - (now - dq[0])))
                 raise HTTPException(
                     status_code=429,
-                    detail="درخواست‌های زیاد؛ کمی صبر کنید",
+                    detail=f"درخواست‌های زیاد؛ {retry_after} ثانیه صبر کنید و دوباره تلاش کنید",
+                    headers={"Retry-After": str(retry_after)},
                 )
             dq.append(now)
 
@@ -261,11 +264,15 @@ _limiter = _RateLimiter()
 
 
 def client_ip(request: Request) -> str:
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
+    # Uvicorn resolves proxy headers only from --forwarded-allow-ips peers.
+    # Reading raw X-Forwarded-For here would bypass that trust boundary.
     return request.client.host if request.client else "unknown"
 
 
 def rate_limit(request: Request, limit: int, window_s: int = 60) -> None:
-    _limiter.hit(client_ip(request), limit, window_s)
+    # Login must not consume the SMS budget or prune its longer window.
+    # Include the policy so different windows never mutate the same deque.
+    path = getattr(getattr(request, "url", None), "path", None)
+    if path is None:
+        path = getattr(request, "scope", {}).get("path", "auth")
+    _limiter.hit(f"{path}:{limit}:{window_s}:{client_ip(request)}", limit, window_s)
