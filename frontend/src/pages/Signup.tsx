@@ -3,26 +3,13 @@ import { useState } from "react";
 import { apiUrl, readApiError } from "../api";
 import { NavFn, SignupData, normalizeSignupData } from "../types";
 import { MAJORS, GRADES, STUDY_HOURS_OPTIONS, TEST_EXAM_OPTIONS } from "../data";
+import { GradeSymbol, SubjectSymbol } from "../components/StudySymbols";
 import {
   AuthOrbs, BackButton, ErrorBanner, StepHeading, PrimaryButton,
   PhoneInput, PasswordInput, StrengthMeter, OtpInput, ChoiceButton,
 } from "../components/ui";
 
 interface Props { nav: NavFn; onComplete: (data: SignupData) => void; }
-
-const MAJOR_ICONS: Record<string, string> = {
-  "ریاضی فیزیک": "📐",
-  "علوم تجربی": "🧬",
-  "علوم انسانی": "📚",
-  "هنر": "🎨",
-};
-
-const GRADE_ICONS: Record<string, string> = {
-  "دهم": "🌱",
-  "یازدهم": "🌿",
-  "دوازدهم": "🌳",
-  "فارغ‌التحصیل": "🎓",
-};
 
 /** Stagger delay class for the i-th choice in a list. */
 function stagger(i: number): string {
@@ -306,7 +293,7 @@ export default function Signup({ nav, onComplete }: Props) {
         <div className="flex flex-col gap-2">
           {MAJORS.map((m, i) => (
             <ChoiceButton key={m} selected={major === m} onClick={() => pick(setMajor, m)} delay={stagger(i)}>
-              <span className="me-2">{MAJOR_ICONS[m] || "🎓"}</span>{m}
+              <span className="inline-flex items-center gap-3"><SubjectSymbol subject={m} size={22} className="shrink-0" />{m}</span>
             </ChoiceButton>
           ))}
         </div>
@@ -319,7 +306,7 @@ export default function Signup({ nav, onComplete }: Props) {
         <div className="flex flex-col gap-2">
           {GRADES.map((g, i) => (
             <ChoiceButton key={g} selected={grade === g} onClick={() => pick(setGrade, g)} delay={stagger(i)}>
-              <span className="me-2">{GRADE_ICONS[g] || "🏫"}</span>{g}
+              <span className="inline-flex items-center gap-3"><GradeSymbol grade={g} size={22} className="shrink-0" />{g}</span>
             </ChoiceButton>
           ))}
         </div>
@@ -332,7 +319,7 @@ export default function Signup({ nav, onComplete }: Props) {
         <div className="flex flex-col gap-2">
           {STUDY_HOURS_OPTIONS.map((h, i) => (
             <ChoiceButton key={h} selected={studyHours === h} onClick={() => pick(setStudyHours, h)} delay={stagger(i)}>
-              <span className="me-2">⏱</span>{h}
+              {h}
             </ChoiceButton>
           ))}
         </div>
@@ -345,12 +332,12 @@ export default function Signup({ nav, onComplete }: Props) {
         <div className="flex flex-col gap-2">
           {TEST_EXAM_OPTIONS.map((e, i) => (
             <ChoiceButton key={e} selected={testExams.includes(e)} onClick={() => toggleExam(e)} delay={stagger(i)}>
-              <span className="me-2">📝</span>{e}
+              {e}
             </ChoiceButton>
           ))}
           {testExams.filter(e => !TEST_EXAM_OPTIONS.includes(e)).map(e => (
             <ChoiceButton key={e} selected onClick={() => toggleExam(e)}>
-              <span className="me-2">✏️</span>{e}
+              {e}
               <span className="text-[11px] opacity-70 ms-2">(سفارشی)</span>
             </ChoiceButton>
           ))}

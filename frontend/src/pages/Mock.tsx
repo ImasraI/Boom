@@ -6,6 +6,7 @@ import ReportQuestion from "../components/ReportQuestion"
 import QuestionFigure from "../components/QuestionFigure"
 import type { QuestionFigureData } from "../questionFigures"
 import { requestMockGeneration } from "../mockGeneration"
+import { CheckMark, CrossMark } from "../components/icons"
 
 type Phase = "config" | "loading" | "ready" | "test" | "result"
 
@@ -328,8 +329,8 @@ function ResultView({ result, mockId, onBack, onRetry }: { result: MockResult; m
             <p className="text-[10px] text-[var(--muted-2)] mt-1">نمره با احتساب نمره منفی</p>
           </div>
           <div className="flex-1 flex gap-4 justify-end text-[12px] font-bold">
-            <span className="text-green-600 dark:text-green-400">✓ {result.correct} درست</span>
-            <span className="text-red-500">✗ {result.wrong} غلط</span>
+            <span className="text-green-600 dark:text-green-400">{result.correct} درست</span>
+            <span className="text-red-500">{result.wrong} غلط</span>
             <span className="text-[var(--muted)]">— {result.blank} نزده</span>
           </div>
         </div>
@@ -358,8 +359,8 @@ function ResultView({ result, mockId, onBack, onRetry }: { result: MockResult; m
                   <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${Math.max(0, Math.min(100, s.score))}%` }} />
                 </div>
                 <div className="flex gap-3 text-[11px] text-[var(--muted-2)] font-bold" dir="ltr">
-                  <span className="text-green-600 dark:text-green-400">✓ {s.correct}</span>
-                  <span className="text-red-500">✗ {s.wrong}</span>
+                  <span className="text-green-600 dark:text-green-400"><CheckMark size={10} className="inline-block align-[-1px]" /> {s.correct}</span>
+                  <span className="text-red-500"><CrossMark size={10} className="inline-block align-[-1px]" /> {s.wrong}</span>
                   <span>— {s.blank}</span>
                 </div>
               </div>
@@ -388,7 +389,7 @@ function ResultView({ result, mockId, onBack, onRetry }: { result: MockResult; m
                 <div className="flex items-start gap-2 mb-2">
                   <span className={`w-6 h-6 rounded-md flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
                     ok ? "bg-green-500 text-white" : blankQ ? "bg-[var(--chip)] text-[var(--muted)]" : "bg-red-500 text-white"
-                  }`}>{ok ? "✓" : blankQ ? "—" : "✗"}</span>
+                  }`}>{ok ? <CheckMark size={12} /> : blankQ ? "—" : <CrossMark size={12} />}</span>
                   <p className="flex-1 text-[13px] font-bold text-[var(--text)] leading-relaxed text-right">
                     <span className="text-[var(--muted-2)]">{i + 1}. [{q.subject}] </span><RichText text={q.text} />
                   </p>

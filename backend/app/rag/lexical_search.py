@@ -7,9 +7,12 @@ an external search engine such as Elasticsearch.
 """
 
 from collections import defaultdict
+from contextlib import nullcontext
 from typing import Any, Dict, List
 import math
 import re
+
+from app.rag.trace import active_trace, clip
 
 
 def normalize_text(text: str) -> str:
@@ -153,82 +156,148 @@ class LexicalIndex:
         top_k: int = 8,
         k1: float = 1.5,
         b: float = 0.75,
+        label: str = "",
     ) -> List[Dict[str, Any]]:
         """
         Search the index using BM25 scoring.
+
+        ``label`` only tags the recorded trace stage (see app.rag.trace); the
+        ranking is unaffected. When a trace is recording, the BM25 internals
+        that decide the ranking - tokenisation, per-term IDF, k1/b and the
+        length normalisation of each hit - are stored for the viewer.
+
+        The stage wraps the whole call - tokenisation, IDF, scoring, sorting
+        and row assembly - so its ``ms`` is the real cost of the search. The
+        expensive parts are all after tokenisation, and timing only the first
+        step reported a search that had already finished as free.
         """
 
-        # Convert query into tokens
-        query_tokens = tokenize(query)
-
-        # Nothing to search
-        if not query_tokens:
-            return []
-
-        # Number of chunks
-        document_count = len(
-            self.documents
+        trace = active_trace()
+        context = (
+            trace.stage((f"{label}" if label else "") + "lexical_search",
+                        "جست‌وجوی واژگانی (BM25)")
+            if trace is not None else nullcontext({})
         )
+        with context as stage:
+            # Convert query into tokens
+            query_tokens = tokenize(query)
 
-        if document_count == 0:
-            return []
+            if stage:
+                stage["command"] = (
+                    "score = Σ idf(term) · tf · (k1+1) / (tf + k1·(1 - b + b·dl/avgdl))"
+                )
+                stage["meta"] = {
+                    "indexed_chunks": len(self.documents),
+                    "query": clip(query, 200),
+                    "query_tokens": query_tokens[:40],
+                    "k1": k1,
+                    "b": b,
+                    "average_chunk_tokens": round(self.average_document_length, 1),
+                    "candidates_requested": top_k,
+                    "timed": "کل جست‌وجو (توکن‌سازی، IDF، امتیازدهی، مرتب‌سازی)",
+                }
 
-        # Precompute the BM25 IDF per unique query term once (it depends
-        # only on the corpus, not on the chunk), then score each chunk that
-        # actually contains at least one query term. Scanning the postings
-        # instead of every chunk keeps this O(matching chunks x terms)
-        # instead of O(chunks x terms).
-        term_idf: Dict[str, float] = {}
-        for term in set(query_tokens):
-            document_frequency = self.document_frequencies.get(term, 0)
-            if document_frequency == 0:
-                continue
-            term_idf[term] = math.log(
-                1
-                + (
-                    document_count
-                    - document_frequency
-                    + 0.5
-                )
-                / (
-                    document_frequency
-                    + 0.5
-                )
+            # Nothing to search
+            if not query_tokens:
+                if stage:
+                    stage["meta"]["stopped"] = "هیچ توکنی از پرسش استخراج نشد"
+                return []
+
+            # Number of chunks
+            document_count = len(
+                self.documents
             )
 
-        avg_dl = max(self.average_document_length, 1)
-        matching = []
-        for index, term_frequency in enumerate(self.term_frequencies):
-            score = 0.0
-            for term, idf in term_idf.items():
-                frequency = term_frequency.get(term, 0)
-                if frequency == 0:
+            if document_count == 0:
+                if stage:
+                    stage["meta"]["stopped"] = "ایندکس واژگانی خالی است (هیچ تکه‌ای برای این کاربر فهرست نشده)"
+                return []
+
+            # Precompute the BM25 IDF per unique query term once (it depends
+            # only on the corpus, not on the chunk), then score each chunk that
+            # actually contains at least one query term. Scanning the postings
+            # instead of every chunk keeps this O(matching chunks x terms)
+            # instead of O(chunks x terms).
+            term_idf: Dict[str, float] = {}
+            for term in set(query_tokens):
+                document_frequency = self.document_frequencies.get(term, 0)
+                if document_frequency == 0:
                     continue
-                score += (
-                    idf
-                    * frequency
-                    * (k1 + 1)
+                term_idf[term] = math.log(
+                    1
+                    + (
+                        document_count
+                        - document_frequency
+                        + 0.5
+                    )
                     / (
-                        frequency
-                        + k1
-                        * (
-                            1
-                            - b
-                            + b
-                            * (sum(term_frequency.values()) or 1)
-                            / avg_dl
-                        )
+                        document_frequency
+                        + 0.5
                     )
                 )
-            if score > 0:
-                matching.append((index, score))
 
-        # Rank only the chunks with a positive score (same ranking as before,
-        # computed without touching zero-score chunks).
-        matching.sort(key=lambda pair: pair[1], reverse=True)
-        results = []
-        for index, score in matching[:top_k]:
-            result = dict(self.documents[index])
-            result["lexical_score"] = round(score, 4)
-            results.append(result)
-        return results
+            if stage:
+                stage["meta"]["term_idf"] = {term: round(idf, 4) for term, idf in term_idf.items()}
+                stage["meta"]["terms_not_in_corpus"] = sorted(set(query_tokens) - set(term_idf))[:20]
+
+            avg_dl = max(self.average_document_length, 1)
+            matching = []
+            for index, term_frequency in enumerate(self.term_frequencies):
+                score = 0.0
+                for term, idf in term_idf.items():
+                    frequency = term_frequency.get(term, 0)
+                    if frequency == 0:
+                        continue
+                    score += (
+                        idf
+                        * frequency
+                        * (k1 + 1)
+                        / (
+                            frequency
+                            + k1
+                            * (
+                                1
+                                - b
+                                + b
+                                * (sum(term_frequency.values()) or 1)
+                                / avg_dl
+                            )
+                        )
+                    )
+                if score > 0:
+                    matching.append((index, score))
+
+            # Rank only the chunks with a positive score (same ranking as before,
+            # computed without touching zero-score chunks).
+            matching.sort(key=lambda pair: pair[1], reverse=True)
+            results = []
+            rows = []
+            for rank, (index, score) in enumerate(matching[:top_k], start=1):
+                result = dict(self.documents[index])
+                result["lexical_score"] = round(score, 4)
+                results.append(result)
+                if stage:
+                    term_frequency = self.term_frequencies[index]
+                    rows.append({
+                        "rank": rank,
+                    "id": str(result.get("id") or ""),
+                        "doc": str(result.get("document_name") or ""),
+                        "chunk": result.get("chunk_index", ""),
+                        "score": round(score, 4),
+                        "terms": "، ".join(sorted(t for t in term_idf if term_frequency.get(t)))[:80],
+                        "preview": clip(result.get("content") or ""),
+                    })
+            if stage:
+                stage["columns"] = [
+                    {"key": "rank", "label": "رتبه"},
+                    {"key": "id", "label": "شناسه تکه"},
+                    {"key": "doc", "label": "سند"},
+                    {"key": "chunk", "label": "تکه"},
+                    {"key": "score", "label": "امتیاز BM25"},
+                    {"key": "terms", "label": "کلیدواژه‌های منطبق"},
+                    {"key": "preview", "label": "متن تکه"},
+                ]
+                stage["rows"] = rows
+                stage["meta"]["scored_chunks"] = len(matching)
+                stage["meta"]["hits"] = len(results)
+            return results

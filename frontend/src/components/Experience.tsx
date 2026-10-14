@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { CheckMark } from "./icons";
 
 export type SoundKind = "tap" | "success";
 const KEY = "boom-experience";
@@ -110,6 +111,6 @@ export default function Experience() {
   }, []);
   return <>
     <div className="feedback-layer" aria-hidden="true">{rings.map(r => <span className="click-ring" key={r.id} style={{left:r.x,top:r.y}} />)}</div>
-    <div className="feedback-announcement" role="status" aria-live="polite" aria-atomic="true">{toast && <div key={toast.id} className="success-toast"><span className="success-seal">✓</span><div><strong>یک قدم جلوتر!</strong><p>{toast.text}</p></div><button aria-label="بستن پیام" onClick={() => setToast(null)}>×</button><div className="success-sparks" aria-hidden="true">{Array.from({length:8},(_,i) => <i key={i} style={{"--i":i} as CSSProperties} />)}</div></div>}</div>
+    <div className="feedback-announcement" role="status" aria-live="polite" aria-atomic="true">{toast && <div key={toast.id} className="success-toast"><span className="success-seal"><CheckMark size={20} strokeWidth={3} /></span><div><strong>یک قدم جلوتر!</strong><p>{toast.text}</p></div><button aria-label="بستن پیام" onClick={() => setToast(null)}>×</button><div className="success-sparks" aria-hidden="true">{Array.from({length:8},(_,i) => <i key={i} style={{"--i":i} as CSSProperties} />)}</div></div>}</div>
   </>;
 }

@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from app.auth.database import PoolDraftJob, BankQuestion, SessionLocal
 from app.config import get_settings
 from app.rag import mock_generation, pool_core, question_bank, exam_blueprint
+from app.rag import trace
 from app.rag.llm import get_pool_verifier_client
 from app.rag.provider_quota import pool_generation_status, pool_verification_status, is_terminal_provider_error
 from app.utils.logger import get_logger
@@ -227,8 +228,28 @@ def claim_job(scope=None):
         return job_id if claimed.rowcount == 1 else None
 
 
+DECISION_COLUMNS = [
+    {"key": "n", "label": "#"},
+    {"key": "subject", "label": "درس"},
+    {"key": "text", "label": "صورت سؤال"},
+    {"key": "solver", "label": "گزینهٔ حل‌کنندهٔ نابینا"},
+    {"key": "stored", "label": "کلید ذخیره‌شده"},
+    {"key": "audit", "label": "نظر بازبین"},
+    {"key": "status", "label": "تصمیم"},
+    {"key": "reason", "label": "دلیل"},
+]
+
+
 def verify_step(job_id, client=None):
-    """Commit each batch's decisions and bank inserts together; refusals keep drafts."""
+    """Commit each batch's decisions and bank inserts together; refusals keep drafts.
+
+    The batch runs as an ``evaluation`` trace, the same kind the booklet
+    verifier records, so an admin filtering the panel by ارزیابی sees the blind
+    solve (with its prompt), the independent audit of each key, and the
+    accept/reject/defer decisions this queue step actually made. The trace is
+    recorded here, around the real batch, and never around a re-implementation
+    of it - the acceptance rules below are unchanged.
+    """
     with SessionLocal() as db:
         job = db.get(PoolDraftJob, job_id)
         if not job or job.status != "verifying" or job.lease_owner != _OWNER:
@@ -236,55 +257,145 @@ def verify_step(job_id, client=None):
         rows = json.loads(job.questions)
         positions = [i for i, q in enumerate(rows) if q.get("_queue_status") == "pending"
                      and q.get("_review_after", "") <= _now().isoformat()][:mock_generation._VERIFY_BATCH_SIZE]
-    client = client if client is not None else get_pool_verifier_client()
-    verdicts = mock_generation._verify_batch(client, [rows[i] for i in positions], 60)
-    with SessionLocal() as db:
-        job = db.get(PoolDraftJob, job_id)
-        if job.status != "verifying" or job.lease_owner != _OWNER:
-            return False
-        if verdicts is None:
-            # A terminal quota/access refusal is remembered by the provider
-            # client. Never discard candidates because a provider is unavailable.
-            for position in positions:
-                rows[position]["validation"] = {"version": 1, "status": "pending", "reason": "verifier_provider_or_protocol_error"}
-            job.questions = json.dumps(rows, ensure_ascii=False)
+    if not positions:
+        # The lease is held but nothing is due yet. Spend no provider call (and
+        # record no run) on an empty batch: hand the lease back so the loop can
+        # pick the job up again, exactly as an unanswerable batch would.
+        with SessionLocal() as db:
+            job = db.get(PoolDraftJob, job_id)
+            if not job or job.status != "verifying" or job.lease_owner != _OWNER:
+                return False
             job.status = "pending"; job.retry_at = _now() + timedelta(seconds=60)
             job.lease_owner = ""; job.lease_until = None
             db.commit()
-            return False
-        accepted = []
-        for index, position in enumerate(positions, start=1):
-            q = rows[position]
-            if index in getattr(verdicts, "details", {}):
-                q["validation"] = verdicts.details[index]
-            if index in getattr(verdicts, "deferred", set()):
-                q["_review_retries"] = q.get("_review_retries", 0) + 1
-                q["_review_after"] = (_now() + timedelta(seconds=min(
-                    21600, 60 * 2 ** min(q["_review_retries"], 8)))).isoformat()
-                continue
-            valid = (verdicts.get(index) == q["answer"]
-                     and not mock_generation._missing_visible_reference(q))
-            q["_queue_status"] = "verified" if valid else "rejected"
-            q["verification_status"] = "verified" if valid else "rejected"
-            if valid:
-                accepted.append({k: v for k, v in q.items() if not k.startswith("_review") and k != "_queue_status"})
-                job.verified_count += 1
-            else:
-                job.rejected_count += 1
-        if accepted:
-            pool_core._harvest_questions(db, accepted, job.major, job.difficulty, job.grade, commit=False)
-        job.questions = json.dumps(rows, ensure_ascii=False)
-        job.status = ("pending" if any(q.get("_queue_status") == "pending" for q in rows)
-                      else "completed" if job.verified_count else "rejected")
-        # An uncertain question waits without blocking the remaining questions
-        # in the same draft booklet. Only due reviews compete for this lease.
-        pending_times = [datetime.fromisoformat(q["_review_after"]) if q.get("_review_after") else _now()
-                         for q in rows if q.get("_queue_status") == "pending"]
-        earliest = min(pending_times, default=_now())
-        job.retry_at = earliest if earliest > _now() else None
-        job.lease_owner = ""; job.lease_until = None
-        db.commit()
+        return False
+    client = client if client is not None else get_pool_verifier_client()
+    with trace.record_trace(
+        "evaluation",
+        title=f"ارزیابی صف: {len(positions)} سؤال (بازبین نابینا)",
+        meta={"queue_job": job_id, "batch": len(positions),
+              "source": "صف پیش‌نویس (verify_step)"},
+    ):
+        verdicts = mock_generation._verify_batch(client, [rows[i] for i in positions], 60)
+        with SessionLocal() as db:
+            job = db.get(PoolDraftJob, job_id)
+            if not job or job.status != "verifying" or job.lease_owner != _OWNER:
+                return False
+            if verdicts is None:
+                # A terminal quota/access refusal is remembered by the provider
+                # client. Never discard candidates because a provider is unavailable.
+                reason = (getattr(client, "last_error", "")
+                          or "provider returned no response")
+                with trace.stage("queue_refusal", "توقف ارزیابی صف (پاسخ‌ندادن ارائه‌دهنده)") as st:
+                    st["command"] = "_verify_batch(...) → None (بدون پاسخ ارائه‌دهنده)"
+                    st["meta"] = {
+                        "reason": trace.clip(reason, 300),
+                        "kept_pending": len(positions),
+                        "discarded": 0,
+                        "retry_after_seconds": 60,
+                        "note": "پیش‌نویس‌ها حذف نمی‌شوند؛ فقط زمان بازبینی عقب می‌افتد",
+                    }
+                    st["columns"] = [{"key": "n", "label": "#"},
+                                     {"key": "subject", "label": "درس"},
+                                     {"key": "text", "label": "صورت سؤال"},
+                                     {"key": "answer", "label": "کلید ذخیره‌شده"}]
+                    st["rows"] = [
+                        {"n": index, "subject": str(rows[position].get("subject") or ""),
+                         "text": trace.clip(rows[position].get("text"), 140),
+                         "answer": rows[position].get("answer")}
+                        for index, position in enumerate(positions, start=1)
+                    ]
+                trace.note(refused=trace.clip(reason, 120), kept_pending=len(positions),
+                           job_status="pending")
+                for position in positions:
+                    rows[position]["validation"] = {"version": 1, "status": "pending", "reason": "verifier_provider_or_protocol_error"}
+                job.questions = json.dumps(rows, ensure_ascii=False)
+                job.status = "pending"; job.retry_at = _now() + timedelta(seconds=60)
+                job.lease_owner = ""; job.lease_until = None
+                db.commit()
+                return False
+            accepted = []
+            decisions = []
+            deferred = 0
+            with trace.stage("queue_decisions", "تصمیم‌های صف (تأیید / رد / تعویق)") as st:
+                for index, position in enumerate(positions, start=1):
+                    q = rows[position]
+                    if index in getattr(verdicts, "details", {}):
+                        q["validation"] = verdicts.details[index]
+                    if index in getattr(verdicts, "deferred", set()):
+                        q["_review_retries"] = q.get("_review_retries", 0) + 1
+                        q["_review_after"] = (_now() + timedelta(seconds=min(
+                            21600, 60 * 2 ** min(q["_review_retries"], 8)))).isoformat()
+                        deferred += 1
+                        decisions.append(_decision_row(index, q, verdicts))
+                        continue
+                    valid = (verdicts.get(index) == q["answer"]
+                             and not mock_generation._missing_visible_reference(q))
+                    q["_queue_status"] = "verified" if valid else "rejected"
+                    q["verification_status"] = "verified" if valid else "rejected"
+                    if valid:
+                        accepted.append({k: v for k, v in q.items() if not k.startswith("_review") and k != "_queue_status"})
+                        job.verified_count += 1
+                    else:
+                        job.rejected_count += 1
+                    decisions.append(_decision_row(index, q, verdicts))
+                st["command"] = (
+                    "verdicts.get(n) == question['answer'] and not "
+                    "_missing_visible_reference(question) → verified، در غیر این صورت rejected؛ "
+                    "نظر نامطمئن بازبین → تعویق"
+                )
+                st["meta"] = {
+                    "verified": job.verified_count,
+                    "rejected": job.rejected_count,
+                    "deferred": deferred,
+                    "harvested_to_bank": 0,
+                    "note": "کلید بازبین نابینا با کلید ذخیره‌شده برابر باشد و سؤال ارجاع دیدنی نداشته باشد",
+                }
+                st["columns"] = DECISION_COLUMNS
+                st["rows"] = decisions
+            if accepted:
+                pool_core._harvest_questions(db, accepted, job.major, job.difficulty, job.grade, commit=False)
+            with trace.stage("queue_commit", "ثبت نتایج صف") as st:
+                st["command"] = "harvest verified questions → update job counters/status → commit"
+                st["meta"] = {"verified_in_job": job.verified_count,
+                              "rejected_in_job": job.rejected_count,
+                              "accepted_this_batch": len(accepted)}
+            job.questions = json.dumps(rows, ensure_ascii=False)
+            final_status = ("pending" if any(q.get("_queue_status") == "pending" for q in rows)
+                            else "completed" if job.verified_count else "rejected")
+            job.status = final_status
+            # An uncertain question waits without blocking the remaining questions
+            # in the same draft booklet. Only due reviews compete for this lease.
+            pending_times = [datetime.fromisoformat(q["_review_after"]) if q.get("_review_after") else _now()
+                             for q in rows if q.get("_queue_status") == "pending"]
+            earliest = min(pending_times, default=_now())
+            job.retry_at = earliest if earliest > _now() else None
+            job.lease_owner = ""; job.lease_until = None
+            db.commit()
+        trace.note(job_status=final_status, verified=_trace_values(verdicts, "verified"),
+                   rejected=_trace_values(verdicts, "rejected"), deferred=deferred)
         return bool(accepted)
+
+
+def _decision_row(index, question, verdicts):
+    """One row for the decisions table: what each question was judged to be."""
+    validation = question.get("validation") if isinstance(question.get("validation"), dict) else {}
+    return {
+        "n": index,
+        "subject": str(question.get("subject") or ""),
+        "text": trace.clip(question.get("text"), 140),
+        "solver": verdicts.get(index),
+        "stored": question.get("answer"),
+        "audit": validation.get("audit_valid"),
+        "status": str(question.get("_queue_status") or "pending"),
+        "reason": trace.clip(validation.get("reason"), 200),
+    }
+
+
+def _trace_values(verdicts, status):
+    """How many questions of this batch ended in ``status``."""
+    return sum(1 for detail in (getattr(verdicts, "details", None) or {}).values()
+               if isinstance(detail, dict) and detail.get("status") == status)
 
 
 def _active():

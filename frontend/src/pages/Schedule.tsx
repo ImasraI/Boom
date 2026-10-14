@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
 import { apiUrl, authHeaders, readApiError } from "../api"
 import GroqChart from "../components/GroqChart"
+import { RepeatIcon } from "../components/icons";
 import {
   addDays,
   blocksOverlap,
@@ -37,7 +38,6 @@ const DAYS = [
 const HOUR_START = 6
 const TOTAL_HOURS = 18
 const SLOT_COUNT = TOTAL_HOURS * 2
-const HOUR_END = HOUR_START + TOTAL_HOURS - 0.5
 const HOURS = Array.from({ length: SLOT_COUNT }, (_, i) => {
   const val = HOUR_START + i * 0.5
   const h = Math.floor(val) % 24
@@ -53,8 +53,7 @@ const MAX_DURATION = 6
 const MS_PER_DAY = 86400000
 const MS_PER_WEEK = 7 * MS_PER_DAY
 
-// The calendar shows 2 years before and 2 years after the current week.
-const YEARS_PRIOR = 2
+// Generated-plan navigation reaches two years beyond the current week.
 const YEARS_AFTER = 2
 const MAX_WEEKS = Math.round((YEARS_AFTER * 365.25) / 7) // 104
 
@@ -911,7 +910,9 @@ export default function Schedule({
             onClick={() => nav("home")}
             className="w-9 h-9 rounded-xl bg-[var(--border)] flex items-center justify-center text-[var(--muted)]"
           >
-            →
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: "scaleX(-1)" }}>
+              <path d="M19 12H5M12 5l-7 7 7 7" />
+            </svg>
           </button>
           <h1 className="flex-1 text-right font-bold text-lg">برنامه هفتگی</h1>
           {isCurrentWeekGenerating ? (
@@ -1104,7 +1105,7 @@ export default function Schedule({
                 >
                   <div className={`schedule-block schedule-static overflow-hidden px-1.5 ${b.duration < 0.5 ? "py-0 text-[9px]" : "py-1 text-[11px]"} ${isBlockDragging(b) ? "is-dragging" : ""}`}>
                     <div className={`font-bold truncate flex items-center gap-1 pointer-events-none ${b.duration < 0.5 ? "leading-none" : "leading-snug"}`}>
-                      <span className="text-[10px] leading-none">↻</span>
+                      <RepeatIcon size={10} className="leading-none" />
                       <span className="truncate">{b.title}</span>
                     </div>
                     {b.duration >= 0.5 && <div dir="ltr" className="text-[10px] text-right opacity-80 pointer-events-none">

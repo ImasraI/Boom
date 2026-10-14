@@ -509,12 +509,14 @@ html.dark .schedule-block {
 }
 
 .schedule-block-resize-handle::after {
-  content: "▮";
+  content: "";
   display: block;
-  text-align: center;
-  font-size: 8px;
-  line-height: 6px;
-  opacity: 0.55;
+  width: 22px;
+  height: 4px;
+  margin: 0 auto;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.35;
 }
 
 .eval-card {

@@ -1,0 +1,8 @@
+# Laptop-only comparison tools. Core server requirements remain separate.
+# Run with the existing CUDA-compatible PyTorch install; do not replace it.
+pypdfium2==5.13.0
+pytesseract==0.3.13
+easyocr==1.7.2
+tzdata==2026.5
+# Tesseract itself and its fas/eng language files are system prerequisites.
+# PyMuPDF, httpx and python-dotenv are supplied by requirements.txt.

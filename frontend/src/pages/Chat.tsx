@@ -4,6 +4,7 @@ import { apiUrl, authHeaders } from "../api";
 import { NavFn, SignupData } from "../types";
 import { weeklyScheduleContext, loadWeekBlocks, saveWeekBlocks, getWeekISO, hasScheduleOverlap, StoredBlock } from "../scheduleStore";
 import ChatMarkdown from "../components/ChatMarkdown";
+import { CloseIcon } from "../components/icons";
 import HomeworkIntake, { type HomeworkDraft } from "../components/HomeworkIntake";
 import { flushCalendar, pullCalendar, calendarSyncError } from "../calendarSync";
 
@@ -454,7 +455,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
                   aria-label={`حذف ${s.name}`}
                   title="حذف گفتگو"
                 >
-                  ✕
+                  <CloseIcon size={10} />
                 </button>
               </div>
             );

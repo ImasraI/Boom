@@ -4,6 +4,7 @@ import re
 from fractions import Fraction
 
 from app.rag import pool_usage
+from app.rag import trace
 
 
 def json_value(raw):
@@ -78,16 +79,34 @@ def audit(client, question, timeout=300):
         + json.dumps(visible, ensure_ascii=False))
     try:
         with pool_usage.stage("quality_audit"):
-            raw = client.generate([{"role": "user", "content": prompt}],
-                                  max_tokens=8192, timeout=max(300, timeout))
+            with trace.stage("quality_audit", "ارزیابی کیفیت سؤال (بازبین مستقل)") as st:
+                st["command"] = (
+                    f"{type(client).__name__}.generate([audit prompt], max_tokens=8192, "
+                    f"timeout={max(300, timeout)})"
+                )
+                st["text"]["prompt"] = prompt
+                st["meta"] = {
+                    **trace.client_label(client),
+                    "question": trace.clip(question.get("text"), 200),
+                    "stored_answer": question.get("answer"),
+                }
+                raw = client.generate([{"role": "user", "content": prompt}],
+                                      max_tokens=8192, timeout=max(300, timeout))
+                st["meta"].update(trace.client_label(client))
+                st["text"]["raw"] = trace.clip(raw, 3000)
     except Exception:
+        trace.note(audit="provider_error")
         return {"valid": None, "reason": "audit_provider_error"}
     result = json_object(raw)
     if (not result or type(result.get("valid")) not in (bool, type(None))
             or "valid" not in result or not isinstance(result.get("reason"), str)
             or not result["reason"].strip()):
+        trace.note(audit="invalid protocol reply")
         return {"valid": None, "reason": "audit_protocol_error"}
-    return {"valid": result["valid"], "reason": result["reason"][:1500]}
+    verdict = {"valid": result["valid"], "reason": result["reason"][:1500]}
+    trace.note(audit=str(verdict["valid"]),
+               audit_reason=trace.clip(verdict["reason"], 200))
+    return verdict
 
 
 class Verdicts(dict):

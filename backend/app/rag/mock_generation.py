@@ -35,11 +35,52 @@ from app.rag.provider_quota import is_terminal_provider_error, quota_identity
 from app.rag.pool_pacing import wait_for_draft_slot
 from app.rag import pool_usage
 from app.rag import exam_blueprint, question_quality
+from app.rag import trace
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 OPTIONS = ["الف", "ب", "ج", "د"]
+
+# Table layouts for the RAG trace viewer (app.rag.trace): drafted questions and
+# blind-solver verdicts, so an admin can see what each stage produced.
+QUESTION_COLUMNS = [
+    {"key": "n", "label": "#"},
+    {"key": "subject", "label": "درس"},
+    {"key": "topic", "label": "مبحث"},
+    {"key": "text", "label": "صورت سؤال"},
+    {"key": "answer", "label": "کلید"},
+    {"key": "status", "label": "وضعیت"},
+    {"key": "explanation", "label": "توضیح"},
+]
+
+VERDICT_COLUMNS = [
+    {"key": "n", "label": "#"},
+    {"key": "subject", "label": "درس"},
+    {"key": "text", "label": "صورت سؤال"},
+    {"key": "solver", "label": "پاسخ حل‌کننده"},
+    {"key": "stored", "label": "کلید ذخیره‌شده"},
+    {"key": "match", "label": "تطابق"},
+    {"key": "status", "label": "داوری"},
+]
+
+
+def _question_rows(questions: List[dict], limit: int = 25) -> List[Dict[str, Any]]:
+    """One viewer row per drafted/repaired question."""
+    rows = []
+    for index, question in enumerate(questions[:limit], start=1):
+        validation = question.get("validation") or {}
+        rows.append({
+            "n": index,
+            "subject": str(question.get("subject") or ""),
+            "topic": str(question.get("topic") or ""),
+            "text": trace.clip(question.get("text"), 160),
+            "answer": question.get("answer"),
+            "status": str(question.get("verification_status")
+                          or validation.get("status") or ""),
+            "explanation": trace.clip(question.get("explanation"), 120),
+        })
+    return rows
 
 # Live progress events for whoever is watching a long generation run (the
 # pool passes a reporter in; the live-mock path passes nothing). Events:
@@ -298,7 +339,7 @@ def build_booklet_prompt(plan: List[dict], topics: List[str], difficulty: str,
     topics_text = ("\n".join(f"- {t}" for t in topics)
                    if topics else "- هر مبحث کنکوری آن درس")
     grounded = bool((context or "").strip())
-    return _GENERATE_PROMPT.format(
+    prompt = _GENERATE_PROMPT.format(
         plan=plan_text, topics=topics_text,
         difficulty=_DIFFICULTY_LABEL.get(difficulty, _DIFFICULTY_LABEL["konkur"]),
         grade_block=grade_block(grade),
@@ -306,6 +347,9 @@ def build_booklet_prompt(plan: List[dict], topics: List[str], difficulty: str,
         weak_block=weak_block,
         grounding_rule=_GROUNDED_RULE if grounded else _UNGROUNDED_RULE,
     )
+    # Style examples remain separate from book evidence and cannot widen scope.
+    from app.rag.exam_style import context as exam_style_context
+    return prompt + (exam_style_context(plan, topics) if grounded else "")
 
 
 def weak_areas(user_id: int, recent_n: int = 40, limit: int = 10) -> List[dict]:
@@ -621,12 +665,28 @@ def _verify_batch(client, batch: List[dict],
     different failure from "the solver could not solve it": this codebase must
     not spend one call per question discovering that a per-day quota is gone.
     """
+    prompt = _verify_batch_prompt(batch)
     try:
         with pool_usage.stage('verification'):
-            raw = client.generate(
-                [{"role": "user", "content": _verify_batch_prompt(batch)}],
-                max_tokens=max(8192, 1024 * len(batch)), timeout=max(300, timeout),
-            )
+            with trace.stage("verify_llm", "حل مستقل سؤال‌ها (بازبین نابینا)") as st:
+                st["command"] = (
+                    f"{type(client).__name__}.generate([blind solve {len(batch)} "
+                    f"question(s)], max_tokens={max(8192, 1024 * len(batch))}, "
+                    f"timeout={max(300, timeout)})"
+                )
+                st["text"]["prompt"] = prompt
+                st["meta"] = {
+                    **trace.client_label(client),
+                    "batch": len(batch),
+                    "sees": "صورت سؤال و گزینه‌ها (بدون کلید و توضیح)",
+                }
+                raw = client.generate(
+                    [{"role": "user", "content": prompt}],
+                    max_tokens=max(8192, 1024 * len(batch)), timeout=max(300, timeout),
+                )
+                st["meta"].update(trace.client_label(client))
+                st["meta"]["output_characters"] = len(raw or "")
+                st["text"]["raw"] = trace.clip(raw, 3000)
     except Exception as exc:
         logger.warning("Verifier batch call failed: %s", exc)
         return None
@@ -673,17 +733,42 @@ def _batch_verdicts(client, questions: List[dict], timeout: float, report):
     batch_timeout = max(timeout, 30.0) * 2
     for start in range(0, len(questions), batch_size):
         batch = questions[start:start + batch_size]
-        verdicts = _verify_batch(client, batch, batch_timeout)
-        if verdicts is None:
-            reason = (getattr(client, "last_error", "")
-                      or "provider returned no response")
-            logger.error(
-                "Verifier refused the call (%s); stopping after %d/%d "
-                "question(s) - the rest stay unverified.",
-                reason, start, len(questions),
+        with trace.stage("verify_batch", f"داوری سؤال‌های {start + 1}–{start + len(batch)}") as st:
+            st["command"] = (
+                f"_verify_batch({len(batch)} question(s)) → شاخص گزینه از حل‌کننده نابینا"
             )
-            _report(report, "provider_error", message=reason)
-            return
+            st["meta"] = {
+                "batch_first_question": start + 1,
+                "batch_size": len(batch),
+                "total_questions": len(questions),
+                "batch_timeout": batch_timeout,
+            }
+            verdicts = _verify_batch(client, batch, batch_timeout)
+            if verdicts is None:
+                reason = (getattr(client, "last_error", "")
+                          or "provider returned no response")
+                logger.error(
+                    "Verifier refused the call (%s); stopping after %d/%d "
+                    "question(s) - the rest stay unverified.",
+                    reason, start, len(questions),
+                )
+                st["meta"]["refused"] = trace.clip(reason, 300)
+                _report(report, "provider_error", message=reason)
+                return
+            details_map = getattr(verdicts, "details", None) or {}
+            st["columns"] = VERDICT_COLUMNS
+            st["rows"] = [
+                {
+                    "n": pos,
+                    "subject": str(question.get("subject") or ""),
+                    "text": trace.clip(question.get("text"), 140),
+                    "solver": verdicts.get(pos),
+                    "stored": question.get("answer"),
+                    "match": verdicts.get(pos) == question.get("answer"),
+                    "status": str((details_map.get(pos) or {}).get("status") or ""),
+                }
+                for pos, question in enumerate(batch, start=1)
+            ]
         if getattr(client, "last_error", "") and getattr(verdicts, "deferred", set()):
             _report(report, "provider_error", message=client.last_error)
             return
@@ -720,6 +805,33 @@ def _norm_qtext(text: str) -> str:
 
 
 def verify_and_repair_booklet(
+    questions: List[dict],
+    user_id: int,
+    difficulty: str = "konkur",
+    max_regens: int = 2,
+    timeout: float = 60.0,
+    gen_max_tokens: int = 6000,
+    report: Reporter = None,
+) -> List[dict]:
+    """Record the blind-solve evaluation, then run it unchanged."""
+    with trace.record_trace(
+        "evaluation",
+        title=f"ارزیابی {len(questions)} سؤال (بازبین نابینا)",
+        user_id=user_id,
+        meta={
+            "questions": len(questions),
+            "difficulty": difficulty,
+            "max_regens": max_regens,
+            "timeout": timeout,
+        },
+    ):
+        return _verify_and_repair_booklet(
+            questions, user_id, difficulty, max_regens, timeout, gen_max_tokens,
+            report,
+        )
+
+
+def _verify_and_repair_booklet(
     questions: List[dict],
     user_id: int,
     difficulty: str = "konkur",
@@ -812,6 +924,7 @@ def verify_and_repair_booklet(
         out.append(best)
         seen_texts.add(_norm_qtext(best["text"]))
         _report(report, "verified", count=1)
+    trace.note(verified=len(out), discarded=max(0, len(questions) - len(out)))
     return out
 
 
@@ -841,8 +954,28 @@ def _draft_generate(client, prompt: str, max_tokens: int, timeout: float) -> str
     model = (settings.POOL_LLM_MODEL_NAME or settings.LLM_MODEL_NAME).strip()
     identity = quota_identity(provider, model, settings.POOL_LLM_API_KEY or settings.LLM_API_KEY)
     wait_for_draft_slot(identity, max(0, getattr(settings, "POOL_GENERATION_REQUESTS_PER_MINUTE", 0)))
-    with pool_usage.stage('repair' if pool_usage.current_stage() == 'repair' else 'drafting'):
-        return client.generate([{"role":"user", "content":prompt}], max_tokens=budget, timeout=max(300, timeout))
+    usage_stage = 'repair' if pool_usage.current_stage() == 'repair' else 'drafting'
+    with pool_usage.stage(usage_stage):
+        with trace.stage("draft_llm", "فراخوانی مدل برای نوشتن سؤال (Draft)") as st:
+            st["command"] = (
+                f"{type(client).__name__}.generate([user], max_tokens={budget}, "
+                f"timeout={max(300, timeout)})"
+            )
+            st["text"]["prompt"] = prompt
+            st["meta"] = {
+                **trace.client_label(client),
+                "usage_stage": usage_stage,
+                "prompt_characters": len(prompt),
+                "identity": identity[0] if isinstance(identity, tuple) else str(identity),
+            }
+            raw = client.generate([{"role":"user", "content":prompt}], max_tokens=budget, timeout=max(300, timeout))
+            provider_error = str(getattr(client, "last_error", "") or "")
+            if provider_error:
+                st["meta"]["provider_error"] = trace.clip(provider_error, 300)
+            st["meta"].update(trace.client_label(client))
+            st["meta"]["output_characters"] = len(raw or "")
+            st["text"]["raw"] = trace.clip(raw, 4000)
+            return raw
 
 
 def _generate_subject_questions(user_id: int, row: dict, topics: List[str],
@@ -956,7 +1089,13 @@ def _draft_subject_batch(client, row, count, row_topics, difficulty, context,
         parsed = parse_booklet(raw)[:count]
         seen = {_norm_qtext(q['text']) for q in already}
         unique = []
+        from app.rag import exam_style
+        style_rows = exam_style.references([row], row_topics) if (context or '').strip() else []
         for q in parsed:
+            if exam_style.is_source_copy(q['text'], [row], row_topics):
+                continue
+            if style_rows:
+                q['style_prompt_reference_ids'] = [s['id'] for s in style_rows]
             identity = _norm_qtext(q['text'])
             if identity not in seen:
                 seen.add(identity)
@@ -1000,6 +1139,36 @@ def generate_booklet(
     grade: str = "",
     on_drafted=None,
 ) -> List[dict]:
+    """Draft a booklet, recording the whole generation run as a RAG trace."""
+    with trace.record_trace(
+        "mock",
+        title=f"دفترچه {difficulty} · کاربر {user_id}",
+        user_id=user_id,
+        meta={
+            "difficulty": difficulty,
+            "grade": grade,
+            "subjects": [str(s.get("name") or "") for s in plan],
+            "target_questions": sum(int(s.get("questions") or 0) for s in plan),
+            "topics": list(topics or [])[:10],
+        },
+    ):
+        return _generate_booklet(
+            user_id, plan, topics, difficulty, max_tokens, timeout, report,
+            grade, on_drafted,
+        )
+
+
+def _generate_booklet(
+    user_id: int,
+    plan: List[dict],
+    topics: Optional[List[str]] = None,
+    difficulty: str = "konkur",
+    max_tokens: int = 6000,
+    timeout: float = 420.0,
+    report: Reporter = None,
+    grade: str = "",
+    on_drafted=None,
+) -> List[dict]:
     """Full pipeline: per-subject (retrieval -> prompt -> LLM -> parse -> pad).
 
     One LLM call per subject row keeps large official booklets (105-160
@@ -1027,11 +1196,26 @@ def generate_booklet(
     _report(report, "phase", name="generating")
 
     for row in exam_blueprint.coverage_rows(plan):
-        if int(row.get("questions") or 0) <= 0:
+        target = int(row.get("questions") or 0)
+        if target <= 0:
             continue
-        rows = _generate_subject_questions(
-            user_id, row, topics, difficulty, max_tokens, timeout, report=track,
-            grade=grade, **({"on_drafted": on_drafted} if on_drafted else {}))
+        with trace.stage("subject_draft", f"درس: {row.get('name', '')}") as st:
+            st["command"] = (
+                f"_generate_subject_questions(subject={row.get('name')!r}, "
+                f"count={target}, difficulty={difficulty!r})"
+            )
+            st["meta"] = {
+                "subject": row.get("name"),
+                "target_questions": target,
+                "topics": [str(t) for t in (row.get("topics") or topics)][:10],
+                "grade": grade,
+            }
+            rows = _generate_subject_questions(
+                user_id, row, topics, difficulty, max_tokens, timeout, report=track,
+                grade=grade, **({"on_drafted": on_drafted} if on_drafted else {}))
+            st["meta"]["produced"] = len(rows)
+            st["columns"] = QUESTION_COLUMNS
+            st["rows"] = _question_rows(rows)
         if not rows:
             if terminal_error:
                 break

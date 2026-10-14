@@ -5,6 +5,8 @@ import CorruptQuestions from "../components/CorruptQuestions";
 import PoolCredentials from "../components/PoolCredentials";
 import PoolDraftQueue, { type QueueStats, type PoolWorkerState } from "../components/PoolDraftQueue";
 import WeeklyRankedPool from "../components/WeeklyRankedPool";
+import RagInspector from "../components/RagInspector";
+import WipeUserDialog from "../components/WipeUserDialog";
 
 interface AllowEntry { id: number; phone: string; note: string; created_at: string | null }
 interface Usage { features: Record<string, number>; tokens_used_today: number }
@@ -96,6 +98,12 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  // Full-wipe confirmation: a real in-app dialog instead of window.prompt,
+  // which some browsers and embedded webviews refuse to show at all.
+  const [wipeTarget, setWipeTarget] = useState<UserRow | null>(null);
+  const [wipeTyped, setWipeTyped] = useState("");
+  const [wipeError, setWipeError] = useState("");
+  const [wiping, setWiping] = useState(false);
   const [restocking, setRestocking] = useState(false);
   const [cancelRequested, setCancelRequested] = useState(false);
   const [section, setSection] = useState("generation");
@@ -244,26 +252,32 @@ export default function Admin({ nav }: { nav: NavFn }) {
     finally { setBusy(false); }
   }
 
-  async function wipeUser(u: UserRow) {
-    // Type-to-confirm: the admin must retype the user's username (phone).
-    const typed = window.prompt(
-      `حذف کامل داده‌های کاربر #${u.id} (${u.username})\n\n` +
-      "همه گفتگوها، آزمون‌ها، آمار و فایل‌های این کاربر برای همیشه پاک می‌شوند و قابل بازگشت نیستند.\n" +
-      `برای تایید، نام کاربری را تایپ کنید: ${u.username}`
-    );
-    if (typed === null) return; // canceled
-    setBusy(true); setErr(""); setMsg("");
+  function askWipe(u: UserRow) {
+    setMsg(""); setErr(""); setWipeError(""); setWipeTyped("");
+    setWipeTarget(u);
+  }
+
+  async function confirmWipe() {
+    const target = wipeTarget;
+    if (!target) return;
+    // Type-to-confirm: the backend compares this against the account's
+    // username and refuses a mismatch with 400.
+    setWiping(true); setWipeError(""); setMsg("");
     try {
-      const res = await fetch(apiUrl(`/api/admin/users/${u.id}/data`), {
+      const res = await fetch(apiUrl(`/api/admin/users/${target.id}/data`), {
         method: "DELETE",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ confirm: typed.trim() }),
+        body: JSON.stringify({ confirm: wipeTyped.trim() }),
       });
       if (!res.ok) throw new Error(await readApiError(res, "حذف کامل ناموفق بود"));
-      setMsg(`همه داده‌های کاربر ${u.username} پاک شد`);
+      setMsg(`همه داده‌های کاربر ${target.username} پاک شد`);
+      setWipeTarget(null); setWipeTyped("");
       await load();
-    } catch (e) { setErr(e instanceof Error ? e.message : "خطا"); }
-    finally { setBusy(false); }
+    } catch (e) {
+      // Keep the dialog open so the admin can read the reason and retry.
+      setWipeError(e instanceof Error ? e.message : "حذف کامل ناموفق بود");
+    }
+    finally { setWiping(false); }
   }
 
   async function cancelRestock() {
@@ -293,7 +307,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
       </div>
 
       <nav aria-label="بخش‌های مدیریت" className="flex flex-wrap gap-x-5 gap-y-2 border-b border-[var(--border)] pb-2">
-        {[["generation", "تولید آزمون"], ["bank", "بانک سوال"], ["keys", "مدل‌ها و مصرف"], ["users", "کاربران"], ["sms", "ورود و پیامک"]].map(([id, label]) =>
+        {[["generation", "تولید آزمون"], ["bank", "بانک سوال"], ["keys", "مدل‌ها و مصرف"], ["rag", "بررسی RAG"], ["users", "کاربران"], ["sms", "ورود و پیامک"]].map(([id, label]) =>
           <button key={id} type="button" aria-pressed={section === id} aria-controls={`admin-${id}`} onClick={() => setSection(id)}
             className={`py-2 text-sm border-b-2 transition-colors ${section === id ? "border-[var(--accent)] text-[var(--accent)] font-bold" : "border-transparent text-[var(--muted)] hover:text-[var(--text)]"}`}>
             {label}
@@ -400,7 +414,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
                       ریست سهمیه
                     </button>
                     {!u.is_admin && (
-                      <button onClick={() => wipeUser(u)} disabled={busy}
+                      <button onClick={() => askWipe(u)} disabled={busy || wiping}
                         className="text-[11px] px-2.5 py-1 rounded-lg border border-red-400/60 text-red-400 hover:bg-red-400/10 disabled:opacity-40">
                         حذف کامل
                       </button>
@@ -535,6 +549,10 @@ export default function Admin({ nav }: { nav: NavFn }) {
       </section>
       <PoolDraftQueue queue={pool?.draft_queue} drafting={pool?.run?.drafting} verification={pool?.run?.verification} running={pool?.run?.enabled} />
       </div>
+      <div id="admin-rag" hidden={section !== "rag"} className="space-y-6">
+      {/* --------------------------------------- RAG inspector ---- */}
+      <RagInspector />
+      </div>
       <div id="admin-bank" hidden={section !== "bank"} className="space-y-6">
       <section className="study-section p-5">
         <h2 className="font-bold text-sm mb-4">بانک سوال و دفترچه‌های آماده</h2>
@@ -592,6 +610,18 @@ export default function Admin({ nav }: { nav: NavFn }) {
         )}
       </section>
       </div>
+
+      {wipeTarget && (
+        <WipeUserDialog
+          target={wipeTarget}
+          typed={wipeTyped}
+          busy={wiping}
+          error={wipeError}
+          onTypedChange={setWipeTyped}
+          onCancel={() => { if (!wiping) { setWipeTarget(null); setWipeTyped(""); setWipeError(""); } }}
+          onConfirm={confirmWipe}
+        />
+      )}
     </div>
   );
 }

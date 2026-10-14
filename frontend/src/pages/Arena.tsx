@@ -4,6 +4,7 @@ import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
 import ColosseumIcon from "../components/ColosseumIcon"
+import { RankSymbol, StudySymbol } from "../components/StudySymbols"
 import QuestionFigure from "../components/QuestionFigure"
 import type { QuestionFigureData } from "../questionFigures"
 
@@ -422,8 +423,9 @@ function MatchResult({ match, onHome, onBoard }: { match: MatchInfo; onHome: () 
   return (
     <div className="min-h-screen bg-[var(--surface)] flex flex-col">
       <div className="px-4 pt-16 pb-6 text-center">
+        {match.won && <StudySymbol kind="award" size={44} className="mx-auto mb-3 text-[var(--accent)]" />}
         <p className={`font-bold text-3xl mb-2 ${match.won ? "text-green-500" : match.your_score === match.opponent_score ? "text-[var(--muted)]" : "text-red-500"}`}>
-          {match.won ? "🏆 بردی!" : match.your_score === match.opponent_score ? "مساوی" : "باختی"}
+          {match.won ? "بردی!" : match.your_score === match.opponent_score ? "مساوی" : "باختی"}
         </p>
         <p className="text-[13px] text-[var(--muted-2)] mb-1">حریف: {match.opponent}</p>
         {!!match.subjects?.length && (
@@ -484,7 +486,7 @@ function Board({ rows, onBack }: { rows: LeaderRow[]; onBack: () => void }) {
           <div key={r.user_id}
             className={`flex items-center gap-3 rounded-2xl border p-3.5 ${r.is_you ? "border-[var(--accent)] bg-[var(--accent-soft)]" : "border-[var(--border)] bg-[var(--card)]"}`}>
             <span className={`w-8 text-center font-bold tabular-nums ${r.rank === 1 ? "text-yellow-500 text-[18px]" : r.rank <= 3 ? "text-[var(--accent)]" : "text-[var(--muted-2)]"}`}>
-              {r.rank}
+              {r.rank <= 3 ? <RankSymbol rank={r.rank} size={31} className="mx-auto" title={`رتبه ${r.rank.toLocaleString("fa-IR")}`} /> : r.rank.toLocaleString("fa-IR")}
             </span>
             <div className="flex-1 text-right min-w-0">
               <p className="text-[13px] font-bold text-[var(--text)] truncate">

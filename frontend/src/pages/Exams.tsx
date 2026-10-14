@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { NavFn } from "../types";
 import { apiUrl, authHeaders } from "../api";
+import { CheckMark, CrossMark, TrendUpIcon } from "../components/icons";
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
@@ -69,7 +70,7 @@ function ScoreBar({ score }: { score: number }) {
 }
 
 export default function Exams({ nav }: { nav: NavFn }) {
-  const { examResults, loading } = useExamResults();
+  const { examResults } = useExamResults();
   const [selected, setSelected] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadDone, setUploadDone] = useState(false);
@@ -145,7 +146,7 @@ export default function Exams({ nav }: { nav: NavFn }) {
             <p className="text-[12px] text-[#3A6B48] leading-relaxed font-medium flex-1 text-right">
               نمره‌ات در دو آزمون اخیر <strong>{examResults.length > 1 ? (examResults[1].totalScore - examResults[0].totalScore).toFixed(1) : 0}٪</strong> بهتر شده. {examResults.length > 0 && examResults[0].subjects.find(s => s.name === 'فیزیک') ? 'فیزیک' : 'مباحث'} بیشترین فرصت رشد رو داره — این هفته روش تمرکز کن.
             </p>
-            <span className="text-[#6B9E7A] mt-0.5 flex-shrink-0 font-bold">↑</span>
+            <span className="text-[#6B9E7A] mt-0.5 flex-shrink-0 font-bold"><TrendUpIcon size={14} /></span>
           </div>
         </div>
       ) : exam ? (
@@ -170,8 +171,8 @@ export default function Exams({ nav }: { nav: NavFn }) {
                 <div key={s.name}>
                   <div className="flex justify-between mb-1.5">
                     <div className="flex gap-3 text-[11px] font-bold" dir="ltr">
-                      <span className="text-[#6B9E7A]">✓ {s.correct}</span>
-                      <span className="text-[#C44A4A]">✗ {s.wrong}</span>
+                      <span className="text-[#6B9E7A]"><CheckMark size={10} className="inline-block align-[-1px]" /> {s.correct}</span>
+                      <span className="text-[#C44A4A]"><CrossMark size={10} className="inline-block align-[-1px]" /> {s.wrong}</span>
                       <span className="text-[var(--muted-2)]">— {s.blank}</span>
                     </div>
                     <p className="text-[13px] font-semibold text-[var(--text)]">{s.name}</p>

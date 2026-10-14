@@ -13,6 +13,7 @@ import {
 } from "../homeTasks";
 import { SCHEDULE_CHANGED_EVENT, toISO } from "../scheduleStore";
 import WeaknessMap from "../components/WeaknessMap";
+import StudyDeskHero from "../components/StudyDeskHero";
 
 import { currentStreak } from "../studyStats";
 import { apiUrl, authHeaders } from "../api";
@@ -55,35 +56,6 @@ function TaskTypeIcon({ type }: { type: Task["type"] }) {
     practice: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>,
   };
   return icons[type] ?? icons.study;
-}
-
-function CircularProgress({ done, total }: { done: number; total: number }) {
-  const r = 48;
-  const circ = 2 * Math.PI * r;
-  const dash = total ? circ * (done / total) : 0;
-  const pct = total ? Math.round((done / total) * 100) : 0;
-  return (
-    <div className="flex flex-col items-center">
-      <svg width="130" height="130" viewBox="0 0 130 130">
-        <circle cx="65" cy="65" r={r} fill="none" stroke="#F0EBE3" strokeWidth="11"/>
-        <circle cx="65" cy="65" r={r} fill="none" stroke="url(#prog)" strokeWidth="11"
-          strokeDasharray={`${dash} ${circ}`} strokeLinecap="round"
-          transform="rotate(-90 65 65)"
-          style={{ transition: "stroke-dasharray 0.8s ease" }}
-        />
-        <defs>
-          <linearGradient id="prog" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#E8A070"/>
-            <stop offset="100%" stopColor="#C4714A"/>
-          </linearGradient>
-        </defs>
-        <text x="65" y="58" textAnchor="middle" fontSize="26" fontWeight="800" fill="#1A1108" fontFamily="Vazirmatn,sans-serif">{done}</text>
-        <text x="65" y="74" textAnchor="middle" fontSize="11" fill="#7A6858" fontFamily="Vazirmatn,sans-serif">از {total} تکلیف</text>
-        <text x="65" y="89" textAnchor="middle" fontSize="13" fontWeight="700" fill="#C4714A" fontFamily="Vazirmatn,sans-serif">{pct}٪</text>
-      </svg>
-      <p className="text-[11px] font-bold text-[var(--muted-2)] mt-1">پیشرفت امروز</p>
-    </div>
-  );
 }
 
 function TaskSheet({ task, onClose, onPostpone, onSave }: {
@@ -297,7 +269,6 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
   const [todayISO, setTodayISO] = useState(() => toISO(new Date()));
   const [syncError, setSyncError] = useState("");
   const [tasks, setTasks] = useState<HomeTask[]>(() => homeTasksForDate(todayISO));
-  const done = tasks.filter(t => t.done).length;
   const STREAK = currentStreak();
   const [nextExamDate, setNextExamDate] = useState<string | null>(null);
   useEffect(() => {
@@ -313,16 +284,6 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
   const [selectedTask, setSelectedTask] = useState<HomeTask | null>(null);
   const [quizTask, setQuizTask] = useState<HomeTask | null>(null);
   const [postponingId, setPostponingId] = useState<number | null>(null);
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "صبح بخیر" : hour < 17 ? "ظهر بخیر" : "شب بخیر";
-
-  // 3 hero states based on streak + completion
-  const isFirstWeek = STREAK <= 3;
-  const donePct = tasks.length ? done / tasks.length : 0;
-  const heroMode: "ai" | "countdown" | "circular" = isFirstWeek ? "ai" : donePct < 0.5 ? "countdown" : "circular";
-
-  const AI_LEVEL = Math.round(donePct * 100);
-
   // Re-derive whenever the weekly plan or statics change anywhere in the app
   // (Schedule edits, AI chat plan_update) or the day rolls over.
   const refreshTasks = useCallback(() => {
@@ -383,109 +344,10 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F6F2] pb-32">
+    <div className="home-desk min-h-screen bg-[var(--surface)] pb-32">
 
-      {/* ── Hero card ── */}
-      <div className="border-b border-[var(--border)]">
-        <div className="study-hero flex flex-col">
-
-          {/* Top row: [settings + greeting] right | [streak] left */}
-          <div className="flex items-center justify-between">
-            {/* Right side: settings button + greeting (RTL: first = rightmost) */}
-            <div className="flex items-center gap-2.5">
-              <button aria-label="تنظیمات پروفایل" onClick={() => { nav("profile"); }}
-                className="w-9 h-9 rounded-xl bg-[#F0EBE3] flex items-center justify-center text-[var(--muted)] hover:bg-[#E5DDD4] transition-colors flex-shrink-0">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="3"/>
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                </svg>
-              </button>
-              <button aria-label="خروج از حساب" onClick={logout}
-                className="w-9 h-9 rounded-xl bg-red-50 flex items-center justify-center text-red-500 hover:bg-red-100 transition-colors flex-shrink-0">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-                </svg>
-              </button>
-              <div>
-                <p className="text-[10px] text-[var(--muted-2)] font-medium">{greeting}</p>
-                <p className="font-display text-[17px] text-[var(--text)] leading-tight">{userData.name || userData.phone || "دانش‌آموز"}</p>
-              </div>
-            </div>
-
-            {/* Left side: streak (RTL: last = leftmost) */}
-              <button onClick={() => { nav("streak"); }}
-              className="flex items-center gap-1.5 bg-[var(--accent-soft)] border border-[var(--accent-soft-border)] rounded-xl px-3 py-1.5 hover:bg-[var(--chip-hover)] transition-colors">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-[var(--accent)]">
-                <path d="M12 2C9 7 6 8 7 13c.7 3 3 5 5 5s4.3-2 5-5c1-5-2-6-5-11z"/>
-              </svg>
-              <span className="text-[13px] font-bold text-[var(--accent)]">{STREAK}</span>
-              <span className="text-[11px] text-[var(--muted-2)] font-medium">روز</span>
-            </button>
-          </div>
-
-          {/* Hero content */}
-          <div className="mt-5">
-            {heroMode === "ai" && (
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className="text-[11px] font-bold tracking-[0.08em] text-[var(--muted-2)]">پیشرفت امروز</p>
-                    <div className="flex items-end gap-2 mt-1">
-                      <span className="text-3xl font-bold text-[var(--text)]">{AI_LEVEL}٪</span>
-                      <span className="text-[12px] text-[var(--muted)] mb-0.5">از برنامه انجام شده</span>
-                    </div>
-                  </div>
-                  <div className="w-12 h-12 rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)] flex items-center justify-center">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><line x1="9" y1="21" x2="15" y2="21"/><line x1="10" y1="17" x2="10" y2="21"/><line x1="14" y1="17" x2="14" y2="21"/>
-                    </svg>
-                  </div>
-                </div>
-                <div className="relative h-2.5 bg-[#F0EBE3] rounded-full overflow-hidden mb-2">
-                  <div className="absolute inset-y-0 right-0 rounded-full transition-all duration-1000"
-                    style={{ width: `${AI_LEVEL}%`, background: "linear-gradient(to left, #C4714A, #E8A070)" }} />
-                </div>
-                <p className="text-[11px] text-[var(--muted-2)]">انجام تکالیف و نتیجهٔ تست‌ها، برنامهٔ بعدی تو را دقیق‌تر می‌کند.</p>
-                <div className="mt-4 pt-4 border-t border-[var(--border)] flex items-center justify-between">
-                  <div>
-                    <p className="text-[10px] text-[var(--muted-2)]">XP امروز</p>
-                    <p className="text-xl font-bold text-[#6B9E7A]">{done * 10}</p>
-                  </div>
-                  <div className="text-left">
-                    <p className="text-[10px] text-[var(--muted-2)]">روز تا آزمون ثبت‌شده</p>
-                    <p className="text-xl font-bold text-[#C4714A]">{daysLeft}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {heroMode === "countdown" && (
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[10px] font-bold text-[var(--muted-2)] mb-1">روز تا آزمون ثبت‌شده</p>
-                  <p className="text-[72px] font-bold text-[var(--text)] leading-none tabular-nums">{daysLeft}</p>
-                  <p className="text-[11px] text-[var(--muted-2)] mt-1">{[userData.grade, userData.major].filter(Boolean).join(" · ") || "پروفایل ناقص"}</p>
-                </div>
-                <div className="bg-[#FFF5F0] rounded-2xl px-4 py-3 text-left">
-                  <p className="text-[9px] font-bold text-[var(--muted-2)]">تکمیل امروز</p>
-                  <p className="text-[20px] font-bold text-[#C4714A] leading-none">{done}<span className="text-[12px] text-[#C4A080]">/{tasks.length}</span></p>
-                </div>
-              </div>
-            )}
-
-            {heroMode === "circular" && (
-              <div className="flex items-center justify-between">
-                <CircularProgress done={done} total={tasks.length} />
-                <div className="text-left">
-                  <p className="text-[10px] font-bold text-[var(--muted-2)]">روز تا آزمون ثبت‌شده</p>
-                  <p className="text-[42px] font-bold text-[#C4714A] leading-none">{daysLeft}</p>
-                  <p className="text-[11px] text-[var(--muted-2)] mt-1">{userData.grade || "—"}</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+      <StudyDeskHero tasks={tasks} userData={userData} nav={nav} logout={logout}
+        streak={STREAK} daysLeft={daysLeft} date={todayISO} />
 
       {/* ── Weakness map (from wrong_answers across all tests) ── */}
       <div className="border-b border-[var(--border)]">
@@ -493,7 +355,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
       </div>
 
       {/* ── Tasks ── */}
-      <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-4 pb-2">
+      <div className="desk-tasks bg-[var(--card)] border-b border-[var(--border)] px-4 pt-4 pb-2">
         <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
           <button onClick={() => setShowTime(s => !s)}
             className="text-[11px] font-bold text-[var(--muted-2)] bg-[#F0EBE3] px-3 py-1 rounded-full hover:bg-[#E5DDD4] transition-colors">
@@ -532,12 +394,12 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
             const isPostponing = postponingId === task.id;
             return (
               <div key={task.id}
-                className={`task-tile flex items-stretch overflow-hidden border-b border-[var(--border)] last:border-b-0 transition-all duration-[380ms] ${
+                data-subject={task.subject} className={`task-tile flex items-stretch overflow-hidden border-b border-[var(--border)] last:border-b-0 transition-all duration-[380ms] ${
                   task.done ? "opacity-55" : "hover:bg-[var(--surface-2)]"
                 }`}
                 style={isPostponing ? {
                   opacity: 0, transform: "translateX(100%)", maxHeight: 0, marginBottom: 0, overflow: "hidden",
-                } : { maxHeight: "200px" }}
+                } : { maxHeight: "200px", "--task-tone": color } as React.CSSProperties}
               >
                 {/* Checkbox — rightmost in RTL */}
                 <div className="flex items-center pr-3.5">
@@ -594,13 +456,13 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
       </div>
 
       {/* ── Planning and exam shortcuts ── */}
-      <div className="bg-[var(--card)] grid grid-cols-2 [&>*+*]:border-r [&>*+*]:border-[var(--border)]">
+      <div className="desk-shortcuts bg-[var(--card)] grid grid-cols-2 [&>*+*]:border-r [&>*+*]:border-[var(--border)]">
         {[
           { label: "آزمون‌ها", sub: "نتایج و تحلیل", screen: "exams" as const, bg: "#F0EBF5", color: "#9B7AAD",
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
           { label: "برنامه", sub: "اهداف و تقویم", screen: "plan" as const, bg: "#EBF0F5", color: "#5C8BA8",
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
-        ].map(({ label, sub, screen, bg, color, icon }) => (
+        ].map(({ label, sub, screen, icon }) => (
           <button key={label} onClick={() => { nav(screen); }}
             className="p-4 flex flex-col items-center gap-2 hover:bg-[var(--surface-2)] transition-colors">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "var(--surface-2)", color: "var(--text)" }}>

@@ -2,8 +2,8 @@
 
 The website is still named Boom. At the user's request, the detailed Karzar
 shield is now used by the local site header, login, landing page and icons.
-The full site name change remains a future rebrand. The shield was deployed
-on October 6, 2026; see [deployment verification](deployment-2026-10-06.md).
+The full site name change remains a future rebrand. Use the same tracked shield
+asset for the site logo, favicon and touch icon.
 
 - Sole logo asset: `frontend/public/karzar-shield-detailed.png`.
   Other logo variants were removed at the user's request.

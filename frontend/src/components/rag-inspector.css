@@ -1,0 +1,95 @@
+.rag-inspector {
+  --rag-radius: 8px;
+  min-width: 0;
+}
+.rag-inspector .study-section { border-radius: var(--rag-radius); }
+.rag-trace-header, .rag-section-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.rag-section-heading { border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; }
+.rag-section-heading h3 { font-size: 13px; font-weight: 750; }
+.rag-section-heading span, .rag-note { font-size: 11px; line-height: 1.9; color: var(--muted); }
+.rag-note { margin-block: 8px; }
+.rag-warning { font-size: 12px; line-height: 1.9; color: var(--desk-gold, #efbb69); border-inline-start: 2px solid currentColor; padding: 6px 12px; background: color-mix(in srgb, var(--desk-gold, #efbb69) 7%, transparent); }
+.rag-error { color: var(--desk-pink, #eb849f); }
+.rag-visual-workbench { display: grid; grid-template-columns:minmax(0,1fr); gap: 26px; min-width:0; }
+.rag-visual-workbench > * { min-width:0; }
+.rag-embedding-pane { border: 1px solid var(--border); border-radius: var(--rag-radius); background: linear-gradient(135deg, color-mix(in srgb, var(--desk-blue, #73a9ff) 5%, var(--surface)), var(--surface)); padding: 18px; }
+.rag-embedding-pane svg { display: block; width: 100%; max-height: 400px; }
+.rag-map-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--rag-radius); background: var(--surface); padding: 10px; }
+.rag-flow-map { display: block; width: 100%; min-width: 700px; }
+.rag-map-node { cursor: pointer; outline: none; }
+.rag-map-node:hover > rect:first-of-type, .rag-map-node:focus-visible > rect:first-of-type { stroke: var(--accent); stroke-width: 2.5; }
+.rag-map-node[aria-pressed="true"] > rect:first-of-type { stroke: var(--accent); }
+.rag-rank-chart { display: block; width: 100%; min-width: 680px; }
+.rag-rank-chart [role="button"] { outline: none; }
+.rag-rank-chart [role="button"]:focus-visible circle { stroke: var(--accent); stroke-width: 3px; }
+.rag-stage-selection { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; border-inline-start: 3px solid var(--accent); padding: 10px 14px; background: color-mix(in srgb, var(--accent) 5%, var(--surface)); font-size: 12px; }
+.rag-stage-card { border-radius: var(--rag-radius); }
+.rag-stage-card[aria-current="true"] { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); }
+.rag-inspector table { border-collapse: collapse; }
+.rag-inspector table tbody tr:nth-child(even) { background: color-mix(in srgb, var(--text) 2%, transparent); }
+.rag-inspector pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.rag-inspector button:focus-visible, .rag-inspector summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.rag-trace-list { max-height: 320px; overflow: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 8px; }
+.rag-detail-loading { padding: 16px; color: var(--muted); font-size: 12px; border-inline-start: 2px solid var(--desk-blue, #73a9ff); }
+.rag-inspector h2, .rag-inspector h3 { font-family: var(--font-body); }
+.rag-inspector h2 { font-size: 16px; }
+.rag-inspector .rag-section-heading h3 { font-size: 16px; margin-top: 4px; }
+.rag-kicker { font: 9px ui-monospace,monospace !important; letter-spacing: 1.7px; color: var(--desk-blue,var(--accent)) !important; direction: ltr; display: inline-block; }
+.rag-source-explorer { border-block:1px solid var(--border-strong); padding-block:20px; }
+.rag-source-tools { display:flex; align-items:center; flex-wrap:wrap; gap:18px; padding-bottom:16px; color:var(--muted); font-size:11px; }
+.rag-source-tools label { display:flex; align-items:center; flex-wrap:wrap; max-width:100%; gap:9px; }
+.rag-source-tools input:not([type='checkbox']) { border:1px solid var(--border-strong); padding:7px 10px; background:var(--field); width:180px; }
+.rag-source-tools button { color:var(--accent); }
+.rag-source-layout { display:grid; grid-template-columns:minmax(0,1fr) 240px; border:1px solid var(--border); border-radius:5px; }
+.rag-source-canvas { min-width:0; overflow:auto; padding:15px; background-image:radial-gradient(var(--border) .7px,transparent .7px); background-size:18px 18px; }
+.rag-source-canvas svg { width:100%; min-width:600px; display:block; }
+.rag-source-map { min-width:720px; }
+.rag-source-map [role='button'] { cursor:pointer; outline:none; }
+.rag-source-map [role='button']:hover > rect:first-of-type,.rag-source-map [role='button']:focus-visible > rect:first-of-type { stroke:var(--accent); stroke-width:2; }
+.rag-source-map [role='button']:hover > circle:first-of-type,.rag-source-map [role='button']:focus-visible > circle:first-of-type { stroke:var(--accent); stroke-width:3; }
+.rag-mind-card > rect:first-of-type { transition:stroke .15s ease; }
+.rag-source-focus { font-size:11px; color:var(--accent); border-inline-start:2px solid currentColor; padding:4px 10px; background:color-mix(in srgb,var(--accent) 6%,transparent); }
+.rag-source-detail { border-inline-start:1px solid var(--border); padding:20px 16px; min-width:0; max-height:510px; overflow:auto; background:var(--surface-2); }
+.rag-source-detail h4 { font-size:13px; line-height:1.9; overflow-wrap:anywhere; color:var(--text); margin-top:8px; }
+.rag-source-detail details { border-top:1px solid var(--border-strong); padding-block:10px; }
+.rag-source-detail summary { cursor:pointer; font-size:11px; color:var(--text); }
+.rag-source-detail summary span { color:var(--accent); font-size:9px; margin-inline-start:8px; }
+.rag-source-detail details p { font-size:12px; line-height:2; color:var(--muted); white-space:pre-wrap; margin-block:8px; }
+.rag-source-detail details small { color:var(--desk-blue,var(--accent)); font-size:9px; line-height:1.8; display:block; }
+.rag-source-detail details strong { display:block; color:var(--accent); font-size:10px; margin-top:10px; }
+.rag-source-empty { display:flex; align-items:center; flex-direction:column; justify-content:center; text-align:center; min-height:230px; color:var(--muted-2); gap:15px; }
+.rag-source-empty svg { color:var(--accent); opacity:.65; }
+.rag-source-empty p { font-size:11px; line-height:2; }
+/* Top toolbar: the settings button and the trace-list actions sit together at
+   the top of the tab instead of being spread across the sections below. */
+.rag-topbar { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:14px; }
+.rag-topbar-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.rag-settings-toggle { display:inline-flex; align-items:center; gap:7px; font-size:11px; font-weight:700; padding:7px 12px; border-radius:12px; border:1px solid color-mix(in srgb,var(--accent) 55%,var(--border)); background:var(--surface-2); color:var(--accent); }
+.rag-settings-toggle:hover { background:var(--accent-soft); }
+.rag-settings { display:grid; gap:14px; border-top:1px solid var(--border-strong); margin-top:14px; padding-top:14px; }
+.rag-settings-group { border-top:1px solid var(--border); padding-top:12px; }
+.rag-settings label select:focus-visible, .rag-settings-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+/* A hidden panel must leave the layout even where a utility class sets a
+   display mode, and it is then out of the accessibility tree as well. */
+.rag-settings[hidden], .rag-tab-panel[hidden] { display:none !important; }
+
+/* The trace view is a tab list: the pictures first, the raw stage record
+   second. Both panels stay in the document so switching never remounts them. */
+.rag-tabs { display:flex; flex-wrap:wrap; gap:6px; border-bottom:1px solid var(--border-strong); }
+.rag-tab { display:flex; flex-direction:column; align-items:flex-start; gap:2px; text-align:start; padding:8px 14px 9px; border:1px solid transparent; border-bottom:2px solid transparent; border-radius:10px 10px 0 0; color:var(--muted); }
+.rag-tab:hover { color:var(--text); background:var(--surface-2); }
+.rag-tab.is-active { border-color:var(--border); border-bottom-color:var(--accent); background:color-mix(in srgb,var(--accent) 7%,var(--surface)); color:var(--text); }
+.rag-tab-label { font-size:12px; font-weight:750; }
+.rag-tab-hint { font-size:9.5px; color:var(--muted-2); }
+.rag-tab.is-active .rag-tab-hint { color:var(--accent); }
+.rag-tab:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.rag-tab-panel { padding-top:14px; }
+
+/* Key counts of one run, before any diagram is read. */
+.rag-visual-ribbon { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,116px),1fr)); gap:8px; list-style:none; margin:0; padding:0; }
+.rag-visual-ribbon li { border:1px solid var(--border); border-radius:var(--rag-radius); background:var(--surface-2); padding:8px 10px; min-width:0; }
+.rag-visual-ribbon span { display:block; font-size:9.5px; color:var(--muted-2); }
+.rag-visual-ribbon strong { display:block; font-size:12.5px; color:var(--text); overflow-wrap:anywhere; }
+
+@media(max-width:1050px) { .rag-source-layout { grid-template-columns:minmax(0,1fr); } .rag-source-detail { border-inline-start:0; border-top:1px solid var(--border); max-height:300px; } .rag-source-empty { min-height:100px; } }
+@media (prefers-reduced-motion: reduce) { .rag-inspector * { scroll-behavior: auto; transition: none; } }

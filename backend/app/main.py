@@ -12,6 +12,7 @@ from app.routers import mocks
 from app.routers import challenges
 from app.routers import arena
 from app.routers import admin
+from app.routers import rag_trace
 from app.routers.profile import router as profile_router
 from app.routers.tasks import router as tasks_router
 from .auth.database import ensure_schema
@@ -183,6 +184,7 @@ app.include_router(mocks.router)
 app.include_router(challenges.router)
 app.include_router(arena.router)
 app.include_router(admin.router)
+app.include_router(rag_trace.router)
 
 # Health check endpoint
 @app.get("/api/health", tags=["health"])

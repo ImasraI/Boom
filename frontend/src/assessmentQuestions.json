@@ -120,7 +120,7 @@
   {
     "id": "physics",
     "name": "فیزیک",
-    "icon": "⚡",
+    "icon": "F",
     "color": "#4A7AC4",
     "questions": [
       {
@@ -228,7 +228,7 @@
   {
     "id": "chemistry",
     "name": "شیمی",
-    "icon": "⚗",
+    "icon": "Ch",
     "color": "#7AC44A",
     "questions": [
       {
@@ -336,7 +336,7 @@
   {
     "id": "literature",
     "name": "ادبیات فارسی",
-    "icon": "📖",
+    "icon": "Fa",
     "color": "#C44A7A",
     "questions": [
       {

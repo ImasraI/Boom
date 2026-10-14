@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 
 const siteConfigurationPath = path.resolve(import.meta.dirname, '.figma/make/site.json')
 const siteConfiguration = existsSync(siteConfigurationPath)
@@ -33,6 +34,7 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
+      localDevelopmentPreviews(),
       figmaSiteConfiguration(siteConfiguration),
       figmaErrorOverlayReplay(),
       figmaReactRefreshBoundaryFallback(),
@@ -61,6 +63,44 @@ export default defineConfig(({ mode }) => {
     },
   }
 })
+
+/** Local synthetic fixtures stay outside public/ so Vite never ships them. */
+function localDevelopmentPreviews(): Plugin {
+  const directory = path.resolve(import.meta.dirname, 'dev-previews')
+  const routes = new Map([
+    ['/desk_preview.html', 'desk_preview.html'],
+    ['/desk_preview.js', 'desk_preview.js'],
+    ['/rag_debug_preview.html', 'rag_debug_preview.html'],
+    ['/study_symbols_preview.html', 'study_symbols_preview.html'],
+  ])
+  return {
+    name: 'boom-local-development-previews',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const route = req.url?.split('?')[0] ?? ''
+        const filename = routes.get(route)
+        if (!filename || (req.method !== 'GET' && req.method !== 'HEAD')) return next()
+        try {
+          const source = await readFile(path.join(directory, filename), 'utf8')
+          const html = filename.endsWith('.html')
+          const body = html ? await server.transformIndexHtml(route, source) : source
+          res.setHeader('Content-Type', html ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8')
+          res.setHeader('Cache-Control', 'no-store')
+          res.setHeader('X-Robots-Tag', 'noindex, nofollow')
+          res.end(req.method === 'HEAD' ? undefined : body)
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+            res.statusCode = 404
+            res.end('Local preview is not installed.')
+          } else {
+            next(error as Error)
+          }
+        }
+      })
+    },
+  }
+}
 
 type FigmaSiteConfiguration = {
   title?: string

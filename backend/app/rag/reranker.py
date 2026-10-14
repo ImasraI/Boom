@@ -44,7 +44,36 @@ class CrossEncoderReranker:
         return self._model
 
     @property
+    def loaded(self) -> bool:
+        """True only when a model object is already in memory.
+
+        Distinct from :attr:`available`, which loads the model if it has to.
+        Reading configuration must never download or initialise a model, so the
+        inspector reads this instead of probing availability.
+        """
+        return self._model is not None
+
+    @property
+    def failed(self) -> bool:
+        """True once a load attempt failed; it will not be retried."""
+        return self._failed
+
+    def state(self) -> str:
+        """One of ``disabled``/``unloaded``/``loaded``/``failed`` - never loads.
+
+        ``unloaded`` is the honest answer for "would reranking work?": the
+        model is only brought up on the first search that needs it, so a
+        configuration read cannot say more without paying for a load.
+        """
+        if not rerank_enabled():
+            return "disabled"
+        if self.loaded:
+            return "loaded"
+        return "failed" if self._failed else "unloaded"
+
+    @property
     def available(self) -> bool:
+        """Probe (and therefore load) the model; callers that gate on a search do."""
         return self._load() is not None
 
     def rerank(

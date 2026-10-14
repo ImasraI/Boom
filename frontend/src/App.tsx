@@ -8,6 +8,9 @@ import { Screen, SignupData, NavFn, normalizeSignupData, emptySignupData } from 
 import { PANELS, panelOf } from "./navConfig";
 import PanelTabs from "./components/PanelTabs";
 import ColosseumIcon from "./components/ColosseumIcon";
+import Experience from "./components/Experience";
+import Workbench from "./components/Workbench";
+import { StudySymbol } from "./components/StudySymbols";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -43,6 +46,9 @@ const NAV_ITEMS: { screen: Screen; label: string; icon: React.ReactNode }[] = [
 /** Icon shortcuts keyed by screen; panel rows get their labels from navConfig. */
 const ICONS: Record<string, React.ReactNode> = {
   ...Object.fromEntries(NAV_ITEMS.map(item => [item.screen, item.icon])),
+  plan: <StudySymbol kind="plan" size={18} />,
+  exams: <StudySymbol kind="document" size={18} />,
+  streak: <StudySymbol kind="streak" size={18} />,
   leaderboard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>,
   admin: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
 };
@@ -82,7 +88,7 @@ function DesktopSidebar({ screen, nav, isAdmin }: { screen: Screen; nav: (s: Scr
       <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
         <SideButton screen="home" label="خانه" icon={ICONS.home} current={screen} nav={nav} />
         {(["ranked", "plan", "profile"] as const).map(key => (
-          <div key={key}>
+          <div key={key} data-nav-group={key}>
             <p className="px-4 pt-4 pb-1 text-[11px] font-bold text-[var(--muted-2)]">{PANELS[key].label}</p>
             {PANELS[key].items
               .filter(item => item.screen !== "admin" || isAdmin)
@@ -116,15 +122,17 @@ class ScreenBoundary extends Component<{ children: React.ReactNode; screen: Scre
   }
 }
 
-function Shell({ children, screen, nav, isAdmin }: { children: React.ReactNode; screen: Screen; nav: (s: Screen) => void; isAdmin: boolean }) {
+function Shell({ children, screen, nav, isAdmin, onSettings }: { children: React.ReactNode; screen: Screen; nav: (s: Screen) => void; isAdmin: boolean; onSettings: () => void }) {
   const hideSidebar = ["landing", "login", "signup"].includes(screen);
   const panelKey = hideSidebar ? null : (panelOf(screen)?.key ?? null);
   return (
-    <div dir="rtl" className="min-h-screen bg-[var(--page-bg)]">
+    <div dir="rtl" className="boom-workspace min-h-screen bg-[var(--page-bg)]">
+      <Experience />
       {!hideSidebar && <DesktopSidebar screen={screen} nav={nav} isAdmin={isAdmin} />}
       {!hideSidebar && <MobileTabBar screen={screen} nav={nav} isAdmin={isAdmin} />}
       <div className={`min-h-screen ${!hideSidebar ? "md:mr-[220px]" : ""}`}>
-        <div className={`w-full max-w-[430px] mx-auto md:max-w-none min-h-screen bg-[var(--surface)] md:shadow-none ${!hideSidebar ? "pb-24 md:pb-0" : ""}`}>
+        <div className={`workspace-content w-full max-w-[430px] mx-auto md:max-w-none min-h-screen bg-[var(--surface)] md:shadow-none ${!hideSidebar ? "pb-24 md:pb-0" : ""}`}>
+          {!hideSidebar && <Workbench screen={screen} onSettings={onSettings} />}
           {!hideSidebar && panelKey && <PanelTabs panelKey={panelKey} screen={screen} nav={nav} isAdmin={isAdmin} />}
           <main key={screen} className={`page-scene page-${screen}`}><ScreenBoundary screen={screen} nav={nav}><Suspense fallback={<div className="page-loading" role="status" aria-label="در حال آماده‌سازی صفحه"><span>در حال آماده‌سازی…</span><i /><i /><i /></div>}>{panelKey ? <div className="panel-body">{children}</div> : children}</Suspense></ScreenBoundary></main>
         </div>
@@ -192,6 +200,7 @@ export default function App() {
   const [dark, setDark] = useState(() => { const stored = localStorage.getItem("boom-theme"); return stored ? stored === "dark" : true; });
   const [userData, setUserData] = useState<SignupData | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [settingsRequest, setSettingsRequest] = useState(0);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -252,6 +261,7 @@ export default function App() {
   }
 
   function nav(s: Screen) {
+    setSettingsRequest(0);
     setScreen(s);
     window.scrollTo(0, 0);
   }
@@ -291,12 +301,6 @@ export default function App() {
     });
   }
 
-  function handleUpdateProfile(data: SignupData) {
-    const profile = normalizeSignupData(data);
-    persistUser(profile);
-    setUserData(profile);
-  }
-
   function handleSaveProfile(data: SignupData) {
     persistUser(data);
     setUserData(data);
@@ -313,7 +317,7 @@ export default function App() {
   const settingsProps = { dark, toggleDark, onSave: handleSaveProfile, logout };
 
   return (
-    <Shell key={accountId() || "anonymous"} screen={screen} nav={nav} isAdmin={isAdmin}>
+    <Shell key={accountId() || "anonymous"} screen={screen} nav={nav} isAdmin={isAdmin} onSettings={() => { setSettingsRequest(value => value + 1); setScreen("profile"); window.scrollTo(0, 0); }}>
       {screen === "landing" && <Landing {...p} />}
       {screen === "login" && <Login {...p} onLogin={handleLogin} />}
       {screen === "signup" && <Signup {...p} onComplete={handleSignupComplete} />}
@@ -328,7 +332,7 @@ export default function App() {
       {screen === "arena" && <Arena {...p} userData={userData} />}
       {screen === "leaderboard" && <Arena {...p} userData={userData} initialPhase="board" />}
       {screen === "admin" && <Admin {...p} />}
-      {screen === "profile" && userData && <Profile {...p} userData={userData} {...settingsProps} />}
+      {screen === "profile" && userData && <Profile {...p} userData={userData} {...settingsProps} settingsRequest={settingsRequest} />}
       {screen === "knowledge" && userData && <KnowledgeGraph {...p} userData={userData} />}
     </Shell>
   );

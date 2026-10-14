@@ -13,7 +13,7 @@ type Overview = {
 const faDate = (iso: string) => new Intl.DateTimeFormat("fa-IR", { dateStyle: "full" }).format(fromISO(iso));
 const card = "study-section py-5";
 
-export default function Plan({ nav, userData }: { nav: NavFn; userData: SignupData | null }) {
+export default function Plan({ nav }: { nav: NavFn; userData: SignupData | null }) {
   const [data, setData] = useState<Overview | null>(null);
   const [error, setError] = useState("");
   const [week, setWeek] = useState(getWeekISO());

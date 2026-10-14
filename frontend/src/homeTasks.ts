@@ -235,7 +235,6 @@ export function reportTaskActual(
  * already has that block tomorrow, only today's list is updated. */
 export function postponeToTomorrow(dateISO: string, task: HomeTask) {
   const tomorrow = addDays(fromISO(dateISO), 1);
-  const tomorrowISO = toISO(tomorrow);
   const block = task.planBlock;
   const sourceWeek = weekOf(fromISO(dateISO));
   const sourceBlocks = loadWeekBlocks(sourceWeek);

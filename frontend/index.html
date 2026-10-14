@@ -10,17 +10,23 @@
     <link rel="canonical" href="https://boomedu.ir/" />
     <link rel="preload" href="/fonts/boom-persian-1.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="preload" href="/fonts/boom-persian-5.woff2" as="font" type="font/woff2" crossorigin />
-    <meta name="theme-color" content="#0E0B08" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#F8F6F2" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1b1214" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#fff7f5" media="(prefers-color-scheme: light)" />
     <!-- figma:head-end -->
   </head>
   <body class="dark">
     <script>
-      const theme = localStorage.getItem("boom-theme");
-      if (theme === "light") {
-        document.body.classList.remove("dark");
-      } else {
-        document.body.classList.add("dark");
+      // Set the actual theme root before React paints; Sunset is the default.
+      try {
+        const dark = localStorage.getItem("boom-theme") !== "light";
+        document.documentElement.classList.toggle("dark", dark);
+        document.body.classList.toggle("dark", dark);
+        const prefs = JSON.parse(localStorage.getItem("boom-experience") || "{}");
+        document.documentElement.dataset.palette = ["coral", "mint", "iris"].includes(prefs?.palette) ? prefs.palette : "coral";
+        document.documentElement.dataset.calm = String(prefs?.calm === true);
+      } catch {
+        document.documentElement.classList.add("dark");
+        document.documentElement.dataset.palette = "coral";
       }
     </script>
     <!-- figma:body-start -->

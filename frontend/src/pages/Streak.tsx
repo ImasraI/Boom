@@ -1,5 +1,7 @@
 import { NavFn } from "../types";
 import { studyRecords, currentStreak } from "../studyStats";
+import { CheckMark } from "../components/icons";
+import { StudySymbol } from "../components/StudySymbols";
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
@@ -27,10 +29,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
       {/* Streak hero */}
       <div className="study-section mx-5 mt-2 p-6 flex items-center gap-5">
         <div className="w-20 h-20 rounded-2xl bg-[#FFF5F0] flex items-center justify-center">
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="#C4714A">
-            <path d="M12 2C9 7 6 8 7 13c.7 3 3 5 5 5s4.3-2 5-5c1-5-2-6-5-11z"/>
-            <path d="M12 14c-1 0-2-1-2-2.5C10 10 11 9 12 9s2 1 2 1.5C14 13 13 14 12 14z" fill="white"/>
-          </svg>
+          <StudySymbol kind="streak" size={36} className="text-[var(--accent)]" />
         </div>
         <div>
           <p className="text-[11px] font-bold text-[var(--muted-2)]">استریک فعلی</p>
@@ -99,7 +98,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-[12px] font-bold ${
                   pct === 100 ? "bg-[#EAF5EC] text-[#6B9E7A]" : pct >= 50 ? "bg-[#FFF5F0] text-[#C4714A]" : "bg-[#F5F5F5] text-[var(--muted-2)]"
                 }`}>
-                  {pct === 100 ? "✓" : `${pct}%`}
+                  {pct === 100 ? <CheckMark size={12} /> : `${pct}%`}
                 </div>
               </div>
             );

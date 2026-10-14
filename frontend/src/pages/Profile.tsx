@@ -40,15 +40,17 @@ function Chips({ options, value, onChange }: { options: string[]; value: string;
 
 const SECTIONS = ["اطلاعات عمومی", "سبک زندگی", "ارزیابی دروس", "هوش مصنوعی", "تنظیمات"];
 
-export default function Profile({ nav, userData, dark, toggleDark, onSave, logout }: { 
+export default function Profile({ nav, userData, dark, toggleDark, onSave, logout, settingsRequest = 0 }: {
   nav: NavFn; 
   userData: SignupData | null; 
   dark: boolean; 
   toggleDark: () => void;
   onSave: (data: SignupData) => void;
   logout: () => void;
+  settingsRequest?: number;
 }) {
-  const [activeSection, setActiveSection] = useState(0);
+  const [activeSection, setActiveSection] = useState(settingsRequest ? 4 : 0);
+  useEffect(() => { if (settingsRequest) setActiveSection(4); }, [settingsRequest]);
   const subjects = SUBJECTS_BY_MAJOR[userData?.major ?? "ریاضی فیزیک"] ?? [];
 
   // General
@@ -376,7 +378,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
         <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5 text-right">حال‌وهوای رنگی برنامه</p>
         <div className="flex gap-2 mt-3">
           {(["coral", "mint", "iris"] as const).map(id => {
-            const color = id === "coral" ? "#c4714a" : id === "mint" ? "#278575" : "#8060c6";
+            const color = id === "coral" ? "#ba5360" : id === "mint" ? "#278575" : "#8060c6";
             const label = id === "coral" ? "غروب" : id === "mint" ? "جنگل" : "یاس";
             return (
               <button key={id} onClick={() => setPalette(id)} aria-pressed={prefs.palette === id}
@@ -456,7 +458,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
           }`}
           style={{ display: (isChanged || saved) ? 'block' : 'none' }}
         >
-          {saved ? "✓ ذخیره شد — هوش مصنوعی برنامهات رو آپدیت میکنه" : "ذخیره تغییرات"}
+          {saved ? "ذخیره شد — هوش مصنوعی برنامهات رو آپدیت میکنه" : "ذخیره تغییرات"}
         </button>
 
         )}

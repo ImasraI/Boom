@@ -4,14 +4,10 @@ import { NavFn } from "../types"
 import { SUBJECT_TESTS, SubjectTest, Question } from "../questions"
 import { apiUrl, authHeaders, readApiError } from "../api"
 import ReportQuestion from "../components/ReportQuestion"
+import { CheckMark, CrossMark } from "../components/icons"
+import { SubjectSymbol } from "../components/StudySymbols"
 
 type Phase = "select" | "test" | "result"
-
-interface AnswerRecord {
-  questionIndex: number
-  selected: number | null
-  correct: boolean
-}
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60)
@@ -30,7 +26,7 @@ function SubjectCard({ test, onClick }: { test: SubjectTest; onClick: () => void
           className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold flex-shrink-0"
           style={{ backgroundColor: test.color + "20", color: test.color }}
         >
-          {test.icon}
+          <SubjectSymbol subject={test.name} size={29} />
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-bold text-[var(--text)] text-[15px]">{test.name}</p>
@@ -46,7 +42,6 @@ function SubjectCard({ test, onClick }: { test: SubjectTest; onClick: () => void
 
 function TimerBar({ elapsed, total }: { elapsed: number; total: number }) {
   const pct = total > 0 ? (elapsed / total) * 100 : 0
-  const mins = Math.floor(elapsed / 60)
   return (
     <div className="flex items-center gap-2">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -237,9 +232,6 @@ function TestView({
   }, [current, answers])
 
   const answeredCount = answers.filter((a) => a !== null).length
-  const correctCount = answers.filter(
-    (a, i) => a !== null && a === test.questions[i].answer
-  ).length
 
   return (
     <div className="h-full flex flex-col bg-[var(--surface)]">
@@ -448,7 +440,7 @@ function ResultView({
                     ? "bg-red-500 text-white"
                     : "bg-[var(--chip)] text-[var(--muted)]"
                 }`}>
-                  {isCorrect ? "✓" : isWrong ? "✗" : "—"}
+                  {isCorrect ? <CheckMark size={12} /> : isWrong ? <CrossMark size={12} /> : "—"}
                 </span>
                 <p className="text-[13px] font-medium text-[var(--text)] leading-relaxed text-right flex-1">
                   {q.question}
@@ -592,7 +584,9 @@ export default function Evaluation({ nav }: { nav: NavFn }) {
             onClick={() => nav("home")}
             className="w-9 h-9 rounded-xl bg-[var(--border)] flex items-center justify-center text-[var(--muted)]"
           >
-            →
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: "scaleX(-1)" }}>
+              <path d="M19 12H5M12 5l-7 7 7 7" />
+            </svg>
           </button>
           <h1 className="flex-1 text-right font-bold text-lg">ارزیابی</h1>
         </div>

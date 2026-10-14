@@ -44,6 +44,7 @@ backend/data/
 backend/server_*.log
 
 # Tooling caches / AI-agent scratch
+.vibe-wise/
 .pytest_cache/
 .ruff_cache/
 .kilo/
@@ -53,6 +54,8 @@ debug_output.txt
 # One-off local preview/design harnesses (single-file scratch HTML pages
 # opened in a browser during development - never part of the app build).
 *_preview.html
+# Private synthetic fixtures are served only by Vite dev, never copied to dist.
+/frontend/dev-previews/
 # Figma Make design harness - optional, vite.config.ts reads it only if it
 # exists. Never part of the app build.
 frontend/.figma/
@@ -116,6 +119,7 @@ backend/models/
 backend/model_cache/
 embedding-output/
 corpus-exports/
+mocks/
 backups/
 poolstate.txt
 /AGENTS.md
@@ -123,3 +127,6 @@ poolstate.txt
 # Unrelated local monitoring project; do not ship with Boom.
 /pico-monitoring/
 /.github/workflows/pico-monitoring.yml
+
+# Local browser authentication scratch output
+/backend/frontend-embed.json

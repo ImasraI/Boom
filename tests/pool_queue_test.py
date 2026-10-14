@@ -347,3 +347,119 @@ def test_run_resumes_after_saved_quota_wait_without_restarting_selection(setup, 
     queue.run()
     assert len(calls) == 4 and queue.snapshot()['pending_questions'] == 1
     assert pool_service.snapshot()['config'] == config()
+
+
+def test_verify_step_records_its_real_batch_as_an_evaluation_trace(setup):
+    """The queue path must be inspectable: blind solve, audit and decisions.
+
+    ``verify_step`` used to call ``_verify_batch`` directly, so a verification
+    run from the queue left no trace at all - the panel's evaluation filter
+    stayed empty for exactly the runs that decide what reaches students. This
+    drives the real queue path (no re-implementation) and reads back one run
+    per batch, with no duplicate nested traces.
+    """
+    from app.rag import trace as trace_mod
+
+    settings, tag = setup
+    trace_mod.store.clear()
+    job_id = draft(tag, 2)
+    solver = Solver(answer=0)
+    for _ in range(2):
+        assert queue.claim_job() == job_id
+        assert queue.verify_step(job_id, solver) is True
+
+    listing = trace_mod.store.list(kind='evaluation', limit=10)
+    assert len(listing) == 2                                  # one run per batch
+    assert trace_mod.store.counts() == {'evaluation': 2}
+    detail = trace_mod.store.get(listing[0]['id'])            # newest batch first
+    assert detail['status'] == 'ok'
+    assert detail['title'].startswith('ارزیابی صف')
+    names = [stage['name'] for stage in detail['stages']]
+    assert names == ['verify_llm', 'quality_audit', 'queue_decisions', 'queue_commit']
+    assert 'verify_batch' not in names
+    assert detail['summary']['queue_job'] == job_id
+
+    solve = detail['stages'][0]
+    assert 'بدون کلید' in solve['meta']['sees']
+    assert 'explanation-hidden-from-solver' not in solve['text']['prompt']
+    assert json.loads(solve['text']['raw'])['answers']['1'] == 0
+
+    audit = detail['stages'][1]
+    assert audit['meta']['stored_answer'] == 0
+    assert 'QUALITY_AUDIT_V1' in audit['text']['prompt']
+
+    decisions = next(s for s in detail['stages'] if s['name'] == 'queue_decisions')
+    assert decisions['meta']['verified'] == 2                 # job counter, both batches
+    assert decisions['meta']['rejected'] == 0
+    assert [row['status'] for row in decisions['rows']] == ['verified']
+    assert [row['solver'] for row in decisions['rows']] == [0]
+    assert [row['stored'] for row in decisions['rows']] == [0]
+    assert all(row['audit'] is True for row in decisions['rows'])
+    assert {c['key'] for c in decisions['columns']} == {
+        'n', 'subject', 'text', 'solver', 'stored', 'audit', 'status', 'reason'}
+    assert detail['stages'][-1]['meta']['accepted_this_batch'] == 1
+    assert detail['summary']['verified'] == 1
+    with SessionLocal() as db:
+        assert db.get(PoolDraftJob, job_id).verified_count == 2
+        assert db.get(PoolDraftJob, job_id).status == 'completed'
+
+
+def test_idle_lease_is_handed_back_without_a_call_or_a_trace(setup):
+    """Nothing due yet: no provider call, no recorded run, lease handed back."""
+    from app.rag import trace as trace_mod
+
+    settings, tag = setup
+    trace_mod.store.clear()
+    job_id = draft(tag, 1)
+    assert queue.claim_job() == job_id
+    with SessionLocal() as db:
+        job = db.get(PoolDraftJob, job_id)
+        rows = json.loads(job.questions)
+        for row in rows:                     # no question is due for review yet
+            row['_review_after'] = '2999-01-01T00:00:00'
+        job.questions = json.dumps(rows, ensure_ascii=False)
+        job.retry_at = None
+        db.commit()
+
+    solver = Solver(answer=0)
+    assert queue.verify_step(job_id, solver) is False
+    assert solver.prompts == []              # no call spent on an empty batch
+    assert trace_mod.store.counts() == {}    # and no run recorded for it
+    with SessionLocal() as db:
+        job = db.get(PoolDraftJob, job_id)
+        assert job.status == 'pending' and job.retry_at is not None
+        assert not job.lease_owner and job.lease_until is None
+        assert json.loads(job.questions)[0]['_queue_status'] == 'pending'
+
+
+def test_refused_queue_batch_keeps_its_drafts_and_records_the_refusal(setup):
+    """A provider refusal is a first-class outcome the panel can explain."""
+    from app.rag import trace as trace_mod
+
+    settings, tag = setup
+    trace_mod.store.clear()
+    job_id = draft(tag, 3)
+    assert queue.claim_job() == job_id
+    assert queue.verify_step(job_id, Solver(refused=True)) is False
+
+    listing = trace_mod.store.list(kind='evaluation', limit=10)
+    assert len(listing) == 1
+    detail = trace_mod.store.get(listing[0]['id'])
+    names = [stage['name'] for stage in detail['stages']]
+    assert names == ['verify_llm', 'queue_refusal']
+
+    refusal = detail['stages'][-1]
+    assert refusal['meta']['kept_pending'] == 1
+    assert refusal['meta']['discarded'] == 0
+    assert refusal['meta']['reason'].strip()
+    assert [row['answer'] for row in refusal['rows']] == [0]
+    assert detail['summary']['kept_pending'] == 1
+    assert detail['summary']['job_status'] == 'pending'
+    # The candidates survive: a dead provider never discards drafted questions.
+    with SessionLocal() as db:
+        job = db.get(PoolDraftJob, job_id)
+        rows = json.loads(job.questions)
+        assert job.status == 'pending'
+        assert [q['_queue_status'] for q in rows] == ['pending'] * 3
+        assert rows[0]['validation']['status'] == 'pending'
+        assert not db.scalar(select(BankQuestion.id).where(BankQuestion.content.contains(tag)))

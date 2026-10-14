@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { apiUrl, authHeaders, readApiError } from "../api";
+import { FlagIcon } from "./icons";
 
 export default function ReportQuestion({ mockId, questionId, onReported }: {
   mockId: number; questionId: number; onReported?: () => void;
@@ -25,7 +26,7 @@ export default function ReportQuestion({ mockId, questionId, onReported }: {
 
   return <div className="mt-4 border-t border-[var(--border)] pt-3 text-right">
     {reported ? <p role="status" className="text-xs text-[var(--accent)]">گزارش ثبت شد؛ این سوال تا بررسی مدیر از بانک کنار گذاشته شد.</p>
-      : <button type="button" onClick={() => setOpen(!open)} className="text-xs text-[var(--muted)] hover:text-red-500">⚑ گزارش اشکال در سوال</button>}
+      : <button type="button" onClick={() => setOpen(!open)} className="text-xs text-[var(--muted)] hover:text-red-500"><FlagIcon size={11} strokeWidth={2.2} className="me-1 inline-block align-[-2px]" />گزارش اشکال در سوال</button>}
     {open && <div className="mt-2 space-y-2">
       <label className="block text-xs text-[var(--muted)]">اشکال متن، گزینه‌ها، تصویر یا پاسخ را توضیح بده
         <textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={2000} rows={2}
