@@ -3,7 +3,9 @@
 ## Authorization and ownership
 
 Local work only in `C:/Users/Arsam/Desktop/Boom-merged`. The user will authorize
-pushing later. Do not SSH to the VM, upload/import data there or push this work.
+pushing later. Do not deploy, upload/import corpus data or push this work.
+Exception authorized 14 October: pause the VM mock pool and privately import its
+Groq/Gemini credentials for local scanning; this does not authorize VM OCR.
 Local commits follow the user's explicit authorization. Preserve concurrent
 emoji-cleanup/RAG-inspector changes. No API keys in
 prompts, source, logs, Git or frontend settings. `mocks/`, `backend/data/` and
@@ -50,8 +52,9 @@ with zero new vision candidates. This run does not establish that daily quotas
 are exhausted: HTTP 503 is provider availability, not a daily-quota refusal.
 Read the current `scan-status.json` and `vision-quota.json` before resuming; the
 older quota deadline above is historical. Native extraction remains complete,
-and the three qualified visual pilot references remain intact. No OCR worker is
-currently alive. Groq's recorded hard request-size/capacity blocks remain.
+and the three qualified visual pilot references remain intact. At that earlier
+check no OCR worker was alive. The visible fleet was started later; read the live
+status rather than treating this historical check as current worker state.
 
 ## Implemented modules
 
@@ -106,10 +109,54 @@ default command without `--limit` selects the full inventory; do not launch a
 large unattended vision import before the pilot is visually checked. The scanner
 has not earned a measured production accuracy rate.
 
-Automatic execution review blocked attempts to launch a detached Windows worker
-with `Start-Process`. No detached worker was started. The already-running native
-extraction was left alone. Do not claim a future scan has been scheduled/running
-unless `coordinator-status.json` and actual process liveness confirm it.
+## Visible workers and restart after closing the laptop
+
+The user explicitly requested visible local workers on 14 October. Double-click
+`START-EXAM-WORKERS.cmd` in the repository root, or run it from PowerShell. It
+opens a scanner console and a live monitor console; the browser dashboard is
+`http://127.0.0.1:8770/`. The launcher reuses a live scanner and an existing
+monitor. One coordinator owns three parallel threads and the OS lock, rotating
+ready keys. Saved page/question checkpoints survive interruption. This does not
+start the legacy textbook OCR workers under `ocr-workers/`.
+
+The launcher defaults to the seven-page quality pilot and the laptop proxy
+`http://127.0.0.1:10809`; connect the working VPN first. Set `EXAM_OCR_PROXY` before
+launch to use a different proxy. The selected model defaults to
+`gemini-3.8-flash`, verified in the provider model inventory and a successful
+native high-reasoning image-layout probe. Set `EXAM_OCR_GEMINI_MODEL` to override
+it for scanning only; this does not change chat, embeddings or VM configuration.
+Gemini 3.6 Flash repeatedly returned overload HTTP 503. One 3.1 Pro credential
+probe returned a terminal daily quota refusal and is retained privately; do not
+repeat it before the saved provider retry deadline. A layout result is not a
+whole question transcript or scientific approval.
+
+The dashboard separates actual stored text/layout pages, full-page OCR,
+unique saved question candidates and qualified style references. Worker rows
+show document, page, stage, model, credential label, HTTP status and request
+age. Waiting has a live coordinator but zero active requests. No keys, prompts,
+provider calls or write endpoints are exposed by the monitor.
+
+Closing the scanner console stops that process. Closing only the monitor does
+not stop the scanner. Sleep/hibernate/shutdown pauses or stops local computation.
+After reopening the laptop and reconnecting the VPN, run the same launcher;
+compatible completed work is skipped. An in-flight request may need repeating.
+No Windows power setting or login task was changed. Finish and visually check
+the pilot before launching the full corpus.
+
+Manual commands from `backend/`:
+
+```powershell
+$env:EXAM_OCR_PROXY='http://127.0.0.1:10809'
+$env:EXAM_OCR_GEMINI_MODEL='gemini-3.8-flash'
+.venv/Scripts/python.exe -X utf8 scripts/import_exam_examples.py scan --provider gemini --workers 3 --limit 7 --watch --live
+# Separate terminal:
+.venv/Scripts/python.exe -X utf8 scripts/exam_scan_status.py --serve --port 8770
+```
+
+Earlier detached worker starts were denied by automatic execution review. The
+new visible launcher succeeded under the user's explicit visible-worker request.
+Closing an old inactive console was separately denied, so it was left to the
+user. Confirm live PID/heartbeat, not just a window or saved phase string.
 
 ## Private checkpoint files
 
@@ -255,3 +302,42 @@ Status must report stored counts, worker heartbeat/liveness, next action and
 remaining eligible pages. Completeness is measured against the source inventory,
 not how many jobs happened to finish. Generate a portable manifest for future
 transfer, without raw PDFs or secrets; transfer is not authorized yet.
+
+## Visible local fleet and production pause (14 October 2026)
+
+Run `START-EXAM-WORKERS.cmd` from the project root. It opens a visible scanner
+console and a read-only status console/dashboard at `http://127.0.0.1:8770/`.
+It skips an already live coordinator, resumes compatible saved page/question
+parts, and waits for stored provider retry times without making calls. The
+current run is a seven-page quality pilot with up to eight simultaneous page
+jobs, using both Gemini and Groq. It is not the full 19,233-page visual scan.
+All 19,233 native text/layout pages are retained; complete visual OCR and
+question/reference counts are separate on the dashboard.
+
+A sleeping/off laptop cannot scan. After waking, reconnect the laptop proxy
+(default local port 10809) and run the same launcher. Closing the scanner
+console stops its process; closing only the monitor does not stop the scanner.
+The launcher uses Gemini 3.8 Flash at high thinking after a successful layout
+probe; repeated 503 responses still require cooldown. Groq high reasoning
+remains enabled. A 1,000-output-token trial returned truncated layouts, so the
+launcher retains a 16,384-token budget for full question transcription. Keys
+whose actual vision ceiling is lower stay blocked for that request size. No
+truncated output is promoted, and the quality gate must pass before bulk OCR.
+`EXAM_OCR_GEMINI_MODEL`, `EXAM_OCR_GROQ_OUTPUT_TOKENS`, and `EXAM_OCR_PROXY` can
+be set explicitly before running the launcher. A smaller compatible request
+may bypass only a known output-size refusal, never access or daily quota blocks.
+
+The user explicitly authorized pausing the Oracle VM pool. Its existing admin
+cancel endpoint was called; saved run state is `enabled=false,status=stopped`.
+`POOL_WORKER_INPROCESS=False` was already set; no standalone pool process was
+running. A private environment/run-state backup was saved on the VM under
+`backend/data/operator-backups/pause-pool-20261014-133112/`. Existing accepted
+booklets, pending drafts and account data remain intact. Resume pool production
+only when the user asks, through the admin panel's Start control. No code was
+deployed and no local corpus was transferred to the VM.
+
+The VM's 16 Groq and 13 Gemini credentials were imported privately into ignored
+`ocr-workers/worker-vm/worker.env`. The scanner reads this alongside local envs
+and deduplicates exact keys. These counts do not establish independent provider
+organizations/projects or usable vision capacity. Actual quota/access responses
+determine eligibility. Secrets are never displayed on the monitor or committed.

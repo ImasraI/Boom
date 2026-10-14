@@ -63,7 +63,7 @@ export { SoundIcon };
 export default function Experience() {
   // The floating bar UI was removed — theme/sound/palette controls live in
   // the Profile settings tab now. This component stays mounted only for the
-  // invisible effects: palette/calm data-attributes, tap sounds, click rings
+  // invisible effects: palette/calm data-attributes, tap sounds
   // and success toasts.
   const [prefs, setPrefs] = useState(readPreferences);
   useEffect(() => {
@@ -72,8 +72,6 @@ export default function Experience() {
     return () => window.removeEventListener(PREFERENCES_CHANGED_EVENT, sync);
   }, []);
   const [toast, setToast] = useState<{ text: string; id: number } | null>(null);
-  const [rings, setRings] = useState<{ x: number; y: number; id: number }[]>([]);
-  const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const sequence = useRef(0);
   useEffect(() => {
@@ -81,16 +79,10 @@ export default function Experience() {
     document.documentElement.dataset.calm = String(prefs.calm);
   }, [prefs]);
   useEffect(() => {
-    const reduced = () => readPreferences().calm || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const click = (event: MouseEvent) => {
       const button = event.target instanceof Element ? event.target.closest("button") : null;
       if (!button || button.disabled || button.getAttribute("aria-disabled") === "true") return;
       if (!button.hasAttribute("data-silent")) playFeedback();
-      if (reduced() || event.detail === 0) return;
-      const id = ++sequence.current;
-      setRings(old => [...old.slice(-3), {x: event.clientX, y: event.clientY, id}]);
-      const timer = setTimeout(() => { setRings(old => old.filter(r => r.id !== id)); timers.current.delete(timer); }, 480);
-      timers.current.add(timer);
     };
     const success = (event: Event) => {
       const text = (event as CustomEvent<string>).detail;
@@ -105,12 +97,10 @@ export default function Experience() {
     return () => {
       document.removeEventListener("click", click, true);
       window.removeEventListener("boom-celebrate", success);
-      timers.current.forEach(clearTimeout); timers.current.clear();
       clearTimeout(toastTimer.current);
     };
   }, []);
   return <>
-    <div className="feedback-layer" aria-hidden="true">{rings.map(r => <span className="click-ring" key={r.id} style={{left:r.x,top:r.y}} />)}</div>
     <div className="feedback-announcement" role="status" aria-live="polite" aria-atomic="true">{toast && <div key={toast.id} className="success-toast"><span className="success-seal"><CheckMark size={20} strokeWidth={3} /></span><div><strong>یک قدم جلوتر!</strong><p>{toast.text}</p></div><button aria-label="بستن پیام" onClick={() => setToast(null)}>×</button><div className="success-sparks" aria-hidden="true">{Array.from({length:8},(_,i) => <i key={i} style={{"--i":i} as CSSProperties} />)}</div></div>}</div>
   </>;
 }

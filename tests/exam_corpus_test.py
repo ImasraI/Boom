@@ -398,3 +398,126 @@ def test_cross_checked_candidates_require_safe_retained_source_image(tmp_path,im
     for provider in ('gemini','groq'):corpus.atomic_json(folder/f'page_00001.{provider}.json',row)
     corpus.atomic_json(folder/'page_00001.review.json',{'approved':False})
     assert scanning.standardize(tmp_path)['qualified_references']==0
+
+
+def test_worker_telemetry_does_not_store_credentials_prompts_or_responses(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    f=VisionFleet([],tmp_path)
+    def record():
+        f.worker_update(document_name='sample.pdf',pdf_page=3,phase='requesting',
+                        key='private-value',prompt='private-prompt',response='private-response')
+    with ThreadPoolExecutor(max_workers=1,thread_name_prefix='exam') as executor:
+        executor.submit(record).result()
+    rows=f.worker_status()
+    assert rows[0]['worker']=='exam_0' and rows[0]['pdf_page']==3
+    assert not any(field in rows[0] for field in ('key','prompt','response'))
+
+
+def test_monitor_counts_unique_retained_candidates_separately_from_full_ocr(tmp_path):
+    from app.rag.exam_progress import stored_counts
+    _,folder=save_review(tmp_path)
+    row=corpus.read_json(folder/'page_00001.visual.json')
+    row.update(coverage='full_page',prompt_digest=scanning.PIPELINE_DIGEST)
+    for provider in ('gemini','groq'):corpus.atomic_json(folder/f'page_00001.{provider}.json',row)
+    corpus.atomic_json(folder/'page_00002.gemini.json',{'ok':True,'data':{'questions':'bad'}})
+    counts=stored_counts(tmp_path)
+    assert counts['full_ocr_pages']==1
+    assert counts['saved_question_candidates']==1
+    row['prompt_digest']='obsolete';corpus.atomic_json(folder/'page_00001.gemini.json',row)
+    corpus.atomic_json(folder/'page_00001.groq.json',row)
+    assert stored_counts(tmp_path)['full_ocr_pages']==0
+    # The separately visually checked source remains a retained candidate.
+    assert stored_counts(tmp_path)['saved_question_candidates']==1
+
+
+def test_monitor_does_not_present_stale_pid_as_active_or_waiting_as_requests(tmp_path,monkeypatch):
+    from app.rag import exam_progress as monitor
+    monkeypatch.setattr(monitor,'worker_alive',lambda _:True)
+    monkeypatch.setattr('app.rag.exam_vision.credentials',lambda _:[])
+    corpus.atomic_json(tmp_path/'scan-status.json',{'pid':1,'phase':'scanning','heartbeat':1,
+        'active_candidates':3,'workers':[{'worker':'exam_0','phase':'requesting'}]})
+    counts={'native_pages':0,'full_ocr_pages':0,'saved_question_candidates':0}
+    s=monitor.snapshot(tmp_path,counts=counts,now=1000)
+    assert not s['worker_alive'] and s['active_candidates']==0 and s['workers'][0]['phase']=='stopped'
+    corpus.atomic_json(tmp_path/'coordinator-status.json',{'pid':1,'heartbeat':990,
+        'phase':'waiting_for_saved_provider_retry','retry_not_before':1200})
+    s=monitor.snapshot(tmp_path,counts=counts,now=1000)
+    assert s['worker_alive'] and s['active_candidates']==0 and s['retry_not_before']==1200
+
+
+def test_scan_publishes_actual_worker_requests_and_checkpoint_counts(tmp_path,monkeypatch):
+    import time
+    document={'document_id':'a'*64,'name':'sample.pdf','path':'mocks/sample.pdf','pages':2}
+    corpus.atomic_json(tmp_path/'inventory.json',{'documents':[document],'archives':[]})
+    monkeypatch.setattr(scanning,'pilot_tasks',lambda _:[(document,1)])
+    spec=Credential('gemini','test-only-key','test-model','https://example.invalid')
+    monkeypatch.setattr(scanning,'credentials',lambda _:[spec])
+    def save(root,doc,p,fleet,provider):
+        fleet.worker_update(phase='requesting',document_name=doc['name'],pdf_page=p)
+        with fleet.lock:fleet.request_count+=1
+        time.sleep(.05)
+        return {'ok':True,'data':page()}
+    monkeypatch.setattr(scanning,'_scan_one',save)
+    monkeypatch.setattr(scanning,'standardize',lambda *_:{'qualified_references':0})
+    snapshots=[]
+    result=scanning.scan(tmp_path,workers=2,limit=2,provider='gemini',progress=snapshots.append)
+    assert result['scanned_this_run']==2 and result['requests_this_run']==2
+    assert result['active_candidates']==0 and result['pending_candidates']==0
+    assert result['workers'][0]['worker'].startswith('exam_')
+    assert snapshots and corpus.read_json(tmp_path/'scan-status.json')['phase']=='selected_scan_finished'
+
+
+def test_smaller_groq_request_fits_observed_ceiling_without_clearing_daily_quota(tmp_path):
+    import time
+    spec=Credential('groq','test-only-key','qwen/test','https://example.invalid')
+    f=VisionFleet([spec],tmp_path,groq_output_tokens=1000)
+    f.state[spec.identity]={'request_capacity_blocked':True,'output_token_limit':1000}
+    assert f.ready_count('groq')==1 and f.next_ready('groq') is not None
+    f.state[spec.identity]['retry_at']=time.time()+86400
+    assert f.ready_count('groq')==0
+    f.state[spec.identity].pop('retry_at')
+    f.state[spec.identity]['access_denied']=True
+    assert f.ready_count('groq')==0 and f.next_ready('groq') is None
+    f=VisionFleet([spec],tmp_path,groq_output_tokens=16384)
+    f.state[spec.identity]={'request_capacity_blocked':True,'output_token_limit':1000}
+    assert f.ready_count('groq')==0
+
+
+def test_small_groq_budget_keeps_high_reasoning_and_rejects_truncation(tmp_path):
+    image=tmp_path/'image.png';image.write_bytes(b'fake png')
+    def handler(request):
+        body=json.loads(request.content)
+        assert body['max_completion_tokens']==1000 and body['reasoning_effort']=='high'
+        return httpx.Response(200,json={'choices':[{'finish_reason':'length','message':{'content':'{}'}}]})
+    spec=Credential('groq','test-only-key','qwen/test','https://example.invalid')
+    f=VisionFleet([spec],tmp_path,groq_output_tokens=1000,
+        client_factory=lambda _:httpx.Client(transport=httpx.MockTransport(handler)))
+    assert f.request('literal transcription',image,'groq')['error']=='incomplete_transcription'
+
+
+def test_imported_vm_worker_credentials_are_deduplicated_and_never_in_repr(tmp_path,monkeypatch):
+    from app.rag.exam_vision import credentials
+    monkeypatch.setenv('EXAM_OCR_GEMINI_MODEL','test-image-model')
+    (tmp_path/'backend').mkdir()
+    gem='AIza-test-only';groq='gsk_test-only'
+    (tmp_path/'backend/.env').write_text('GEMINI_API_KEY='+gem+'\n')
+    worker=tmp_path/'ocr-workers/worker-vm';worker.mkdir(parents=True)
+    (worker/'worker.env').write_text('GEMINI_API_KEYS='+gem+','+gem+'\nGROQ_API_KEYS='+groq+'\n')
+    specs=credentials(tmp_path)
+    assert len(specs)==2 and specs[0].model=='test-image-model'
+    assert gem not in repr(specs) and groq not in repr(specs)
+
+
+def test_provider_rotation_is_independent_between_groq_and_gemini(tmp_path):
+    image=tmp_path/'image.png';image.write_bytes(b'fake png')
+    specs=[Credential(provider,f'test-key-{provider}-{i}','test-model',
+        'https://example.invalid/v1beta/openai') for provider in ('gemini','groq') for i in range(3)]
+    selected=[]
+    def client(spec):
+        selected.append(spec.key)
+        body={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':'{}'}]}}]} if spec.provider=='gemini' else {'choices':[{'finish_reason':'stop','message':{'content':'{}'}}]}
+        return httpx.Client(transport=httpx.MockTransport(lambda _:httpx.Response(200,json=body)))
+    f=VisionFleet(specs,tmp_path,minimum_interval=0,client_factory=client)
+    for _ in range(3):
+        f.request('literal layout',image,'gemini');f.request('literal layout',image,'groq')
+    assert selected==[f'test-key-{p}-{i}' for i in range(3) for p in ('gemini','groq')]

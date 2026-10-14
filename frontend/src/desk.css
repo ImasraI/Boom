@@ -7,6 +7,7 @@
   --text:#452e26; --text-strong:#30201c; --muted:#74584b; --muted-2:#806153; --placeholder:#806153;
   --border:#e4d1c5; --border-strong:#ceb3a4; --toggle-off:#d4b7a8; --neutral-chip:#f0e4da;
   --accent:#ad332b; --accent-rgb:173 51 43; --accent-soft:#f9e1d8; --accent-soft-border:#dfa79b; --accent-ink:#8a2722;
+  --action:#a43f36; --action-ink:#fff7f1;
   --success-text:#376c50; --success-bg:#e5efe4; --brown-text:#684c3f;
   --desk-blue:#506d91; --desk-pink:#b34032; --desk-gold:#8c6729; --desk-line:#dfcabb;
   --font-heading:'Boom Nazanin','Estedad','Vazirmatn',serif;
@@ -19,6 +20,7 @@ html.dark {
   --muted:#ceb8a9; --muted-2:#b79c8b; --placeholder:#b79c8b; --border:#432f26; --border-strong:#634638;
   --toggle-off:#594032; --neutral-chip:#372720; --accent:#e76858; --accent-rgb:231 104 88;
   --accent-soft:#42261f; --accent-soft-border:#804336; --accent-ink:#ffa594;
+  --action:#a6473e; --action-ink:#fff7f1;
   --success-text:#9ac5a3; --success-bg:#25372a; --brown-text:#dbc3b2;
   --desk-blue:#a5b8d5; --desk-pink:#df7760; --desk-gold:#e4c17e; --desk-line:#443027;
   --block-shadow:#80634e;
@@ -27,6 +29,7 @@ html[data-palette='mint']:not(.dark) { --surface:#f5f8f2; --surface-2:#e9f0e6; -
 html.dark[data-palette='mint'] { --page-bg:#101815; --surface:#131e19; --surface-2:#1c2a22; --card:#1a271f; --chip:#24372c; --field:#17221b; --border:#2c3e32; --border-strong:#415d4b; }
 html[data-palette='iris']:not(.dark) { --surface:#f8f5fa; --surface-2:#eee8f3; --page-bg:#e9e4ee; }
 html.dark[data-palette='iris'] { --page-bg:#15131b; --surface:#1a1721; --surface-2:#252030; --card:#201c2a; --chip:#30293d; --field:#1c1824; --border:#383045; --border-strong:#544664; }
+html[data-palette='mint'],html[data-palette='iris'] { --action:var(--accent); --action-ink:var(--surface); }
 
 body { font-size:14px; }
 .font-display, h1, h2, h3 { font-weight:700; font-synthesis:none; }
@@ -34,6 +37,7 @@ body { font-size:14px; }
 .page-scene h2 { font-size:26px; line-height:1.5; }
 .page-scene h3 { font-size:22px; line-height:1.5; }
 input, select, textarea { accent-color:var(--accent); color:var(--text); }
+.boom-workspace button[class~='bg-[var(--accent)]'] { background:var(--action); color:var(--action-ink); }
 select option { background:var(--card); color:var(--text); }
 button, a, input, textarea, select { -webkit-tap-highlight-color:transparent; }
 .boom-workspace button:not(.rounded-full):not(.schedule-block), .boom-workspace input:not([type='range']):not([type='checkbox']):not([type='radio']), .boom-workspace textarea, .boom-workspace select { border-radius:6px; }
@@ -95,7 +99,7 @@ button, a, input, textarea, select { -webkit-tap-highlight-color:transparent; }
 .desk-hero h1 em::after { content:''; position:absolute; bottom:5px; inset-inline:0; height:1px; background:var(--accent); opacity:.4; transform:rotate(-2deg); }
 .desk-intro { color:var(--muted); font-size:13px; line-height:2; margin-top:21px; }
 .desk-hero-actions { display:flex; flex-wrap:wrap; align-items:center; gap:23px; margin-top:25px; }
-.desk-primary { display:flex; align-items:center; justify-content:center; gap:12px; background:var(--accent); color:var(--surface); font-size:12px; font-weight:600; min-height:44px; padding:10px 16px; border:1px solid transparent; box-shadow:3px 4px 0 color-mix(in srgb,var(--accent) 25%,var(--page-bg)); transition:transform .25s var(--desk-ease),box-shadow .25s var(--desk-ease) !important; }
+.desk-primary { display:flex; align-items:center; justify-content:center; gap:12px; background:var(--action); color:var(--action-ink); font-size:12px; font-weight:600; min-height:44px; padding:10px 16px; border:1px solid transparent; box-shadow:3px 4px 0 color-mix(in srgb,var(--accent) 25%,var(--page-bg)); transition:transform .25s var(--desk-ease),box-shadow .25s var(--desk-ease) !important; }
 .desk-primary:hover { transform:translate(-1px,-2px); box-shadow:4px 6px 0 color-mix(in srgb,var(--accent) 25%,var(--page-bg)); }
 .desk-primary:active { transform:translate(2px,2px); box-shadow:0 1px 0 var(--border-strong); }
 .desk-text-link { color:var(--muted); font-size:12px; display:flex; align-items:center; gap:12px; }

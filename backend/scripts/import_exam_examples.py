@@ -20,12 +20,22 @@ def main():
     parser.add_argument("--provider", choices=["gemini", "groq", "auto"], default="auto")
     parser.add_argument('--local-only',action='store_true',help='Benchmark local engines without API requests')
     parser.add_argument('--watch',action='store_true',help='Resume a scan after its saved provider retry time')
+    parser.add_argument('--live',action='store_true',help='Print worker stages and counters while scanning')
     parser.add_argument('--extract-first',action='store_true',help='Refresh local text/layout checkpoints before scanning')
     parser.add_argument('--wait-for-lock',action='store_true',help='Queue behind an existing local corpus worker')
     args = parser.parse_args()
     if args.workers<1 or args.workers>8 or args.limit<0:parser.error('Workers must be 1..8 and limit nonnegative')
     if args.watch and args.mode!='scan':parser.error('--watch is supported only for scan')
     from app.rag import exam_corpus
+    def live_progress(state):
+        stamp=time.strftime('%H:%M:%S')
+        print(f"[{stamp}] {state['phase']} | saved this run {state.get('scanned_this_run',0)} | "
+              f"active {state.get('active_candidates',0)} | pending {state.get('pending_candidates',0)} | "
+              f"requests {state.get('requests_this_run',0)}",flush=True)
+        for row in state.get('workers',[]):
+            print(f"  {row['worker']}: {row.get('phase','')} / {row.get('stage','')} | "
+                  f"page {row.get('pdf_page','')} | {row.get('credential_label','')} | "
+                  f"HTTP {row.get('http_status','-')} | {row.get('document_name','')}",flush=True)
     if args.mode == "status": print(json.dumps(exam_corpus.status(args.root), ensure_ascii=False)); return
     with ExitStack() as held:
         while True:
@@ -46,8 +56,12 @@ def main():
             if args.extract_first:
                 exam_corpus.extract_native(BACKEND.parent,args.root)
             options={'workers':args.workers,'limit':args.limit,'provider':args.provider}
+            if args.mode=='scan' and args.live:options['progress']=live_progress
             if args.mode=='benchmark':options['local_only']=args.local_only
             while True:
+                exam_corpus.atomic_json(args.root/'coordinator-status.json',{
+                    'phase':'executing','pid':os.getpid(),'heartbeat':time.time(),
+                    'selected_limit':args.limit,'provider':args.provider})
                 result = getattr(exam_scanning, args.mode)(args.root, **options)
                 retry=result.get('retry_not_before')
                 if not (args.mode=='scan' and args.watch and result.get('phase')=='waiting_for_credentials'
@@ -56,6 +70,9 @@ def main():
                     exam_corpus.atomic_json(args.root/'coordinator-status.json',{
                         'phase':'waiting_for_saved_provider_retry','pid':os.getpid(),'heartbeat':time.time(),
                         'retry_not_before':retry,'selected_limit':args.limit,'provider':args.provider})
+                    if args.live:
+                        print(f"Waiting for saved provider retry: {max(0,int(retry-time.time()))}s. "
+                              "No API request is being sent during this wait.",flush=True)
                     time.sleep(min(30,retry-time.time()))
             exam_corpus.atomic_json(args.root/'coordinator-status.json',{
                 'phase':'stopped','pid':os.getpid(),'heartbeat':time.time(),'last_scan_phase':result.get('phase')})

@@ -56,7 +56,7 @@ def credentials(project: Path) -> list[Credential]:
                 provider = "groq" if key.startswith("gsk_") else "gemini" if key.startswith(("AQ.", "AIza")) else None
                 if not provider or (provider, key) in seen: continue
                 seen.add((provider, key))
-                model = ((values.get("GEMINI_MODEL_NAME") or backend.get("GEMINI_MODEL_NAME") or "gemini-3.6-flash") if provider == "gemini"
+                model = ((os.getenv('EXAM_OCR_GEMINI_MODEL') or values.get("GEMINI_MODEL_NAME") or backend.get("GEMINI_MODEL_NAME") or "gemini-3.6-flash") if provider == "gemini"
                          else (backend.get("GROQ_VISION_MODEL") or "qwen/qwen3.8-27b"))
                 # Removed Scout/legacy text models must not silently process images.
                 if provider == "groq" and "qwen" not in model:
@@ -94,21 +94,53 @@ def retry_seconds(response, daily=False, provider="groq"):
 
 
 class VisionFleet:
-    def __init__(self, specs, root: Path, *, client_factory=None, minimum_interval=20):
+    def __init__(self, specs, root: Path, *, client_factory=None, minimum_interval=20, groq_output_tokens=None):
         self.specs = specs
         self.root = root
         self.state_path = root / "vision-quota.json"
         self.state = quota_json(self.state_path,private=True)
         self.lock = threading.RLock()
-        self.busy = set(); self.next_call = {}; self.cursor = 0
+        self.busy = set(); self.next_call = {}; self.cursors = {}
         self.minimum_interval = minimum_interval
+        self.groq_output_tokens = int(groq_output_tokens if groq_output_tokens is not None
+                                      else os.getenv('EXAM_OCR_GROQ_OUTPUT_TOKENS', '16384'))
+        if not 256 <= self.groq_output_tokens <= 32768:
+            raise ValueError('Groq OCR output limit must be 256..32768')
+        self.jobs = {}
+        self.request_count = 0
         self.client_factory = client_factory or (lambda s: httpx.Client(timeout=300, trust_env=False, proxy=s.proxy or None))
         self.shared_path = root.parents[0] / "provider_quota.json"
+
+    def worker_update(self, **values):
+        """Visible task metadata only: never prompts, keys or response bodies."""
+        allowed = {'document_name', 'document_id', 'pdf_page', 'phase', 'stage',
+                   'started_at', 'request_started_at', 'provider', 'model',
+                   'credential_label', 'http_status', 'error', 'finished_at'}
+        with self.lock:
+            name = threading.current_thread().name
+            row = self.jobs.setdefault(name, {'worker': name})
+            row.update({k: v for k, v in values.items() if k in allowed})
+            row['updated_at'] = time.time()
+
+    def worker_status(self):
+        with self.lock:
+            return [dict(row) for _, row in sorted(self.jobs.items())]
+
+    def _capacity_blocked(self, spec, saved):
+        if not saved.get('request_capacity_blocked'): return False
+        # A changed, smaller request can fit an observed output ceiling. This
+        # never clears a daily quota, access denial or the saved refusal record.
+        limit = saved.get('output_token_limit')
+        if limit is None:
+            match = re.search(r'output tokens per minute.*?Limit\s+(\d+)', saved.get('detail', ''), re.I)
+            if match: limit = int(match[1])
+        return not (spec.provider == 'groq' and isinstance(limit, int)
+                    and self.groq_output_tokens <= limit)
 
     def _blocked(self, spec, now):
         if any(v.get('http_status')==401 and v.get('key_id')==spec.key_id for v in self.state.values() if isinstance(v,dict)):return True
         saved = self.state.get(spec.identity, {})
-        if saved.get("access_denied") or saved.get('request_capacity_blocked') or saved.get("retry_at", 0) > now: return True
+        if saved.get("access_denied") or self._capacity_blocked(spec, saved) or saved.get("retry_at", 0) > now: return True
         shared = quota_json(self.shared_path)
         if isinstance(shared.get(spec.identity), (int,float)) and shared[spec.identity] > now: return True
         return bool(shared.get("__access", {}).get(spec.identity))
@@ -118,13 +150,20 @@ class VisionFleet:
         with self.lock:
             choices = [s for s in self.specs if provider in ("auto",s.provider)]
             selected = None
+            cursor = self.cursors.get(provider, 0)
             for i in range(len(choices)):
-                spec = choices[(self.cursor+i) % len(choices)]
+                spec = choices[(cursor+i) % len(choices)]
                 if spec.identity not in self.busy and self.next_call.get(spec.identity,0) <= now and not self._blocked(spec,now):
-                    selected=spec; self.cursor=(self.cursor+i+1) % len(choices); self.busy.add(spec.identity); break
+                    selected=spec; self.cursors[provider]=(cursor+i+1) % len(choices); self.busy.add(spec.identity); break
         if not selected:
             return {"ok":False,"error":"no_ready_credentials","retryable":True}
         spec = selected
+        siblings = [s for s in self.specs if s.provider == spec.provider]
+        self.worker_update(phase='requesting', provider=spec.provider, model=spec.model,
+                           credential_label=f'{spec.provider} {siblings.index(spec)+1}',
+                           request_started_at=time.time(), http_status=None, error=None)
+        with self.lock:
+            self.request_count += 1
         try:
             image_data = base64.b64encode(image.read_bytes()).decode("ascii")
             payload = {"model":spec.model,"temperature":0,"response_format":{"type":"json_object"},
@@ -144,11 +183,12 @@ class VisionFleet:
                 # High-reasoning vision JSON mode can reject otherwise useful
                 # transcripts. Strict local parsing/schema checks still apply.
                 payload.pop('response_format',None)
-                payload.update(max_completion_tokens=16384, reasoning_effort="high", reasoning_format="hidden")
+                payload.update(max_completion_tokens=self.groq_output_tokens, reasoning_effort="high", reasoning_format="hidden")
                 url = spec.base.rstrip("/")+"/chat/completions"
                 headers = {"Authorization":"Bearer "+spec.key}
             with self.client_factory(spec) as client:
                 response = client.post(url,json=payload,headers=headers)
+            self.worker_update(http_status=response.status_code, phase='reading_response')
             if response.status_code >= 400:
                 try: body = json.dumps(response.json(),ensure_ascii=False)
                 except ValueError: body = ""
@@ -181,6 +221,8 @@ class VisionFleet:
                         # Waiting or another identical request cannot make a
                         # high-reasoning output fit a hard per-request ceiling.
                         failure.update(error='provider_request_too_large',request_capacity_blocked=True)
+                        limit = re.search(r'output tokens per minute.*?Limit\s+(\d+)', body, re.I)
+                        if limit: failure['output_token_limit'] = int(limit[1])
                         failure.pop('retry_at',None)
                 elif response.status_code >= 500 or response.status_code in (400,404):
                     failure.update(retry_at=time.time()+900)
@@ -218,7 +260,7 @@ class VisionFleet:
             return [{"provider":s.provider,"model":s.model,"credential_id":s.identity[:12],
                      "blocked":self._blocked(s,now),"busy":s.identity in self.busy,
                      "retry_at":self.state.get(s.identity,{}).get("retry_at"),
-                     'request_capacity_blocked':bool(self.state.get(s.identity,{}).get('request_capacity_blocked')),
+                     'request_capacity_blocked':self._capacity_blocked(s, self.state.get(s.identity,{})),
                      "access_denied":bool(self.state.get(s.identity,{}).get("access_denied"))} for s in self.specs]
 
     def ready_count(self,provider):
@@ -234,7 +276,7 @@ class VisionFleet:
             for s in self.specs:
                 if s.provider!=provider:continue
                 saved=self.state.get(s.identity,{})
-                if saved.get('access_denied') or saved.get('request_capacity_blocked') or shared.get('__access',{}).get(s.identity):continue
+                if saved.get('access_denied') or self._capacity_blocked(s, saved) or shared.get('__access',{}).get(s.identity):continue
                 if any(v.get('http_status')==401 and v.get('key_id')==s.key_id for v in self.state.values() if isinstance(v,dict)):continue
                 values.append(max(now,self.next_call.get(s.identity,0),saved.get('retry_at',0),
                                   shared.get(s.identity,0) if isinstance(shared.get(s.identity),(float,int)) else 0))

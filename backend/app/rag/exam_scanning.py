@@ -58,6 +58,12 @@ visible heading establishes it. Mark incomplete/uncertain if any item is cut off
 PIPELINE_DIGEST=payload_digest({'layout':LAYOUT_PROMPT,'transcription':PROMPT,'group_size':1})
 
 
+def _worker_update(fleet, **values):
+    update = getattr(fleet, 'worker_update', None)
+    if update:
+        update(**values)
+
+
 def validate_layout(data):
     if not isinstance(data,dict) or data.get('complete') is not True or data.get('uncertainties'):return False
     if data.get('page_kind') not in ('questions','answers','lesson','cover','blank','other'):return False
@@ -79,12 +85,14 @@ def structured_scan(root,folder,image,fleet,provider):
         if isinstance(saved,dict) and saved.get('ok') is True:return saved
         result=fleet.request(prompt,image,provider)
         while result.get('error')=='no_ready_credentials' and hasattr(fleet,'next_ready'):
+            _worker_update(fleet,phase='waiting_for_ready_key',http_status=None,request_started_at=None)
             ready=fleet.next_ready(provider)
             if ready is None or ready-time.time()>60:
                 result['retry_at']=ready;break
             time.sleep(min(5,max(.2,ready-time.time())))
             result=fleet.request(prompt,image,provider)
         atomic_json(file,result);return result
+    _worker_update(fleet, stage='page layout')
     layout=request(LAYOUT_PROMPT)
     if not layout.get('ok'):return layout
     if not validate_layout(layout.get('data')):return {'ok':False,'error':'invalid_layout','provider':provider}
@@ -92,6 +100,7 @@ def structured_scan(root,folder,image,fleet,provider):
     groups=[[n] for n in numbers] or [[]]
     gathered=[];prose=[];answers=[];models=set();usage=[]
     for group in groups:
+        _worker_update(fleet, stage=f'question {group[0]}' if group else 'page text')
         prompt=PROMPT+(f'\nTranscribe ONLY printed question number {group[0]}. '
             'Omit all other questions. Complete refers ONLY to this requested question. '
             'Use the FULL image for bounding boxes. Read the heading for major evidence.' if group else '')
@@ -212,13 +221,25 @@ def _scan_one(root,document,page,fleet,provider):
         and previous.get('document_id')==document['document_id']
         and previous.get('pdf_page')==page and previous.get('prompt_digest')==PIPELINE_DIGEST):
         return previous
-    image=image_for(root,document,page)
-    start=time.time();result=structured_scan(root,path.parent/('page_'+f'{page:05d}'),image,fleet,provider)
+    start=time.time()
+    _worker_update(fleet, document_name=document['name'], document_id=document['document_id'],
+                   pdf_page=page, phase='rendering', stage='page image', started_at=start,
+                   finished_at=None, error=None)
+    try:
+        image=image_for(root,document,page)
+        result=structured_scan(root,path.parent/('page_'+f'{page:05d}'),image,fleet,provider)
+    except Exception as error:
+        _worker_update(fleet, phase='failed', error=type(error).__name__, finished_at=time.time())
+        raise
     result.update(document_id=document['document_id'],document_name=document['name'],pdf_page=page,
                   image=str(image.relative_to(root)),elapsed=round(time.time()-start,2),schema_version=1,
                   prompt_digest=PIPELINE_DIGEST,recorded_at=time.time(),coverage='full_page')
+    if provider=='groq':result['groq_output_tokens']=fleet.groq_output_tokens
     if result.get('ok'): result['issues']=validate_page(result['data'])
     atomic_json(path,result)
+    _worker_update(fleet, phase='saved' if result.get('ok') else 'paused' if result.get('retry_at')
+                   or result.get('error')=='no_ready_credentials' else 'failed',
+                   error=result.get('error'), finished_at=time.time())
     return result
 
 
@@ -274,13 +295,15 @@ def benchmark(root,workers=4,limit=0,provider='auto',local_only=False):
     return result
 
 
-def scan(root,workers=4,limit=0,provider='auto'):
+def scan(root,workers=4,limit=0,provider='auto',progress=None):
     """Checkpoint structured candidates. A provider failure never qualifies data."""
     project=Path(__file__).resolve().parents[3]
     inventory=read_json(root/'inventory.json')
     fleet=VisionFleet(credentials(project),root)
     state={'phase':'scanning','pid':os.getpid(),'heartbeat':time.time(),'scanned_this_run':0,'failed_this_run':0,
            'total_pages':sum(d.get('pages',0) for d in inventory['documents'])}
+    state['gemini_model']=next((s.model for s in fleet.specs if s.provider=='gemini'),None)
+    state['groq_output_tokens']=fleet.groq_output_tokens
     # Start with the pilot and the math-physics archive families. All sources stay
     # inventoried; other majors must never masquerade as reviewed math examples.
     targets=pilot_tasks(root)
@@ -302,21 +325,30 @@ def scan(root,workers=4,limit=0,provider='auto'):
             if not isinstance(saved,dict):saved={}
             current=saved.get('prompt_digest')==PIPELINE_DIGEST
             if current and saved.get('ok'):stored+=1;continue
-            key=(d['document_id'],p,name);attempts[key]=saved.get('attempts',0) if current else 0
+            # A larger output budget is a changed request, not another attempt
+            # at the same truncated transcription. Retain completed parts.
+            old_budget=saved.get('groq_output_tokens')
+            compatible = name!='groq' or (isinstance(old_budget,int) and old_budget>=fleet.groq_output_tokens)
+            key=(d['document_id'],p,name);attempts[key]=saved.get('attempts',0) if current and compatible else 0
             if attempts[key]>=2:quarantined+=1;continue
             pending[name].append((d,p))
     state.update(selected_pages=len(ordered),stored_candidates=stored,quarantined_candidates=quarantined)
     capacity=max(1,min(workers,8));active={}
-    with ThreadPoolExecutor(max_workers=capacity) as executor:
+    state.update(worker_capacity=capacity, provider=provider, started_at=time.time())
+    def publish():
+        state.update(heartbeat=time.time(), credentials=fleet.health(),
+                     workers=fleet.worker_status(), requests_this_run=fleet.request_count,
+                     pending_candidates=sum(map(len,pending.values())), active_candidates=len(active))
+        atomic_json(root/'scan-status.json',state)
+        if progress:progress(dict(state))
+    with ThreadPoolExecutor(max_workers=capacity, thread_name_prefix='exam') as executor:
         while any(pending.values()) or active:
             for name in names:
                 slots=min(capacity-len(active),fleet.ready_count(name),len(pending[name]))
                 for _ in range(slots):
                     d,p=pending[name].popleft();future=executor.submit(_scan_one,root,d,p,fleet,name)
                     active[future]=(d,p,name)
-            state.update(heartbeat=time.time(),pending_candidates=sum(map(len,pending.values())),
-                         active_candidates=len(active),credentials=fleet.health())
-            atomic_json(root/'scan-status.json',state)
+            publish()
             if active:
                 completed,_=wait(active,timeout=5,return_when=FIRST_COMPLETED)
                 for future in completed:
@@ -344,7 +376,7 @@ def scan(root,workers=4,limit=0,provider='auto'):
     state.update(pending_candidates=sum(map(len,pending.values())),active_candidates=0)
     if state['phase']=='scanning':state['phase']='selected_scan_finished'
     state['standardized']=standardize(root)
-    atomic_json(root/'scan-status.json',state)
+    publish()
     return state
 
 
