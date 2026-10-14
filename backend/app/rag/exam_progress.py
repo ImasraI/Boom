@@ -62,11 +62,18 @@ def snapshot(root, *, counts=None, now=None):
     for spec, health in zip(fleet.specs, fleet.health()):
         groups[spec.provider] = groups.get(spec.provider, 0)+1
         refusal = fleet.state.get(spec.identity, {})
+        pending=scan.get('pending_by_provider',{}).get(spec.provider)
+        held=scan.get('quarantined_by_provider',{}).get(spec.provider,0)
+        active=scan.get('active_by_provider',{}).get(spec.provider,0) if scan_alive else 0
+        work_state=('scanner stopped' if not (scan_alive or coordinator_alive) else
+                    'no eligible pilot pages · held for review' if pending==0 and not active and held else
+                    'selected work complete' if pending==0 and not active else 'work pending')
         providers.append({'label': f'{spec.provider} {groups[spec.provider]}', 'model': safe_text(spec.model),
             'busy': bool(scan_alive and old.get(health['credential_id'], {}).get('busy')),
             'blocked': health['blocked'], 'retry_at': health['retry_at'],
             'http_status': refusal.get('http_status'), 'error': safe_text(refusal.get('error')),
-            'capacity_blocked': health['request_capacity_blocked'], 'access_denied': health['access_denied']})
+            'capacity_blocked': health['request_capacity_blocked'], 'access_denied': health['access_denied'],
+            'work_state':work_state,'pending_pages':pending,'held_pages':held})
     rows = []
     for row in scan.get('workers', []):
         if not isinstance(row, dict): continue

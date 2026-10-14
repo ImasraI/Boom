@@ -11,6 +11,36 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 
+def credential_files_signature(project):
+    """Detect env-file changes without reading or publishing credential values."""
+    files=[project/'backend/.env',*sorted((project/'ocr-workers').glob('worker*/worker.env'))]
+    result=[]
+    for file in files:
+        try:
+            stat=file.stat();result.append((str(file),stat.st_mtime_ns,stat.st_size))
+        except FileNotFoundError:continue
+    return tuple(result)
+
+
+def wait_for_scan_retry(root, retry, *, limit, provider, live=False):
+    from app.rag import exam_corpus
+    signature=credential_files_signature(BACKEND.parent)
+    while True:
+        now=time.time()
+        if now>=retry:return
+        if credential_files_signature(BACKEND.parent)!=signature:
+            # Reload the fleet, preserving all saved quota/access blocks.
+            return
+        exam_corpus.atomic_json(root/'coordinator-status.json',{
+            'phase':'waiting_for_saved_provider_retry','pid':os.getpid(),'heartbeat':now,
+            'retry_not_before':retry,'selected_limit':limit,'provider':provider})
+        if live:
+            print(f'Waiting for saved provider retry: {max(0,int(retry-now))}s. '
+                  'No API request is being sent during this wait.',flush=True)
+        # Printing/writing can cross the deadline; never pass a negative sleep.
+        time.sleep(max(0,min(30,retry-time.time())))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["inventory", "extract", "status", "benchmark", "scan", "standardize"])
@@ -66,14 +96,7 @@ def main():
                 retry=result.get('retry_not_before')
                 if not (args.mode=='scan' and args.watch and result.get('phase')=='waiting_for_credentials'
                         and isinstance(retry,(int,float)) and retry>time.time()):break
-                while time.time()<retry:
-                    exam_corpus.atomic_json(args.root/'coordinator-status.json',{
-                        'phase':'waiting_for_saved_provider_retry','pid':os.getpid(),'heartbeat':time.time(),
-                        'retry_not_before':retry,'selected_limit':args.limit,'provider':args.provider})
-                    if args.live:
-                        print(f"Waiting for saved provider retry: {max(0,int(retry-time.time()))}s. "
-                              "No API request is being sent during this wait.",flush=True)
-                    time.sleep(min(30,retry-time.time()))
+                wait_for_scan_retry(args.root,retry,limit=args.limit,provider=args.provider,live=args.live)
             exam_corpus.atomic_json(args.root/'coordinator-status.json',{
                 'phase':'stopped','pid':os.getpid(),'heartbeat':time.time(),'last_scan_phase':result.get('phase')})
     print(json.dumps(result, ensure_ascii=False))

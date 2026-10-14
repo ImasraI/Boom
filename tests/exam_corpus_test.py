@@ -535,3 +535,58 @@ def test_structured_scan_does_not_reuse_invalid_cached_layout(tmp_path):
                 'source_major':'riazi','major_evidence':'گروه علوم ریاضی و فنی','uncertainties':[]}} if prompt==scanning.LAYOUT_PROMPT else {'ok':True,'data':page()}
     result=scanning.structured_scan(tmp_path,folder,tmp_path/'image.png',Fleet(),'gemini')
     assert result['ok'] and len(calls)==2 and calls[0]==scanning.LAYOUT_PROMPT
+
+
+def test_retry_wait_survives_deadline_crossing_during_status_write(tmp_path,monkeypatch):
+    import importlib.util
+    from types import SimpleNamespace
+    path=Path(__file__).resolve().parents[1]/'backend/scripts/import_exam_examples.py'
+    spec=importlib.util.spec_from_file_location('exam_retry_driver',path)
+    driver=importlib.util.module_from_spec(spec);spec.loader.exec_module(driver)
+    clock=iter([.999,1.001,1.002]);sleeps=[]
+    monkeypatch.setattr(driver,'time',SimpleNamespace(time=lambda:next(clock),sleep=sleeps.append))
+    monkeypatch.setattr(driver,'credential_files_signature',lambda _:())
+    driver.wait_for_scan_retry(tmp_path,1,limit=7,provider='auto')
+    assert sleeps==[0]
+    saved=corpus.read_json(tmp_path/'coordinator-status.json')
+    assert saved['retry_not_before']==1 and saved['phase']=='waiting_for_saved_provider_retry'
+
+
+def test_retry_wait_wakes_for_new_credentials_without_resetting_quota(tmp_path,monkeypatch):
+    import importlib.util
+    from types import SimpleNamespace
+    path=Path(__file__).resolve().parents[1]/'backend/scripts/import_exam_examples.py'
+    spec=importlib.util.spec_from_file_location('exam_credentials_driver',path)
+    driver=importlib.util.module_from_spec(spec);spec.loader.exec_module(driver)
+    clock=iter([0,1,2]);sleeps=[];signatures=iter([('old',),('old',),('new',)])
+    monkeypatch.setattr(driver,'time',SimpleNamespace(time=lambda:next(clock),sleep=sleeps.append))
+    monkeypatch.setattr(driver,'credential_files_signature',lambda _:next(signatures))
+    corpus.atomic_json(tmp_path/'vision-quota.json',{'saved-key':{'retry_at':100}})
+    driver.wait_for_scan_retry(tmp_path,100,limit=7,provider='auto')
+    assert sleeps==[30] and corpus.read_json(tmp_path/'vision-quota.json')['saved-key']['retry_at']==100
+
+
+def test_monitor_distinguishes_eligible_keys_from_quarantined_provider_work(tmp_path,monkeypatch):
+    from app.rag import exam_progress as monitor
+    monkeypatch.setattr(monitor,'worker_alive',lambda _:True)
+    monkeypatch.setattr('app.rag.exam_vision.credentials',lambda _:[Credential('groq','test-key','test-model','https://example.invalid')])
+    corpus.atomic_json(tmp_path/'scan-status.json',{'pid':1,'heartbeat':990,'phase':'waiting_for_credentials',
+        'pending_by_provider':{'groq':0},'quarantined_by_provider':{'groq':7}})
+    result=monitor.snapshot(tmp_path,counts={},now=1000)['providers'][0]
+    assert not result['blocked'] and result['pending_pages']==0 and result['held_pages']==7
+    assert result['work_state']=='no eligible pilot pages · held for review'
+
+
+def test_fleet_uses_another_key_while_first_key_waits_for_daily_reset(tmp_path):
+    image=tmp_path/'image.png';image.write_bytes(b'fake png')
+    specs=[Credential('gemini',f'test-key-{i}','test-model','https://example.invalid/v1beta/openai') for i in range(2)]
+    used=[]
+    def client(spec):
+        used.append(spec.key)
+        body={'error':{'message':'Daily request quota exceeded'}} if spec==specs[0] else {'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':'{}'}]}}]}
+        return httpx.Client(transport=httpx.MockTransport(lambda _:httpx.Response(429 if spec==specs[0] else 200,json=body)))
+    f=VisionFleet(specs,tmp_path,minimum_interval=0,client_factory=client)
+    assert f.request('literal layout',image,'gemini')['error']=='provider_daily_quota'
+    assert f.request('literal layout',image,'gemini')['ok']
+    assert f.request('literal layout',image,'gemini')['ok']
+    assert used==['test-key-0','test-key-1','test-key-1']

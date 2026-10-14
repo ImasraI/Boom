@@ -347,3 +347,21 @@ schema-invalid cached parts could consume retry allowances without a new request
 validation version 2 permits a bounded fresh attempt for those failures. Complete
 valid parts stay reusable, and provider quota/access history is not reset.
 OCR regression tests: 83 passed, one skipped.
+
+## Credential rotation follow-up (14 October)
+
+Keys rotate independently per provider; daily/access/capacity refusals only block
+the affected identity, without inferring shared quota from other keys. A new
+regression test confirms a second Gemini key is used while the first awaits its
+daily reset. The daily-quota parser now handles a missing retry hint without
+misclassifying it as a transport error. The watch deadline cannot produce a
+negative sleep; credential env-file changes wake the wait and reload the fleet
+without resetting any saved refusal. Provider work counters distinguish ready
+credentials from page jobs held after validation failures.
+
+At inspection, all 13 Gemini credentials had recent server errors (mostly 503),
+not evidence of exhausted daily quotas. Seven Groq pilot page jobs were held
+after two invalid/incomplete extractions; ten Groq credentials had no provider
+block recorded. Eligible credentials do not imply eligible pending page work or
+known remaining quota. All originals and completed parts were retained. OCR
+regression checks: 87 passed, one skipped.

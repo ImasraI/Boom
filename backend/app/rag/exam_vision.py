@@ -89,7 +89,7 @@ def retry_seconds(response, daily=False, provider="groq"):
         now = datetime.now(timezone.utc)
         midnight = datetime.combine(now.astimezone(pacific).date()+timedelta(days=1), datetime.min.time(),tzinfo=pacific)
         # A short minute retry hint never authorizes another daily-quota probe.
-        return max((midnight-now).total_seconds(), *values)
+        return max([(midnight-now).total_seconds(), *values])
     return max(60 if daily else 10, max(values, default=86400 if daily else 60))
 
 

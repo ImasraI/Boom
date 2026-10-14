@@ -325,6 +325,7 @@ def scan(root,workers=4,limit=0,provider='auto',progress=None):
     if limit:ordered=ordered[:limit]
     names=('gemini','groq') if provider=='auto' else (provider,)
     pending={name:deque() for name in names};attempts={};quarantined=0;stored=0
+    quarantined_by_provider={name:0 for name in names}
     for d,p in ordered:
         for name in names:
             saved=read_json(root/'documents'/d['document_id']/'vision'/f'page_{p:05d}.{name}.json',{})
@@ -338,7 +339,8 @@ def scan(root,workers=4,limit=0,provider='auto',progress=None):
             if (saved.get('error') in ('invalid_layout','invalid_question_transcription','heading_disagreement')
                     and saved.get('part_validation_version')!=PART_VALIDATION_VERSION):compatible=False
             key=(d['document_id'],p,name);attempts[key]=saved.get('attempts',0) if current and compatible else 0
-            if attempts[key]>=2:quarantined+=1;continue
+            if attempts[key]>=2:
+                quarantined+=1;quarantined_by_provider[name]+=1;continue
             pending[name].append((d,p))
     state.update(selected_pages=len(ordered),stored_candidates=stored,quarantined_candidates=quarantined)
     capacity=max(1,min(workers,8));active={}
@@ -346,7 +348,10 @@ def scan(root,workers=4,limit=0,provider='auto',progress=None):
     def publish():
         state.update(heartbeat=time.time(), credentials=fleet.health(),
                      workers=fleet.worker_status(), requests_this_run=fleet.request_count,
-                     pending_candidates=sum(map(len,pending.values())), active_candidates=len(active))
+                     pending_candidates=sum(map(len,pending.values())), active_candidates=len(active),
+                     pending_by_provider={name:len(pending[name]) for name in names},
+                     active_by_provider={name:sum(job[2]==name for job in active.values()) for name in names},
+                     quarantined_by_provider=dict(quarantined_by_provider))
         atomic_json(root/'scan-status.json',state)
         if progress:progress(dict(state))
     with ThreadPoolExecutor(max_workers=capacity, thread_name_prefix='exam') as executor:
@@ -372,7 +377,8 @@ def scan(root,workers=4,limit=0,provider='auto',progress=None):
                     else:
                         state['failed_this_run']+=1
                         if attempts[key]<2:pending[name].append((d,p))
-                        else:state['quarantined_candidates']+=1
+                        else:
+                            state['quarantined_candidates']+=1;quarantined_by_provider[name]+=1
             else:
                 times=[fleet.next_ready(name) for name in names if pending[name]]
                 times=[t for t in times if t is not None]
