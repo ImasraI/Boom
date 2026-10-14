@@ -56,6 +56,7 @@ or transcribe questions yet. source_major is riazi/tajrobi/ensani only when the
 visible heading establishes it. Mark incomplete/uncertain if any item is cut off.
 '''
 PIPELINE_DIGEST=payload_digest({'layout':LAYOUT_PROMPT,'transcription':PROMPT,'group_size':1})
+PART_VALIDATION_VERSION=2
 
 
 def _worker_update(fleet, **values):
@@ -79,10 +80,10 @@ def validate_layout(data):
 def structured_scan(root,folder,image,fleet,provider):
     """Save each question separately; failed requests cannot erase completed ones."""
     parts=folder/'parts';parts.mkdir(parents=True,exist_ok=True)
-    def request(prompt):
+    def request(prompt, valid):
         file=parts/(provider+'.'+payload_digest(prompt)+'.json')
         saved=read_json(file)
-        if isinstance(saved,dict) and saved.get('ok') is True:return saved
+        if isinstance(saved,dict) and saved.get('ok') is True and valid(saved.get('data')):return saved
         result=fleet.request(prompt,image,provider)
         while result.get('error')=='no_ready_credentials' and hasattr(fleet,'next_ready'):
             _worker_update(fleet,phase='waiting_for_ready_key',http_status=None,request_started_at=None)
@@ -93,7 +94,7 @@ def structured_scan(root,folder,image,fleet,provider):
             result=fleet.request(prompt,image,provider)
         atomic_json(file,result);return result
     _worker_update(fleet, stage='page layout')
-    layout=request(LAYOUT_PROMPT)
+    layout=request(LAYOUT_PROMPT,validate_layout)
     if not layout.get('ok'):return layout
     if not validate_layout(layout.get('data')):return {'ok':False,'error':'invalid_layout','provider':provider}
     ld=layout['data'];numbers=ld['question_numbers']
@@ -104,7 +105,11 @@ def structured_scan(root,folder,image,fleet,provider):
         prompt=PROMPT+(f'\nTranscribe ONLY printed question number {group[0]}. '
             'Omit all other questions. Complete refers ONLY to this requested question. '
             'Use the FULL image for bounding boxes. Read the heading for major evidence.' if group else '')
-        result=request(prompt)
+        def valid_question(data):
+            return (not validate_page(data) and {q['number'] for q in data['questions']}==set(group)
+                    and data.get('source_major')==ld.get('source_major')
+                    and canonical_literal(data.get('major_evidence',''))==canonical_literal(ld.get('major_evidence','')))
+        result=request(prompt,valid_question)
         if not result.get('ok'):return {**result,'completed_questions':len(gathered),'expected_questions':len(numbers)}
         data=result.get('data')
         if validate_page(data) or {q['number'] for q in data['questions']}!=set(group):
@@ -234,6 +239,7 @@ def _scan_one(root,document,page,fleet,provider):
     result.update(document_id=document['document_id'],document_name=document['name'],pdf_page=page,
                   image=str(image.relative_to(root)),elapsed=round(time.time()-start,2),schema_version=1,
                   prompt_digest=PIPELINE_DIGEST,recorded_at=time.time(),coverage='full_page')
+    result['part_validation_version']=PART_VALIDATION_VERSION
     if provider=='groq':result['groq_output_tokens']=fleet.groq_output_tokens
     if result.get('ok'): result['issues']=validate_page(result['data'])
     atomic_json(path,result)
@@ -329,6 +335,8 @@ def scan(root,workers=4,limit=0,provider='auto',progress=None):
             # at the same truncated transcription. Retain completed parts.
             old_budget=saved.get('groq_output_tokens')
             compatible = name!='groq' or (isinstance(old_budget,int) and old_budget>=fleet.groq_output_tokens)
+            if (saved.get('error') in ('invalid_layout','invalid_question_transcription','heading_disagreement')
+                    and saved.get('part_validation_version')!=PART_VALIDATION_VERSION):compatible=False
             key=(d['document_id'],p,name);attempts[key]=saved.get('attempts',0) if current and compatible else 0
             if attempts[key]>=2:quarantined+=1;continue
             pending[name].append((d,p))

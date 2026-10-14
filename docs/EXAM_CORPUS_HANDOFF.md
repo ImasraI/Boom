@@ -341,3 +341,9 @@ The VM's 16 Groq and 13 Gemini credentials were imported privately into ignored
 and deduplicates exact keys. These counts do not establish independent provider
 organizations/projects or usable vision capacity. Actual quota/access responses
 determine eligibility. Secrets are never displayed on the monitor or committed.
+
+The scanner validates cached layout/question parts before reusing them. Earlier
+schema-invalid cached parts could consume retry allowances without a new request;
+validation version 2 permits a bounded fresh attempt for those failures. Complete
+valid parts stay reusable, and provider quota/access history is not reset.
+OCR regression tests: 83 passed, one skipped.

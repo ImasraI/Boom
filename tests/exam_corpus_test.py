@@ -521,3 +521,17 @@ def test_provider_rotation_is_independent_between_groq_and_gemini(tmp_path):
     for _ in range(3):
         f.request('literal layout',image,'gemini');f.request('literal layout',image,'groq')
     assert selected==[f'test-key-{p}-{i}' for i in range(3) for p in ('gemini','groq')]
+
+
+def test_structured_scan_does_not_reuse_invalid_cached_layout(tmp_path):
+    folder=tmp_path/'page';parts=folder/'parts';parts.mkdir(parents=True)
+    corpus.atomic_json(parts/('gemini.'+corpus.payload_digest(scanning.LAYOUT_PROMPT)+'.json'),
+        {'ok':True,'data':{'page_kind':'questions','complete':False,'question_numbers':[7],'uncertainties':['cut off']}})
+    calls=[]
+    class Fleet:
+        def request(self,prompt,image,provider):
+            calls.append(prompt)
+            return {'ok':True,'data':{'page_kind':'questions','complete':True,'question_numbers':[7],
+                'source_major':'riazi','major_evidence':'گروه علوم ریاضی و فنی','uncertainties':[]}} if prompt==scanning.LAYOUT_PROMPT else {'ok':True,'data':page()}
+    result=scanning.structured_scan(tmp_path,folder,tmp_path/'image.png',Fleet(),'gemini')
+    assert result['ok'] and len(calls)==2 and calls[0]==scanning.LAYOUT_PROMPT
