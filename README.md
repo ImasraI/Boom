@@ -35,7 +35,7 @@ The phone navigation and desktop sidebar share three panel groups:
 
 ## Study desk and RAG debugging
 
-Sunset is the default palette, with muted crimson and rose surfaces, Nazanin display
+Sunset is the default palette, with brick red accents and warm neutral surfaces, Nazanin display
 headings and Vazirmatn controls. The top settings shortcut opens Profile's
 Settings tab directly. Motion respects the operating system and calm preference;
 sounds are opt-in. The home rings show completed scheduled tasks, not inferred
