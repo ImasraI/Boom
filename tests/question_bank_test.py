@@ -84,6 +84,24 @@ def test_mock_stock_only_refuses_empty_bank_without_any_provider_call(db, monkey
     assert error.value.status_code==409 and error.value.detail['code']=='pool_empty'
 
 
+def test_full_mock_shortage_explains_required_coverage_and_practice_alternative(db):
+    with pytest.raises(HTTPException) as error:
+        mocks._generate_reserved_mock(mocks.MockConfig(stock_only=True,
+            student={'major':'ریاضی فیزیک','grade':'دوازدهم'}),db.get(User,1),db)
+    message=error.value.detail['message']
+    assert '40 ریاضی' in message and '35 فیزیک' in message and '30 شیمی' in message
+    assert 'تمرین از سوال‌های قبلی' in message
+    assert 'تعداد یا مباحث را تغییر بده' not in message
+
+
+def test_practice_shortage_does_not_claim_a_full_booklet_is_required(db):
+    with pytest.raises(HTTPException) as error:
+        mocks._generate_reserved_mock(mocks.MockConfig(stock_only=True,mode='practice',
+            total_questions=10),db.get(User,1),db)
+    assert 'سطح دشواری یا مباحث تمرین' in error.value.detail['message']
+    assert 'دفترچهٔ کامل' not in error.value.detail['message']
+
+
 def test_full_mock_cannot_claim_a_short_subject_template(db):
     source=make_mock(db,count=1)
     assert mocks._claim_pool_mock(db,1,'riazi','konkur','دوازدهم',PLAN) is None

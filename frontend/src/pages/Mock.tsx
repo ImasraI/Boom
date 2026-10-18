@@ -70,7 +70,7 @@ function BackButton({ onClick }: { onClick: () => void }) {
 
 /* ---------------- Config screen ---------------- */
 
-function ConfigView({ onStart, onBack, error }: {
+export function ConfigView({ onStart, onBack, error }: {
   onStart: (cfg: Record<string, unknown>) => void
   onBack: () => void
   error: string
@@ -92,9 +92,14 @@ function ConfigView({ onStart, onBack, error }: {
 
       <div className="px-4 mt-5 space-y-4 max-w-[430px] mx-auto">
         {error && (
-          <p role="alert" className="border-s-4 border-red-500 bg-red-500/10 px-4 py-3 text-[13px] text-[var(--text)] leading-relaxed">
-            {error}
-          </p>
+          <div role="alert" className="border-s-4 border-red-500 bg-red-500/10 px-4 py-3 text-[13px] text-[var(--text)] leading-relaxed">
+            <p>{error}</p>
+            {mode === "general" && <div className="mt-3 border-t border-[var(--border)] pt-3">
+              <p>برای استفاده از سوال‌های موجود، تمرین کوتاه را انتخاب کن. تمرین کوتاه جای دفترچهٔ کامل کنکور را نمی‌گیرد و به موجودی همین سطح دشواری بستگی دارد.</p>
+              <button type="button" onClick={() => { setMode("practice"); setCount(10); setTopics("") }}
+                className="mt-2 underline underline-offset-4 font-bold">انتخاب تمرین ۱۰ سوالی</button>
+            </div>}
+          </div>
         )}
         <div className="border-b border-[var(--border)] pb-4">
           <label className="text-[12px] font-bold text-[var(--muted)]">نوع دفترچه

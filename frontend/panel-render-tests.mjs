@@ -38,6 +38,18 @@ test('Ranked page loads its controls before account and filter requests finish',
   assert.doesNotMatch(html, /صفحه آماده نشد/);
 });
 
+test('Full mock failure offers an explicit short practice selection without silently starting it', async () => {
+  const {ConfigView} = await vite.ssrLoadModule('/src/pages/Mock.tsx');
+  let started=false;
+  const html=renderToStaticMarkup(React.createElement(ConfigView, {
+    onStart(){started=true},onBack(){},error:'دفترچهٔ کامل آماده نیست',
+  }));
+  assert.match(html,/انتخاب تمرین ۱۰ سوالی/);
+  assert.match(html,/جای دفترچهٔ کامل کنکور را نمی‌گیرد/);
+  assert.match(html,/موجودی همین سطح دشواری/);
+  assert.equal(started,false);
+});
+
 test('Colosseum clearly labels a previous Maze batch instead of presenting it as upcoming', async () => {
   const {WeeklyStockNotice} = await vite.ssrLoadModule('/src/pages/Arena.tsx');
   const html=renderToStaticMarkup(React.createElement(WeeklyStockNotice,{weekly:{
