@@ -144,17 +144,17 @@ interface DragState {
 }
 
 const TYPE_COLORS: Record<BlockType, string> = {
-  class: "#5C8BA8",
-  study: "#e2c983",
-  test: "#9B7AAD",
-  break: "#97b094",
+  class: "var(--syntax-blue)",
+  study: "var(--syntax-yellow)",
+  test: "var(--syntax-purple)",
+  break: "var(--syntax-teal)",
 }
 
 const COLOR_OPTIONS = [
-  "#e2c983",
-  "#5C8BA8",
-  "#9B7AAD",
-  "#97b094",
+  "var(--syntax-yellow)",
+  "var(--syntax-blue)",
+  "var(--syntax-purple)",
+  "var(--syntax-teal)",
   "#FF6B6B",
   "#4D96FF",
   "#FFD93D",
@@ -1256,7 +1256,7 @@ export default function Schedule({
                       }
                       className={`py-2 rounded-xl text-xs font-medium ${
                         newBlock.type === t
-                          ? "text-[#1b1c1a]"
+                          ? "text-[var(--text-strong)]"
                           : "bg-[var(--surface-2)] text-[var(--text)]"
                       }`}
                       style={

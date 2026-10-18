@@ -365,8 +365,8 @@ function ResultView({ result, mockId, onBack, onRetry }: { result: MockResult; m
                 </div>
               </div>
             ))}
-            <div className="bg-[#FFF5F0] dark:bg-[#3A2A1A] rounded-2xl border border-[#F5DDD0] p-4">
-              <p className="text-[12px] font-bold text-[#C4714A] mb-1.5">چه اتفاقی در برنامه‌ات می‌افتد</p>
+            <div className="bg-[var(--accent-soft)] dark:bg-[var(--text-strong)] rounded-2xl border border-[var(--accent-soft-border)] p-4">
+              <p className="text-[12px] font-bold text-[var(--accent)] mb-1.5">چه اتفاقی در برنامه‌ات می‌افتد</p>
               <p className="text-[12px] text-[var(--text)] leading-relaxed text-right">
                 غلط‌ها و نزده‌های این آزمون با درس و مبحث ثبت شد. دفعه بعد که برنامه هفتگی بسازی، این نتایج در اولویت مطالعه، تست و مرور این مباحث لحاظ می‌شوند.
               </p>

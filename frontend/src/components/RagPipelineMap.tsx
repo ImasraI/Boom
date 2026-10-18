@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import type { TraceRecord, TraceStage } from "./RagInspector";
 import { TrendUpIcon } from "./icons";
 
@@ -18,6 +18,14 @@ import { TrendUpIcon } from "./icons";
  *
  * Reading order is right-to-left, like the rest of the app: lane 0 (the
  * question) sits on the right and the answer ends on the left.
+ *
+ * Text anchoring follows the same direction. SVG resolves `text-anchor`
+ * against the inline direction, so in this RTL page a label pinned by its
+ * RIGHT edge - what an LTR layout would write as `text-anchor="end"` - is
+ * `text-anchor="start"` here, and one that grows rightwards from a left edge
+ * is `end`. Do not "fix" this by pinning `direction: ltr` on the maps: that
+ * puts a leading number on the wrong end of the line (`۲ تکه در بافت` reads
+ * backwards) even though the alignment looks right.
  */
 
 // ---------------------------------------------------------------- formatting
@@ -44,6 +52,39 @@ function shortName(name: string, limit = 26): string {
   const suffix = page ? ` · ص ${fa(Number(page[1]))}` : "";
   const room = Math.max(8, limit - suffix.length);
   return (book.length <= room ? book : `${book.slice(0, room - 1)}…`) + suffix;
+}
+
+/**
+ * Rough advance width of `value` at `fontSize`, in SVG user units. Persian
+ * letterforms and Arabic-Indic digits are narrower than Latin ones and spaces
+ * are narrower still; the estimate leans wide so a label that fits here always
+ * fits on screen.
+ */
+export function textWidth(value: string, fontSize: number): number {
+  let units = 0;
+  for (const ch of value) {
+    if (ch === " ") units += 0.3;
+    else if (/[\u0660-\u0669\u06F0-\u06F9]/.test(ch)) units += 0.48;
+    else if (/[\u0600-\u06FF\u200c]/.test(ch)) units += 0.5;
+    else if (/[A-Za-z0-9]/.test(ch)) units += 0.56;
+    else units += 0.42;
+  }
+  return units * fontSize;
+}
+
+/**
+ * Trim `value` to the widest prefix that fits `maxWidth` at `fontSize`, ending
+ * in an ellipsis. SVG text cannot wrap, so a label that is merely sliced by
+ * character count is drawn straight through its box border instead.
+ */
+export function fitText(value: string, maxWidth: number, fontSize: number): string {
+  if (textWidth(value, fontSize) <= maxWidth) return value;
+  let out = "";
+  for (const ch of value) {
+    if (textWidth(`${out}${ch}…`, fontSize) > maxWidth) break;
+    out += ch;
+  }
+  return `${out.trimEnd()}…`;
 }
 
 // ------------------------------------------------------- stage classification
@@ -172,6 +213,8 @@ export interface PipelineGraph {
 
 const NODE_W = 178;
 const NODE_H = 58;
+/** Room a node's labels have: its width less the inset and the accent bar. */
+const NODE_TEXT_W = NODE_W - 22;
 const COL_W = 212;
 const ROW_GAP = 28;
 const PAD = 22;
@@ -435,10 +478,10 @@ function nodePosition(node: MapNode, graph: PipelineGraph): { x: number; y: numb
 }
 
 const ROLE_COLOR: Record<StageRole, string> = {
-  gate: "#8B8B8B", rewrite: "#7C6BF2", embed: "#4FA3F7",
-  vector: "#4FA3F7", lexical: "#F0A93B", fusion: "#B05CE0", rerank: "#E0568B",
-  qbank: "#38B48B", image: "#2FA8A0", generate: "#39A852", vision: "#2FA8A0",
-  context: "#27A695", answer: "#39A852", audit: "#C98A2E", other: "#8B8B8B",
+  gate: "var(--muted-2)", rewrite: "var(--syntax-purple)", embed: "var(--syntax-blue)",
+  vector: "var(--syntax-blue)", lexical: "var(--syntax-orange)", fusion: "var(--syntax-purple)", rerank: "var(--syntax-magenta)",
+  qbank: "var(--syntax-green)", image: "var(--syntax-teal)", generate: "var(--syntax-green)", vision: "var(--syntax-teal)",
+  context: "var(--syntax-teal)", answer: "var(--syntax-green)", audit: "var(--syntax-orange)", other: "var(--muted-2)",
 };
 
 export function PipelineMap({ graph, selectedDoc, onSelectDoc, selectedStage, onSelectStage }: {
@@ -472,7 +515,7 @@ export function PipelineMap({ graph, selectedDoc, onSelectDoc, selectedStage, on
 
       {laneTitles.map(lane => (
         <text key={lane.title} x={lane.x} y={PAD} fontSize="11" fontWeight="700"
-          fill="var(--muted-2)" textAnchor="middle">{lane.title}</text>
+          fill="var(--muted-2)" textAnchor="middle">{fitText(lane.title, COL_W - 12, 11)}</text>
       ))}
 
       {graph.edges.map(edge => {
@@ -520,19 +563,19 @@ export function PipelineMap({ graph, selectedDoc, onSelectDoc, selectedStage, on
               + `${node.skippedReason ? ` · ${node.skippedReason}` : ""}`
               + `${node.docs.length ? `\nاسنادی که این مرحله انتخاب کرد:\n${node.docs.slice(0, 8).map(doc => shortName(doc, 46)).join("\n")}` : ""}`}</title>
             <rect x={position.x} y={position.y} width={NODE_W} height={NODE_H} rx="13"
-              fill={`${color}1a`} stroke={node.error ? "#E86676" : isSelected ? color : "var(--border)"}
+              fill={`color-mix(in srgb, ${color} 10%, transparent)`} stroke={node.error ? "var(--syntax-magenta)" : isSelected ? color : "var(--border)"}
               strokeWidth={isSelected ? 2 : 1} />
             <rect x={position.x} y={position.y} width="4" height={NODE_H} rx="2" fill={color} />
             <text x={position.x + NODE_W - 10} y={position.y + 20} fontSize="10.5" fontWeight="700"
-              fill="var(--text)" textAnchor="end">{node.label.slice(0, 30)}</text>
+              fill="var(--text)" textAnchor="start">{fitText(node.label, NODE_TEXT_W, 10.5)}</text>
             <text x={position.x + NODE_W - 10} y={position.y + 36} fontSize="9.5"
-              fill="var(--muted)" textAnchor="end">
-              {node.skippedReason ? node.skippedReason.slice(0, 34)
-                : `${fa(node.ms, 1)} ms${node.selected || node.countKnown ? ` · ${node.countKnown ? "" : "≥"}${fa(node.selected)} مورد` : ""}`}
+              fill="var(--muted)" textAnchor="start">
+              {node.skippedReason ? fitText(node.skippedReason, NODE_TEXT_W, 9.5)
+                : fitText(`${fa(node.ms, 1)} ms${node.selected || node.countKnown ? ` · ${node.countKnown ? "" : "≥"}${fa(node.selected)} مورد` : ""}`, NODE_TEXT_W, 9.5)}
             </text>
             <text x={position.x + NODE_W - 10} y={position.y + 50} fontSize="9"
-              fill="var(--muted-2)" textAnchor="end">
-              {node.name.slice(0, 40)}
+              fill="var(--muted-2)" textAnchor="start">
+              {fitText(node.name, NODE_TEXT_W, 9)}
             </text>
           </g>
         );
@@ -578,7 +621,7 @@ export function FunnelStrip({ graph }: { graph: PipelineGraph }) {
                 title={cluster.length > 1 ? "این جست‌وجوها موازی‌اند و هر دو به مرحلهٔ ادغام می‌دهند" : undefined}>
                 {cluster.map(step => (
                   <span key={step.label} className="px-2 py-0.5 rounded-full border border-[var(--border)] bg-[var(--surface-2)] text-[var(--muted)]"
-                    style={{ borderColor: `${ROLE_COLOR[step.role]}66` }}>
+                    style={{ borderColor: `color-mix(in srgb, ${ROLE_COLOR[step.role]} 40%, transparent)` }}>
                     <span className="inline-block w-1.5 h-1.5 rounded-[2px]" style={{ backgroundColor: ROLE_COLOR[step.role] }} /> {step.label.split(" (")[0]} {step.known ? "" : "≥"}{fa(step.count)}
                   </span>
                 ))}
@@ -595,6 +638,12 @@ export function FunnelStrip({ graph }: { graph: PipelineGraph }) {
 
 const CHART_W = 780;
 const CHART_PAD = 74;
+/**
+ * Right gutter reserved for the per-chunk labels. A label is drawn to the
+ * right of its track's first point, so the plot has to stop short of the
+ * canvas edge or the label runs off it and the SVG viewport clips the name.
+ */
+const CHART_LABEL_W = 170;
 
 export function ChunkRankChart({ chart, docFilter, onSelectDoc }: {
   chart: RankChart; docFilter?: string; onSelectDoc?: (doc: string) => void;
@@ -606,7 +655,8 @@ export function ChunkRankChart({ chart, docFilter, onSelectDoc }: {
   const rowH = 22;
   const height = 40 + shown.length * rowH;
   // Right-to-left: the first search sits at the right edge.
-  const xFor = (index: number) => CHART_W - CHART_PAD - index * ((CHART_W - CHART_PAD * 2) / Math.max(1, chart.steps.length - 1));
+  const plotRight = CHART_W - CHART_LABEL_W;
+  const xFor = (index: number) => plotRight - index * ((plotRight - CHART_PAD) / Math.max(1, chart.steps.length - 1));
   const yFor = (rank: number) => 30 + ((rank - 1) / Math.max(1, chart.maxRank - 1)) * (height - 60);
 
   return (
@@ -620,7 +670,7 @@ export function ChunkRankChart({ chart, docFilter, onSelectDoc }: {
           </g>
         ))}
         {[...new Set([1, Math.max(1, Math.round(chart.maxRank / 2)), chart.maxRank])].map(rank => (
-          <text key={rank} x={CHART_W - 6} y={yFor(rank) + 3} fontSize="9" fill="var(--muted-2)" textAnchor="end">
+          <text key={rank} x={8} y={yFor(rank) + 3} fontSize="9" fill="var(--muted-2)" textAnchor="end">
             رتبه {fa(rank)}
           </text>
         ))}
@@ -635,7 +685,7 @@ export function ChunkRankChart({ chart, docFilter, onSelectDoc }: {
             else current = [];
           });
           if (current.length > 1) segments.push(current.join(" "));
-          const colour = track.cited ? "#39A852" : track.rerankMove > 0 ? "#E0568B" : "var(--muted-2)";
+          const colour = track.cited ? "var(--syntax-green)" : track.rerankMove > 0 ? "var(--syntax-magenta)" : "var(--muted-2)";
           const label = `${shortName(track.doc)} · تکه ${track.chunk}`;
           const first = points.find(point => point != null);
           return (
@@ -655,8 +705,8 @@ export function ChunkRankChart({ chart, docFilter, onSelectDoc }: {
               ))}
               {first && (
                 // Labels live in the right gutter, so they never sit on the lines.
-                <text x={first.x + 8} y={first.y + 3} fontSize="9" fill={track.cited ? "var(--text)" : "var(--muted)"} textAnchor="start">
-                  {label.slice(0, 30)}
+                <text x={first.x + 10} y={first.y + 3} fontSize="9" fill={track.cited ? "var(--text)" : "var(--muted)"} textAnchor="end">
+                  {fitText(label, CHART_LABEL_W - 20, 9)}
                 </text>
               )}
             </g>
@@ -727,7 +777,7 @@ export function DocumentChunkPanel({ docs, selectedDoc, onSelectDoc }: {
                     {chunk.referenced && <span className="text-[10px] text-emerald-400">ارجاع شماره‌دار در پاسخ</span>}
                     <span className="text-[10px] text-[var(--muted-2)]">بهترین رتبه {fa(chunk.bestRank)}</span>
                     {chunk.rerankMove > 0 && (
-                      <span className="text-[10px] text-[#E0568B] inline-flex items-center gap-0.5"><TrendUpIcon size={9} />{fa(chunk.rerankMove)} رتبه</span>
+                      <span className="text-[10px] text-[var(--syntax-magenta)] inline-flex items-center gap-0.5"><TrendUpIcon size={9} />{fa(chunk.rerankMove)} رتبه</span>
                     )}
                     <span className="text-[10px] text-[var(--muted-2)] ms-auto">{chunk.stages.join(" ← ")}</span>
                   </button>
@@ -806,7 +856,13 @@ const M_CARD_H = 56;
 const M_CARD_GAP = 12;
 const M_CHIP_W = 206;
 const M_CHIP_H = 26;
+/** A shelf chip holds two labels side by side; this is each one's budget. */
+const M_CHIP_LABEL_W = 88;
 const M_LEAF_ROW = 38;
+/** Distance from a card's bottom edge down to the centre of its chunk dots. */
+const M_LEAF_DROP = 19;
+/** A chunk dot's radius plus its widest stroke - the canvas must clear it. */
+const M_LEAF_R = 11.5;
 const M_ROW_GAP = 26;
 const M_BAND_GAP = 18;
 
@@ -860,8 +916,14 @@ export function buildMindLayout(shelves: MindShelf[], chunksPerDoc: number): Min
   const trunkBottom = !last ? rootY + M_ROOT_H
     : last.cards.length ? Math.max(...last.cards.map(card => card.y + M_CARD_H / 2))
       : last.chipY + M_CHIP_H;
+  // The chunk dots hang below their card, so the canvas has to clear the dot's
+  // far edge - not just the card's - or the last row is clipped by the viewBox.
+  const contentBottom = Math.max(rootY + M_ROOT_H,
+    ...bands.map(band => band.cards.reduce(
+      (bottom, card) => Math.max(bottom, card.y + M_CARD_H + (leaves ? M_LEAF_DROP + M_LEAF_R : 0)),
+      band.chipY + M_CHIP_H)));
   return {
-    width: M_W, height: Math.max(rootY + M_ROOT_H + 80, trunkBottom + (leaves ? M_LEAF_ROW : 0) + M_PAD),
+    width: M_W, height: Math.max(rootY + M_ROOT_H + 80, contentBottom + M_PAD),
     rootX: M_W - M_PAD - M_ROOT_W, rootY, rootW: M_ROOT_W, rootH: M_ROOT_H,
     trunkX, trunkBottom, cardRight, perRow, leaves, bands,
   };
@@ -922,7 +984,7 @@ export function SourceMindMap({ trace, docs, selectedDoc = "", onSelectDoc, docC
 
   return <section className="rag-source-explorer" aria-label="نقشهٔ ذهنی منابع">
     <div className="rag-section-heading">
-      <div><span className="rag-kicker">SOURCE MIND MAP</span><h3>از پرسش تا تکهٔ کتاب</h3></div>
+      <div><h3>از پرسش تا تکهٔ کتاب</h3></div>
       <span>{`${fa(visible.length)} از ${fa(docs.length)} سند نمایش داده شده · در کل ردیف‌های رد: ${fa(contextChunks)} تکه در بافت مدل، ${fa(recordedChunks)} تکهٔ ثبت‌شده`}</span>
     </div>
     <div className="rag-source-tools">
@@ -957,19 +1019,19 @@ export function SourceMindMap({ trace, docs, selectedDoc = "", onSelectDoc, docC
 
           <rect x={layout.rootX} y={layout.rootY} width={layout.rootW} height={layout.rootH} rx="13"
             fill="var(--surface-2)" stroke="var(--accent)" strokeWidth="1.5" />
-          <text x={layout.rootX + layout.rootW - 14} y={layout.rootY + 21} textAnchor="end" fontSize="10" fill="var(--accent)">پرسش این اجرا</text>
-          <text x={layout.rootX + layout.rootW - 14} y={layout.rootY + 40} textAnchor="end" fontSize="11.5" fill="var(--text)">
-            {trace.question.length > 30 ? `${trace.question.slice(0, 29)}…` : trace.question || "پرسش ثبت نشده"}
+          <text x={layout.rootX + layout.rootW - 14} y={layout.rootY + 21} textAnchor="start" fontSize="10" fill="var(--accent)">پرسش این اجرا</text>
+          <text x={layout.rootX + layout.rootW - 14} y={layout.rootY + 40} textAnchor="start" fontSize="11.5" fill="var(--text)">
+            {fitText(trace.question || "پرسش ثبت نشده", M_ROOT_W - 28, 11.5)}
           </text>
 
           {layout.bands.map(band => <g key={band.key}>
             <rect x={layout.cardRight - M_CHIP_W} y={band.chipY} width={M_CHIP_W} height={M_CHIP_H} rx="13"
               fill="var(--surface-2)" stroke={band.cited > 0 ? "var(--accent)" : "var(--border-strong)"} />
-            <text x={layout.cardRight - 12} y={band.chipY + 17} textAnchor="end" fontSize="10.5" fill="var(--text)">
-              {`${band.label} · ${fa(band.cards.length)} سند`}
+            <text x={layout.cardRight - 12} y={band.chipY + 17} textAnchor="start" fontSize="10.5" fill="var(--text)">
+              {fitText(`${band.label} · ${fa(band.cards.length)} سند`, M_CHIP_LABEL_W, 10.5)}
             </text>
-            <text x={layout.cardRight - M_CHIP_W + 12} y={band.chipY + 17} textAnchor="start" fontSize="9.5" fill="var(--muted)">
-              {`${fa(band.cited)} تکه در بافت`}
+            <text x={layout.cardRight - M_CHIP_W + 12} y={band.chipY + 17} textAnchor="end" fontSize="9.5" fill="var(--muted)">
+              {fitText(`${fa(band.cited)} تکه در بافت`, M_CHIP_LABEL_W, 9.5)}
             </text>
             {band.cards.map(card => {
               const active = selectedDoc === card.doc.doc;
@@ -979,7 +1041,7 @@ export function SourceMindMap({ trace, docs, selectedDoc = "", onSelectDoc, docC
               const centerX = card.x + M_CARD_W / 2;
               const step = shown.length > 1 ? Math.min(26, (M_CARD_W - 18) / shown.length) : 26;
               const firstLeafX = centerX + ((shown.length - 1) * step) / 2;
-              const leafY = card.y + M_CARD_H + 19;
+              const leafY = card.y + M_CARD_H + M_LEAF_DROP;
               const select = () => { onSelectDoc(active ? "" : card.doc.doc); setFocusChunk(""); };
               return <g key={card.doc.doc} opacity={dimmed ? 0.45 : 1}
                 onMouseEnter={() => setHovered(card.doc.doc)} onMouseLeave={() => setHovered("")}>
@@ -992,9 +1054,9 @@ export function SourceMindMap({ trace, docs, selectedDoc = "", onSelectDoc, docC
                     fill={active ? "var(--accent-soft)" : "var(--surface-2)"}
                     stroke={active ? "var(--accent)" : "var(--border-strong)"} />
                   <rect x={card.x + M_CARD_W - 3} y={card.y + 14} width="3" height="28" rx="1" fill="var(--accent)" />
-                  <text x={card.x + M_CARD_W - 14} y={card.y + 22} textAnchor="end" fontSize="11" fill="var(--text)">{shortName(card.doc.doc, 34)}</text>
-                  <text x={card.x + M_CARD_W - 14} y={card.y + 42} textAnchor="end" fontSize="9" fill="var(--muted)">
-                    {`${fa(card.doc.selectedIn)} تکه در رد · ${fa(card.doc.cited)} در بافت`}
+                  <text x={card.x + M_CARD_W - 14} y={card.y + 22} textAnchor="start" fontSize="11" fill="var(--text)">{fitText(shortName(card.doc.doc, 34), M_CARD_W - 28, 11)}</text>
+                  <text x={card.x + M_CARD_W - 14} y={card.y + 42} textAnchor="start" fontSize="9" fill="var(--muted)">
+                    {fitText(`${fa(card.doc.selectedIn)} تکه در رد · ${fa(card.doc.cited)} در بافت`, M_CARD_W - 28, 9)}
                   </text>
                 </g>
                 {shown.map((chunk, index) => {
@@ -1007,10 +1069,10 @@ export function SourceMindMap({ trace, docs, selectedDoc = "", onSelectDoc, docC
                     onClick={open} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); } }}>
                     <title>{`تکه ${digit(chunk.chunk)}\n${chunk.preview || "پیش‌نمایش ذخیره نشده"}`}</title>
                     <circle cx={x} cy={leafY} r="10.5" fill={chunk.cited ? "var(--accent)" : "var(--surface)"}
-                      stroke={chunk.rerankMove > 0 ? "#E0568B" : tone} strokeWidth={focused ? 2.6 : chunk.rerankMove > 0 ? 2 : 1.2}
+                      stroke={chunk.rerankMove > 0 ? "var(--syntax-magenta)" : tone} strokeWidth={focused ? 2.6 : chunk.rerankMove > 0 ? 2 : 1.2}
                       strokeDasharray={chunk.cited ? undefined : "2.5 3"} />
                     <text x={x} y={leafY + 3} textAnchor="middle" fontSize="8.5"
-                      fill={chunk.cited ? "var(--surface)" : "var(--muted)"}>{digit(chunk.chunk).slice(0, 3)}</text>
+                      fill={chunk.cited ? "var(--surface)" : "var(--muted)"}>{fitText(digit(chunk.chunk), 19, 8.5)}</text>
                   </g>;
                 })}
                 {more > 0 && <g role="button" tabIndex={0} aria-expanded={isExpanded}
@@ -1020,7 +1082,7 @@ export function SourceMindMap({ trace, docs, selectedDoc = "", onSelectDoc, docC
                   <circle cx={firstLeafX - shown.length * step} cy={leafY} r="9.5" fill="var(--surface)"
                     stroke="var(--border-strong)" strokeDasharray="2.5 3" />
                   <text x={firstLeafX - shown.length * step} y={leafY + 3} textAnchor="middle" fontSize="8.5" fill="var(--muted)">
-                    {isExpanded ? "−" : `+${fa(hidden)}`}
+                    {fitText(isExpanded ? "−" : `+${fa(hidden)}`, 17, 8.5)}
                   </text>
                 </g>}
               </g>;
@@ -1038,7 +1100,7 @@ export function SourceMindMap({ trace, docs, selectedDoc = "", onSelectDoc, docC
         </p>
       </div>
       <aside className="rag-source-detail" aria-label="تکه‌های سند انتخاب‌شده">
-        {selected ? <><span className="rag-kicker">SOURCE DETAILS</span><h4>{selected.doc}</h4>
+        {selected ? <><h4>{selected.doc}</h4>
           <p className="rag-note">
             {`${fa(selected.selectedIn)} تکه در این رد · ${fa(selected.cited)} تکه در بافت نهایی`
               + `${selected.cited > 0 ? "" : " · هیچ تکه‌ای از این سند به بافت مدل نرسید"}`
@@ -1070,7 +1132,179 @@ export function SourceMindMap({ trace, docs, selectedDoc = "", onSelectDoc, docC
   </section>;
 }
 
-export function EmbeddingProvenance({ trace }: { trace: TraceRecord }) {
+/**
+ * Payload of GET /api/admin/rag/traces/{id}/embedding-map.
+ *
+ * The backend reads the retrieved chunks' vectors back out of Chroma and works
+ * out where the query sits among them; the client infers nothing, and a run
+ * that recorded no cosine-scored vector search simply has no `maps`.
+ */
+export interface EmbeddingMapPoint {
+  id: string; x: number; y: number; doc: string;
+  chunk: string | number; rank: string | number; score: number;
+  preview: string; shelf?: string;
+}
+export interface EmbeddingMapRecord {
+  stage: string; collection: string; shelf: string; shelf_label: string;
+  point_count: number; recorded_rows: number; missing_vectors: number;
+  dimensions: number; metric: string; components: number;
+  explained_variance_ratio: number[];
+  query: { x: number; y: number } | null;
+  points: EmbeddingMapPoint[];
+}
+export interface EmbeddingMapSkipped {
+  collection: string; stage: string; reason: string;
+  found_vectors: number; recorded_rows: number;
+}
+export interface EmbeddingMapPayload {
+  trace_id: string; maps: EmbeddingMapRecord[]; skipped: EmbeddingMapSkipped[];
+  limitations: string[]; notice?: string; reason?: string;
+}
+
+const SCATTER_W = 760;
+const SCATTER_H = 300;
+/** Gutter reserved for the axis numbers, so a tick never sits on the plot. */
+const SCATTER_FRAME = { left: 42, right: 54, top: 16, bottom: 34 };
+
+/**
+ * A recorded candidate, placed in the canvas.
+ *
+ * `strongest` marks the three highest similarities: the map is a projection, so
+ * a compact cluster is what "these chunks are close to each other" looks like,
+ * and the top of the ranking is what a reader looks for first.
+ */
+export interface ScatterPoint extends EmbeddingMapPoint {
+  cx: number; cy: number; strongest: boolean;
+}
+export interface ScatterGeometry {
+  width: number; height: number;
+  left: number; right: number; top: number; bottom: number;
+  points: ScatterPoint[];
+  query: { cx: number; cy: number } | null;
+  extent: { x: [number, number]; y: [number, number] };
+  strongest: number;
+}
+
+/**
+ * Place the vectors and the query inside the canvas.
+ *
+ * The extents come from the data (query included, so a query that sits away
+ * from its results is drawn where it is instead of being clamped onto the
+ * frame). The first principal axis grows leftwards, matching the right-to-left
+ * reading order of every other map in the panel.
+ */
+export function scatterGeometry(
+  record: EmbeddingMapRecord, frame = SCATTER_FRAME, width = SCATTER_W, height = SCATTER_H,
+): ScatterGeometry {
+  const points = (record.points ?? []).filter(point => Number.isFinite(point.x) && Number.isFinite(point.y));
+  const query = record.query && Number.isFinite(record.query.x) && Number.isFinite(record.query.y)
+    ? record.query : null;
+  const bounds = (values: number[]): [number, number] => {
+    const low = Math.min(...values), high = Math.max(...values);
+    // One point, or several that coincide, still needs a box to sit inside.
+    return high - low < 1e-6 ? [low - 1, high + 1] : [low, high];
+  };
+  const extent = {
+    x: bounds(points.map(point => point.x).concat(query ? [query.x] : [])),
+    y: bounds(points.map(point => point.y).concat(query ? [query.y] : [])),
+  };
+  const left = frame.left, right = width - frame.right;
+  const top = frame.top, bottom = height - frame.bottom;
+  const cx = (value: number) => right - ((value - extent.x[0]) / (extent.x[1] - extent.x[0])) * (right - left);
+  const cy = (value: number) => bottom - ((value - extent.y[0]) / (extent.y[1] - extent.y[0])) * (bottom - top);
+  const ranked = [...points].sort((a, b) => b.score - a.score).slice(0, 3);
+  const strong = new Set(ranked.map(point => point.id));
+  return {
+    width, height, left, right, top, bottom,
+    points: points.map(point => ({ ...point, cx: cx(point.x), cy: cy(point.y), strongest: strong.has(point.id) })),
+    query: query ? { cx: cx(query.x), cy: cy(query.y) } : null,
+    extent, strongest: ranked.length,
+  };
+}
+
+/**
+ * One collection's vector space: the retrieved chunks and the query among them.
+ *
+ * Clicking a point selects its document in the source map above, so a dot is
+ * never a dead end - the chunk's text and rank stay one step away.
+ */
+function SemanticScatter({ record, onSelectDoc }: {
+  record: EmbeddingMapRecord; onSelectDoc?: (doc: string) => void;
+}) {
+  const geometry = scatterGeometry(record);
+  const variance = record.explained_variance_ratio ?? [];
+  const share = (value: number | undefined) => `${fa(Math.round((value ?? 0) * 100))}٪`;
+  const shelf = record.shelf_label || GROUP_FA[record.shelf] || "مجموعهٔ برداری";
+  const selectable = (doc: string) => onSelectDoc && doc ? onSelectDoc : undefined;
+  // The label sits on the left of the marker (right-edge anchored - `start` in
+  // this RTL page) unless there is no room there, in which case it flips to the
+  // marker's right and is pinned by its left edge (`end`), like the rank chart.
+  const roomAtLeft = geometry.query ? geometry.query.cx - 14 > geometry.left + 46 : false;
+  const queryLabel: { x: number; y: number; anchor: "start" | "end" } | null = geometry.query
+    ? { x: roomAtLeft ? geometry.query.cx - 13 : geometry.query.cx + 13,
+        anchor: roomAtLeft ? "start" : "end",
+        y: Math.min(Math.max(geometry.query.cy + 3.5, geometry.top + 10), geometry.bottom - 4) }
+    : null;
+  return <div className="rag-embedding-map-block">
+    <div className="rag-section-heading">
+      <div><span className="text-[11px] text-[var(--muted-2)]">فضای برداری همین اجرا</span><h3>{shelf} · {fitText(text(record.collection) || "نام مجموعه ثبت نشده", 260, 16)}</h3></div>
+      <span>{fa(record.point_count)} بردار بازیابی‌شده از {fa(record.recorded_rows)} ردیف ثبت‌شده · {fa(record.dimensions)} بُعد{record.missing_vectors > 0 ? ` · ${fa(record.missing_vectors)} بردار ذخیره‌نشده` : ""}</span>
+    </div>
+    <div className="rag-map-scroll">
+      <svg className="rag-embedding-map" viewBox={`0 0 ${geometry.width} ${geometry.height}`} role="group"
+        aria-label={`نقشهٔ دوبعدی ${fa(record.point_count)} کاندید برداری و بردار پرسش در مجموعهٔ ${text(record.collection)}`}>
+        <title>{`دو جهت اصلی نخست همین کاندیدها، با ${share(variance[0])} و ${share(variance[1])} از واریانس`}</title>
+        <rect x={geometry.left} y={geometry.top} width={geometry.right - geometry.left}
+          height={geometry.bottom - geometry.top} rx="6" fill="var(--surface)" stroke="var(--border)" />
+        {/* Axis read-outs at both ends: a projection can be read in reverse, so
+            the numbers - not an arrow - are what fixes the orientation. */}
+        <text x={geometry.left} y={geometry.bottom + 15} fontSize="9" fill="var(--muted-2)" textAnchor="end">
+          {fa(geometry.extent.x[1], 3)}
+        </text>
+        <text x={geometry.right} y={geometry.bottom + 15} fontSize="9" fill="var(--muted-2)" textAnchor="start">
+          {fa(geometry.extent.x[0], 3)}
+        </text>
+        <text x={geometry.left - 7} y={geometry.top + 10} fontSize="9" fill="var(--muted-2)" textAnchor="start">
+          {fa(geometry.extent.y[1], 3)}
+        </text>
+        <text x={geometry.left - 7} y={geometry.bottom} fontSize="9" fill="var(--muted-2)" textAnchor="start">
+          {fa(geometry.extent.y[0], 3)}
+        </text>
+        {geometry.points.map(point => <g key={point.id} role={onSelectDoc ? "button" : "group"}
+          tabIndex={onSelectDoc ? 0 : undefined} aria-label={`${point.doc} · تکه ${point.chunk} · شباهت ${fa(point.score, 3)}`}
+          onClick={() => selectable(point.doc)?.(point.doc)}
+          onKeyDown={onSelectDoc ? event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectDoc(point.doc); } } : undefined}
+          className={onSelectDoc ? "rag-scatter-point" : undefined}>
+          <title>{`${shortName(point.doc, 46)} · تکه ${point.chunk} · شباهت ${fa(point.score, 3)} · رتبه ${point.rank}${point.preview ? `\n${point.preview}` : ""}`}</title>
+          <circle cx={point.cx} cy={point.cy} r={point.strongest ? 6 : 4.5}
+            fill={point.strongest ? "var(--desk-blue, var(--syntax-blue))" : "var(--surface)"}
+            stroke="var(--desk-blue, var(--syntax-blue))" strokeOpacity={point.strongest ? 1 : 0.65} strokeWidth={1.2} />
+        </g>)}
+        {geometry.query && queryLabel && <g>
+          <circle cx={geometry.query.cx} cy={geometry.query.cy} r="11" fill="none" stroke="var(--accent)" strokeWidth="1.6" />
+          <circle cx={geometry.query.cx} cy={geometry.query.cy} r="3.2" fill="var(--accent)" />
+          <text x={queryLabel.x} y={queryLabel.y} fontSize="10" fill="var(--accent)" textAnchor={queryLabel.anchor}>
+            بردار پرسش
+          </text>
+        </g>}
+      </svg>
+    </div>
+    <ul className="rag-embedding-legend">
+      <li><span className="rag-legend-mark is-query" aria-hidden="true" />بردار پرسش، از شباهت‌های ثبت‌شدهٔ همین اجرا</li>
+      <li><span className="rag-legend-mark is-strong" aria-hidden="true" />{fa(geometry.strongest)} کاندید با بالاترین شباهت</li>
+      <li><span className="rag-legend-mark is-candidate" aria-hidden="true" />بقیهٔ کاندیدهای بازیابی‌شده (برای متن تکه، نقطه را انتخاب کنید)</li>
+    </ul>
+    <p className="rag-note">
+      {`این تصویر ${fa(record.point_count)} تکه از ${fa(record.recorded_rows)} ردیف ثبت‌شدهٔ «${text(record.stage)}» را در ${fa(record.dimensions)} بُعد نشان می‌دهد. `
+        + `دو محور، دو جهت اصلی نخست همین تکه‌هاست و مجموعاً ${share((variance[0] ?? 0) + (variance[1] ?? 0))} از پراکندگی آن‌ها را در بر می‌گیرد؛ `
+        + "پس فاصلهٔ شکل‌ها تقریبی است. کاندیدهای مجموعه‌های دیگر مجموعهٔ برداری جدا و نقشهٔ جدای خود را دارند."}
+    </p>
+  </div>;
+}
+
+export function EmbeddingProvenance({ trace, map, onSelectDoc }: {
+  trace: TraceRecord; map?: EmbeddingMapPayload; onSelectDoc?: (doc: string) => void;
+}) {
   const embeds = (trace.stages ?? []).filter(stage => roleOf(stage.name) === "embed");
   const stores = (trace.stages ?? []).filter(stage => roleOf(stage.name) === "vector");
   if (!embeds.length) return <p className="rag-note">این اجرا فراخوانی بردارسازی ثبت نکرده است؛ از نبود رد نمی‌توان نتیجه گرفت بردارسازی انجام شده.</p>;
@@ -1079,8 +1313,26 @@ export function EmbeddingProvenance({ trace }: { trace: TraceRecord }) {
   const dims = [...new Set(embeds.map(stage => Number(stage.meta.dimensions)).filter(n => Number.isFinite(n) && n > 0))];
   const inputs = embeds.map(stage => text(stage.meta.input ?? stage.text.input)).filter(Boolean);
   const height = Math.max(250, stores.length * 110 + 30);
+  // Only maps with a plane to draw are used: a run whose vectors are gone (or
+  // that never recorded a cosine-scored search) keeps the relationship diagram,
+  // which claims no coordinates at all.
+  const records = (map?.maps ?? []).filter(record => (record.points?.length ?? 0) >= 3);
+  const skipped = map?.skipped ?? [];
   return <section className="rag-embedding-pane" aria-label="روابط بردارسازی و منابع واقعی">
-    <div className="rag-section-heading"><h3>بردارسازی و منشأ منابع</h3><span>{fa(embeds.length)} فراخوانی ثبت‌شده</span></div>
+    <div className="rag-section-heading">
+      <div><h3>بردارسازی و منشأ منابع</h3></div>
+      <span>{fa(embeds.length)} فراخوانی ثبت‌شده{records.length ? ` · ${fa(records.length)} نقشهٔ برداری` : ""}</span>
+    </div>
+    {records.map(record => <SemanticScatter key={`${record.collection}-${record.stage}`} record={record}
+      onSelectDoc={onSelectDoc} />)}
+    {records.length > 0 && <div className="rag-embedding-notes">
+      {map?.notice && <p className="rag-note">{map.notice}</p>}
+      {(map?.limitations ?? []).map(line => <p key={line} className="rag-note">{line}</p>)}
+      {skipped.map(item => <p key={item.collection} className="rag-warning">
+        {`${text(item.collection)}: ${item.reason}`}
+      </p>)}
+    </div>}
+    {records.length === 0 && <>
     <svg viewBox={`0 0 760 ${height}`} role="img" aria-label={`روابط پرسش، بردارساز ${model} و ${stores.length} مجموعه؛ مختصات بردار در دسترس نیست`}>
       <title>نقشهٔ روابط ثبت‌شده، بدون نمایش فاصله یا مختصات بردار</title>
       <line x1="574" y1={height / 2} x2="476" y2={height / 2} stroke="var(--accent)" strokeWidth="2" />
@@ -1089,33 +1341,37 @@ export function EmbeddingProvenance({ trace }: { trace: TraceRecord }) {
         const output = stageOutput(stage);
         const docs = [...new Set(rowsOf(stage).map(row => row.doc).filter(Boolean))];
         return <g key={`${stage.name}-${index}`}>
-          <path d={`M 290 ${height / 2} C 235 ${height / 2}, 240 ${y + 43}, 209 ${y + 43}`} fill="none" stroke="var(--desk-blue, #73a9ff)" strokeWidth="1.5" />
+          <path d={`M 290 ${height / 2} C 235 ${height / 2}, 240 ${y + 43}, 209 ${y + 43}`} fill="none" stroke="var(--desk-blue, var(--syntax-blue))" strokeWidth="1.5" />
           <rect x="18" y={y} width="190" height="86" rx="8" fill="var(--surface-2)" stroke="var(--border)" />
-          <text x="194" y={y + 22} textAnchor="end" fill="var(--text)" fontSize="12">{GROUP_FA[groupOf(stage.name)] ?? "مجموعهٔ بازیابی"}</text>
-          <text x="194" y={y + 43} textAnchor="end" fill="var(--desk-blue, #73a9ff)" fontSize="11">{text(stage.meta.collection).slice(0, 28) || "نام مجموعه ثبت نشده"}</text>
-          <text x="194" y={y + 64} textAnchor="end" fill="var(--muted)" fontSize="10">{output.known ? fa(output.count) : `حداقل ${fa(output.count)}`} نتیجه · {fa(docs.length)} سند در نمونه</text>
+          <text x="194" y={y + 22} textAnchor="start" fill="var(--text)" fontSize="12">{fitText(GROUP_FA[groupOf(stage.name)] ?? "مجموعهٔ بازیابی", 166, 12)}</text>
+          <text x="194" y={y + 43} textAnchor="start" fill="var(--desk-blue, var(--syntax-blue))" fontSize="11">{fitText(text(stage.meta.collection) || "نام مجموعه ثبت نشده", 166, 11)}</text>
+          <text x="194" y={y + 64} textAnchor="start" fill="var(--muted)" fontSize="10">{fitText((output.known ? fa(output.count) : "حداقل " + fa(output.count)) + " نتیجه · " + fa(docs.length) + " سند در نمونه", 166, 10)}</text>
           <title>{docs.join("\n") || "متن سند در این مرحله ثبت نشده"}</title>
         </g>;
       })}
       <circle cx="383" cy={height / 2} r="82" fill="var(--surface-2)" stroke="var(--accent)" strokeWidth="1.5" />
       <text x="383" y={height / 2 - 28} textAnchor="middle" fill="var(--accent)" fontSize="12">بردارساز پرسش</text>
-      <text x="383" y={height / 2 - 2} textAnchor="middle" fill="var(--text)" fontSize="10">{model.slice(0, 29)}</text>
+      <text x="383" y={height / 2 - 2} textAnchor="middle" fill="var(--text)" fontSize="10">{fitText(model, 148, 10)}</text>
       <text x="383" y={height / 2 + 24} textAnchor="middle" fill="var(--muted)" fontSize="11">{dims.length ? `${dims.map(n => fa(n)).join(" / ")} بُعد` : "ابعاد ثبت نشده"}</text>
       <rect x="574" y={height / 2 - 48} width="170" height="96" rx="8" fill="var(--surface-2)" stroke="var(--border)" />
-      <text x="730" y={height / 2 - 19} textAnchor="end" fill="var(--text)" fontSize="12">ورودی واقعی جست‌وجو</text>
-      <text x="730" y={height / 2 + 7} textAnchor="end" fill="var(--muted)" fontSize="10">{(inputs[0] || trace.question || "ورودی ثبت نشده").slice(0, 25)}</text>
-      <text x="730" y={height / 2 + 29} textAnchor="end" fill="var(--muted-2)" fontSize="10">بازنویسی → بردارسازی → بازیابی</text>
+      <text x="730" y={height / 2 - 19} textAnchor="start" fill="var(--text)" fontSize="12">ورودی واقعی جست‌وجو</text>
+      <text x="730" y={height / 2 + 7} textAnchor="start" fill="var(--muted)" fontSize="10">{fitText(inputs[0] || trace.question || "ورودی ثبت نشده", 146, 10)}</text>
+      <text x="730" y={height / 2 + 29} textAnchor="start" fill="var(--muted-2)" fontSize="10">{fitText("بازنویسی ← بردارسازی ← بازیابی", 146, 10)}</text>
     </svg>
     <p className="rag-note">این نقشه رابطهٔ پرسش، بردارساز و مجموعه‌ها را نشان می‌دهد. مختصات و بردارها در این رد ذخیره نشده‌اند؛ فاصلهٔ شکل‌ها فاصلهٔ معنایی نیست. هر تکه از مسیرهای رتبه‌بندی زیر قابل بررسی است.</p>
+    {map?.reason && <p className="rag-note">{map.reason}</p>}
+    </>
+    }
     {dims.length > 1 && <p className="rag-warning">بیش از یک اندازهٔ بردار ثبت شده است؛ سازگاری هر مدل و مجموعه را در جزئیات مرحله بررسی کنید.</p>}
   </section>;
 }
 
-export default function RagVisualMap({ trace, selectedStage, onSelectStage, docCap, chunksPerDoc }: {
+export default function RagVisualMap({ trace, selectedStage, onSelectStage, docCap, chunksPerDoc, embeddingMap }: {
   trace: TraceRecord; selectedStage?: number; onSelectStage?: (index: number) => void;
+  embeddingMap?: EmbeddingMapPayload;
 } & MindMapOptions) {
   return <RagVisualMapBody key={trace.id} trace={trace} selectedStage={selectedStage}
-    onSelectStage={onSelectStage} docCap={docCap} chunksPerDoc={chunksPerDoc} />;
+    onSelectStage={onSelectStage} docCap={docCap} chunksPerDoc={chunksPerDoc} embeddingMap={embeddingMap} />;
 }
 
 /**
@@ -1152,8 +1408,27 @@ function VisualRibbon({ trace, docs }: { trace: TraceRecord; docs: DocCoverage[]
   </ul>;
 }
 
-function RagVisualMapBody({ trace, selectedStage, onSelectStage, docCap, chunksPerDoc }: {
+/**
+ * One visualisation of the run. Every block uses the same heading/hint rhythm so
+ * the workbench reads as an ordered list instead of a pile of pictures, and each
+ * one is a landmark for screen readers.
+ */
+function VizSection({ title, hint, note, children }: {
+  title: string; hint: string; note?: string; children: ReactNode;
+}) {
+  return <section className="rag-viz-block" aria-label={title}>
+    <div className="rag-section-heading">
+      <div><h3>{title}</h3></div>
+      <span>{hint}</span>
+    </div>
+    {note && <p className="rag-note">{note}</p>}
+    {children}
+  </section>;
+}
+
+function RagVisualMapBody({ trace, selectedStage, onSelectStage, docCap, chunksPerDoc, embeddingMap }: {
   trace: TraceRecord; selectedStage?: number; onSelectStage?: (index: number) => void;
+  embeddingMap?: EmbeddingMapPayload;
 } & MindMapOptions) {
   const [selectedDoc, setSelectedDoc] = useState("");
   const graph = useMemo(() => buildPipelineGraph(trace), [trace]);
@@ -1165,34 +1440,26 @@ function RagVisualMapBody({ trace, selectedStage, onSelectStage, docCap, chunksP
       <VisualRibbon trace={trace} docs={docs} />
       <SourceMindMap trace={trace} docs={docs} selectedDoc={selectedDoc} onSelectDoc={setSelectedDoc}
         docCap={docCap} chunksPerDoc={chunksPerDoc} />
-      <EmbeddingProvenance trace={trace} />
-      <div>
-        <div className="flex items-baseline gap-2 flex-wrap mb-1.5">
-          <h3 className="text-xs font-bold text-[var(--text)]">نقشهٔ خط بازیابی</h3>
-          <span className="text-[10px] text-[var(--muted-2)]">
-            ضخامت هر پیکان = تعداد خروجی ثبت‌شده؛ پیکان‌ها رابطهٔ داده را نشان می‌دهند، نه اجرای هم‌زمان.
-          </span>
-        </div>
-        <p className="rag-note">آبی: بازیابی برداری · طلایی: BM25 · بنفش: ادغام · صورتی: بازرتبه‌بندی · سبز: بافت مدل و پاسخ. برای باز کردن جزئیات، مرحله را کلیک کنید یا با Tab و Enter انتخاب کنید. ≥ یعنی فقط تعداد نمونه‌ها ثبت شده است؛ پیکان بدون عدد صرفاً رابطهٔ مرحله‌ها را نشان می‌دهد.</p>
+      <EmbeddingProvenance trace={trace} map={embeddingMap} onSelectDoc={setSelectedDoc} />
+      <VizSection title="نقشهٔ خط بازیابی"
+        hint="ضخامت هر پیکان = تعداد خروجی ثبت‌شده"
+        note="آبی: بازیابی برداری · طلایی: BM25 · بنفش: ادغام · صورتی: بازرتبه‌بندی · سبز: بافت مدل و پاسخ. برای باز کردن جزئیات، مرحله را کلیک کنید یا با Tab و Enter انتخاب کنید. ≥ یعنی فقط تعداد نمونه‌ها ثبت شده است؛ پیکان بدون عدد صرفاً رابطهٔ مرحله‌ها را نشان می‌دهد؛ پیکان‌ها اجرای هم‌زمان را نشان نمی‌دهند.">
         <div className="rag-map-scroll"><PipelineMap graph={graph} selectedDoc={selectedDoc} onSelectDoc={setSelectedDoc} selectedStage={selectedStage} onSelectStage={onSelectStage} /></div>
         <div className="mt-2"><FunnelStrip graph={graph} /></div>
-      </div>
+      </VizSection>
 
-      <div>
-        <div className="flex items-baseline gap-2 flex-wrap mb-1.5">
-          <h3 className="text-xs font-bold text-[var(--text)]">سرنوشت تکه‌ها در مرحله‌ها</h3>
-          <span className="text-[10px] text-[var(--muted-2)]">کدام تکه در کدام مرحله چه رتبه‌ای گرفت</span>
-        </div>
+      <VizSection title="سرنوشت تکه‌ها در مرحله‌ها"
+        hint={selectedDoc ? `فقط ${shortName(selectedDoc, 26)}` : "همهٔ تکه‌های ثبت‌شده"}
+        note={selectedDoc
+          ? "نمودار به سند انتخاب‌شده محدود شده است؛ برای دیدن همهٔ تکه‌ها انتخاب سند را بردارید."
+          : "رتبهٔ هر تکه را در هر مرحله دنبال کنید؛ خطی که بالا می‌رود را بازرتبه‌بندی بالا آورده است."}>
         <div className="rag-map-scroll"><ChunkRankChart chart={chart} docFilter={selectedDoc} onSelectDoc={setSelectedDoc} /></div>
-      </div>
+      </VizSection>
 
-      <div>
-        <div className="flex items-baseline gap-2 flex-wrap mb-1.5">
-          <h3 className="text-xs font-bold text-[var(--text)]">اسناد و متن تکه‌های انتخاب‌شده</h3>
-          <span className="text-[10px] text-[var(--muted-2)]">روی هر تکه بزن تا متنش باز شود</span>
-        </div>
+      <VizSection title="اسناد و متن تکه‌های انتخاب‌شده"
+        hint="روی هر تکه بزن تا متنش باز شود">
         <DocumentChunkPanel docs={docs} selectedDoc={selectedDoc} onSelectDoc={setSelectedDoc} />
-      </div>
+      </VizSection>
     </div>
   );
 }

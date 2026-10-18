@@ -8,6 +8,7 @@ Endpoints (all gated by ``deps.require_admin``):
   GET    /api/admin/rag/config                 pipeline knobs + trace limits
   GET    /api/admin/rag/traces?kind=&limit=    newest-first list (no stages)
   GET    /api/admin/rag/traces/{id}            one trace, every stage
+  GET    /api/admin/rag/traces/{id}/embedding-map  2-D map of the query embedding
   DELETE /api/admin/rag/traces?kind=           drop the buffer (or one kind)
   POST   /api/admin/rag/playground             retrieval-only rerun of a question
 
@@ -31,6 +32,8 @@ router = APIRouter(prefix="/api/admin/rag", tags=["admin-rag"],
                    dependencies=[Depends(require_admin)])
 
 STORED_ONLY = "متن‌ها و پرسش‌ها در حافظهٔ موقتی سرور نگه داشته می‌شوند و با ری‌استارت پاک می‌شوند."
+
+MISSING_TRACE = ("این رد در حافظهٔ سرور نیست؛ شاید ری‌استارت شده یا از ۵۰ مورد آخر حذف شده است.")
 
 
 class PlaygroundRequest(BaseModel):
@@ -100,8 +103,27 @@ def get_trace(trace_id: str, response: Response):
     trace = trace_mod.store.get(trace_id)
     if trace is None:
         # Traces are in memory only, so an old id (or a restart) simply misses.
-        raise HTTPException(404, "این رد در حافظهٔ سرور نیست؛ شاید ری‌استارت شده یا از ۵۰ مورد آخر حذف شده است.")
+        raise HTTPException(404, MISSING_TRACE)
     return {"trace": trace}
+
+
+@router.get("/traces/{trace_id}/embedding-map")
+def trace_embedding_map(trace_id: str, response: Response):
+    """Where the query sits among this run's retrieved chunks.
+
+    Built on demand: the vectors are read from Chroma (and the query's place
+    among them follows from the recorded cosine similarities), so opening a
+    trace is the only thing that pays for this - never the chat path, and never
+    a second embedding call. An empty ``maps`` list means the run recorded no
+    cosine-scored vector search, or too few of its vectors are still stored.
+    """
+    _no_store(response)
+    trace = trace_mod.store.get(trace_id)
+    if trace is None:
+        raise HTTPException(404, MISSING_TRACE)
+    from ..rag.embedding_map import build_embedding_maps
+
+    return build_embedding_maps(trace)
 
 
 @router.delete("/traces")

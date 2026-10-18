@@ -172,7 +172,7 @@ function EloBadge({ elo, title, color, size = "md" }: { elo: number; title?: str
   const pad = size === "lg" ? "px-4 py-2" : size === "sm" ? "px-2 py-0.5" : "px-3 py-1"
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-xl font-bold ${pad}`}
-      style={{ background: (color ?? "#9CA3AF") + "22", color: color ?? "#9CA3AF" }}>
+      style={{ background: `color-mix(in srgb, ${color ?? "var(--muted-2)"} 13%, transparent)`, color: color ?? "var(--muted-2)" }}>
       {title && <span className="text-[11px]">{title}</span>}
       <span className={size === "lg" ? "text-[20px]" : "text-[13px]"}>{elo}</span>
     </span>

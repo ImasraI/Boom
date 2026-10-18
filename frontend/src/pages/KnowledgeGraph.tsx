@@ -25,11 +25,11 @@ interface GraphData { major: string; nodes: GraphNode[]; edges: GraphEdge[];
 const YEARS = [10, 11, 12, 0];
 const YEAR_LABELS: Record<number, string> = { 10: "دهم", 11: "یازدهم", 12: "دوازدهم", 0: "پایه نامشخص / جامع" };
 const SUBJECT_COLORS: Record<string, string> = {
-  "حسابان": "#5C8BA8", "ریاضی": "#5C8BA8", "جبر و گسسته": "#7467A8",
-  "هندسه": "#7A9BB8", "فیزیک": "#5D9974", "شیمی": "#A176B5",
-  "زیست‌شناسی": "#569D6A", "ادبیات فارسی": "#B18B2E", "عربی": "#C4714A",
-  "زبان انگلیسی": "#7184B0", "تاریخ": "#A06F5F", "جغرافیا": "#668F7B",
-  "اقتصاد": "#8AAA60", "منطق و فلسفه": "#9682A8", "علوم اجتماعی": "#6F9AA0",
+  "حسابان": "var(--syntax-blue)", "ریاضی": "var(--syntax-blue)", "جبر و گسسته": "var(--syntax-blue)",
+  "هندسه": "var(--syntax-cyan)", "فیزیک": "var(--syntax-teal)", "شیمی": "var(--syntax-purple)",
+  "زیست‌شناسی": "var(--syntax-green)", "ادبیات فارسی": "var(--syntax-yellow)", "عربی": "var(--syntax-orange)",
+  "زبان انگلیسی": "var(--syntax-magenta)", "تاریخ": "var(--brown-text)", "جغرافیا": "var(--syntax-teal)",
+  "اقتصاد": "var(--syntax-green)", "منطق و فلسفه": "var(--syntax-purple)", "علوم اجتماعی": "var(--syntax-cyan)",
 };
 
 // Layout metrics. Lessons stack per (subject, year) column and each
@@ -49,13 +49,13 @@ const LESSON_X0 = 245;
 const MAIN_SUBJECT_PATTERNS = ["شیمی", "زیست", "حسابان", "ریاضی", "فیزیک", "هندسه", "آمار", "گسسته"];
 function isMainSubject(subject: string) { return MAIN_SUBJECT_PATTERNS.some(pattern => subject.includes(pattern)); }
 
-function subjectColor(subject: string) { return SUBJECT_COLORS[subject] || "#8A7A6A"; }
+function subjectColor(subject: string) { return SUBJECT_COLORS[subject] || "var(--muted-2)"; }
 function masteryColor(node: GraphNode) {
-  if (!node.opened) return "#9B948D";
-  if (node.accuracy == null) return "#5C8BA8";
-  if (node.accuracy >= 0.8) return "#4F9B68";
-  if (node.accuracy >= 0.6) return "#C39435";
-  return "#C45C59";
+  if (!node.opened) return "var(--muted-2)";
+  if (node.accuracy == null) return "var(--syntax-blue)";
+  if (node.accuracy >= 0.8) return "var(--syntax-green)";
+  if (node.accuracy >= 0.6) return "var(--warn-text)";
+  return "var(--error-text)";
 }
 function fa(value: number) { return value.toLocaleString("fa-IR"); }
 
@@ -201,10 +201,10 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
               </select>
             </label>
             <div className="flex flex-wrap justify-end gap-x-4 gap-y-2 text-[10px] font-semibold text-[var(--muted-2)]">
-              <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[#4F9B68]" />دقت بالا</span>
-              <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[#C39435]" />نیاز به تمرین</span>
-              <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[#C45C59]" />ضعیف</span>
-              <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[#9B948D]" />باز نشده</span>
+              <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[var(--syntax-green)]" />دقت بالا</span>
+              <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[var(--warn-text)]" />نیاز به تمرین</span>
+              <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[var(--error-text)]" />ضعیف</span>
+              <span><i className="me-1 inline-block h-2.5 w-2.5 rounded-full bg-[var(--muted-2)]" />باز نشده</span>
             </div>
           </section>
 
@@ -231,7 +231,7 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
                   // draw twice on top of itself - keep the solid one only.
                   if (edge.kind === "sequence" && layout.prerequisitePairs.has(`${edge.source}->${edge.target}`)) return null;
                   const sourceNode = nodeById.get(edge.source);
-                  const stroke = edge.kind === "prerequisite" ? (edge.importance ?? 3) >= 4 ? "#C4714A" : subjectColor(sourceNode?.subject || "") : "var(--border-strong)";
+                  const stroke = edge.kind === "prerequisite" ? (edge.importance ?? 3) >= 4 ? "var(--accent)" : subjectColor(sourceNode?.subject || "") : "var(--border-strong)";
                   const strokeWidth = edge.kind === "prerequisite" ? 1 + (edge.importance ?? 3) / 2 : 0.8;
                   const dash = edge.kind === "prerequisite" ? "0" : "5 5";
                   if (edge.kind !== "contains" && Math.abs(source.x - target.x) < 1) {
@@ -250,7 +250,7 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
                   const selectedNode = selected?.id === node.id;
                   return <g key={node.id} role="treeitem" aria-label={node.title} aria-selected={selectedNode} tabIndex={0} onClick={() => setSelectedId(node.id)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedId(node.id); } }} className="cursor-pointer">
                     <title>{node.title}</title>
-                    <rect x={position.x} y={position.y} width="170" height="50" rx="12" fill={node.opened ? `${color}22` : "#9B948D18"} stroke={selectedNode ? color : node.opened ? color : "#9B948D"} strokeWidth={selectedNode ? 3 : Math.max(1.5, node.importance / 2)} />
+                    <rect x={position.x} y={position.y} width="170" height="50" rx="12" fill={node.opened ? `color-mix(in srgb, ${color} 13%, transparent)` : "color-mix(in srgb, var(--muted-2) 9%, transparent)"} stroke={selectedNode ? color : node.opened ? color : "var(--muted-2)"} strokeWidth={selectedNode ? 3 : Math.max(1.5, node.importance / 2)} />
                     <circle cx={position.x + 18} cy={position.y + 25} r={node.kind === "subject" ? 7 : 5} fill={color} />
                     <text x={position.x + 34} y={position.y + 22} fontSize="12" fontWeight="700" fill="var(--text)" textAnchor="start">{node.title.slice(0, 20)}</text>
                     <text x={position.x + 34} y={position.y + 39} fontSize="9" fill="var(--muted)" textAnchor="start">{node.kind === "subject" ? "درس" : node.opened ? node.accuracy == null ? "مطالعه‌شده؛ بدون تست" : `${Math.round(node.accuracy * 100)}٪ دقت` : "هنوز باز نشده"}</text>
@@ -263,7 +263,7 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
           {selected && <section className="study-section mx-5 mt-4 p-5 text-right">
             <div className="flex items-start justify-between gap-3">
               <div><p className="text-[10px] font-bold text-[var(--muted-2)]">اهمیت {selected.importance} از ۵ (برآورد مدل)</p><h2 className="mt-1 text-lg font-bold text-[var(--text)]">{selected.title}</h2></div>
-              <span className="rounded-xl px-3 py-1 text-[11px] font-bold" style={{ color: masteryColor(selected), backgroundColor: `${masteryColor(selected)}18` }}>{selected.opened ? "باز شده" : selected.available ? "آمادهٔ مطالعه" : "پیش‌نیاز باز نشده"}</span>
+              <span className="rounded-xl px-3 py-1 text-[11px] font-bold" style={{ color: masteryColor(selected), backgroundColor: `color-mix(in srgb, ${masteryColor(selected)} 9%, transparent)` }}>{selected.opened ? "باز شده" : selected.available ? "آمادهٔ مطالعه" : "پیش‌نیاز باز نشده"}</span>
             </div>
             <p className="mt-3 text-[12px] leading-relaxed text-[var(--muted)]">{selected.opened ? `${fa(selected.attempted)} پاسخ ثبت شده، ${fa(selected.wrong)} غلط و ${selected.accuracy == null ? "داده کافی نیست" : `${Math.round(selected.accuracy * 100)}٪ دقت`}.` : "بعد از ثبت یک جلسه مطالعه یا پاسخ‌دادن به تست‌های این مبحث، این گره باز و رنگی می‌شود."}</p>
             {selected.sources?.length && <div className="mt-4 border-t border-[var(--border)] pt-3" dir="rtl">

@@ -2,28 +2,31 @@
 @font-face { font-family: 'Boom Nazanin'; src: url('/fonts/BNazaninBold.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
 
 :root {
-  --page-bg:#eee3dc; --surface:#fff8f3; --surface-2:#f4e9e1; --card:#fffaf6;
-  --field:#fff5ef; --chip:#efdfd5; --chip-hover:#e6cbbd;
-  --text:#452e26; --text-strong:#30201c; --muted:#74584b; --muted-2:#806153; --placeholder:#806153;
-  --border:#e4d1c5; --border-strong:#ceb3a4; --toggle-off:#d4b7a8; --neutral-chip:#f0e4da;
+  --page-bg:#f0f0f0; --surface:#f8f8f8; --surface-2:#ececec; --card:#ffffff;
+  --field:#ffffff; --chip:#e8e8e8; --chip-hover:#dedede;
+  --text:#1f1f1f; --text-strong:#000000; --muted:#616161; --muted-2:#767676; --placeholder:#949494;
+  --border:#e2e2e2; --border-strong:#cccccc; --toggle-off:#cccccc; --neutral-chip:#f3f3f3;
   --accent:#ad332b; --accent-rgb:173 51 43; --accent-soft:#f9e1d8; --accent-soft-border:#dfa79b; --accent-ink:#8a2722;
   --action:#a43f36; --action-ink:#fff7f1;
-  --success-text:#376c50; --success-bg:#e5efe4; --brown-text:#684c3f;
-  --desk-blue:#506d91; --desk-pink:#b34032; --desk-gold:#8c6729; --desk-line:#dfcabb;
+  --success-text:#107c10; --success-bg:#e6f4e8; --brown-text:#3b3b3b;
+  --desk-blue:#0451a5; --desk-pink:#af00db; --desk-gold:#795e26; --desk-line:#dcdcdc;
+  /* VS Code's syntax + status hues, exposed as the app's category colors. */
+  --syntax-blue:#0451a5; --syntax-cyan:#007bb8; --syntax-teal:#267f99; --syntax-green:#107c10; --syntax-yellow:#795e26; --syntax-orange:#c46b20; --syntax-red:#cd3131; --syntax-purple:#af00db; --syntax-magenta:#a3217f; --status-bar:#007acc; --status-ink:#ffffff; --warn-text:#8a6d00; --error-text:#cd3131; --info-text:#005fb8;
   --font-heading:'Boom Nazanin','Estedad','Vazirmatn',serif;
   --desk-ease:cubic-bezier(.16,1,.3,1);
 }
 html.dark {
   color-scheme:dark;
-  --page-bg:#191413; --surface:#231917; --surface-2:#2e211d; --card:#2a1e1a; --field:#231916;
-  --chip:#392721; --chip-hover:#493229; --text:#f1e2da; --text-strong:#fff2e9;
-  --muted:#ceb8a9; --muted-2:#b79c8b; --placeholder:#b79c8b; --border:#432f26; --border-strong:#634638;
-  --toggle-off:#594032; --neutral-chip:#372720; --accent:#e76858; --accent-rgb:231 104 88;
+  --page-bg:#1f1f1f; --surface:#181818; --surface-2:#232323; --card:#252526; --field:#313131;
+  --chip:#2d2d30; --chip-hover:#3c3c3c; --text:#cccccc; --text-strong:#ffffff;
+  --muted:#9d9d9d; --muted-2:#868686; --placeholder:#6e7681; --border:#2b2b2b; --border-strong:#454545;
+  --toggle-off:#3c3c3c; --neutral-chip:#2d2d30; --accent:#e76858; --accent-rgb:231 104 88;
   --accent-soft:#42261f; --accent-soft-border:#804336; --accent-ink:#ffa594;
   --action:#a6473e; --action-ink:#fff7f1;
-  --success-text:#9ac5a3; --success-bg:#25372a; --brown-text:#dbc3b2;
-  --desk-blue:#a5b8d5; --desk-pink:#df7760; --desk-gold:#e4c17e; --desk-line:#443027;
-  --block-shadow:#80634e;
+  --success-text:#89d185; --success-bg:#12271a; --brown-text:#cfcfcf;
+  --desk-blue:#569cd6; --desk-pink:#c586c0; --desk-gold:#dcdcaa; --desk-line:#333333;
+  --syntax-blue:#569cd6; --syntax-cyan:#9cdcfe; --syntax-teal:#4ec9b0; --syntax-green:#6a9955; --syntax-yellow:#dcdcaa; --syntax-orange:#ce9178; --syntax-red:#f14c4c; --syntax-purple:#c586c0; --syntax-magenta:#d16d9e; --status-bar:#007acc; --status-ink:#ffffff; --warn-text:#cca700; --error-text:#f14c4c; --info-text:#75beff;
+  --block-shadow:#4a4a4a;
 }
 html[data-palette='mint']:not(.dark) { --surface:#f5f8f2; --surface-2:#e9f0e6; --page-bg:#e4ebe0; }
 html.dark[data-palette='mint'] { --page-bg:#101815; --surface:#131e19; --surface-2:#1c2a22; --card:#1a271f; --chip:#24372c; --field:#17221b; --border:#2c3e32; --border-strong:#415d4b; }

@@ -2,7 +2,7 @@ import { accountStorage } from "../accountStorage";
 import { useEffect, useState } from "react";
 import { apiUrl, authHeaders, readApiError } from "../api";
 import { NavFn, SignupData, normalizeSignupData } from "../types";
-import { AuthOrbs, BackButton, ErrorBanner, PhoneInput, PasswordInput, PrimaryButton } from "../components/ui";
+import { BackButton, ErrorBanner, PhoneInput, PasswordInput, PrimaryButton } from "../components/ui";
 
 function profileForPhone(phone: string): SignupData {
   try {
@@ -69,12 +69,11 @@ export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: s
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--page-bg)]">
-      <AuthOrbs />
       <div className="relative flex-1 flex flex-col px-5 pt-6 pb-8">
-        <div className="anim-fade-in"><BackButton onClick={() => nav("landing")} /></div>
+        <div><BackButton onClick={() => nav("landing")} /></div>
 
         <div className="flex-1 flex flex-col justify-center max-w-md w-full mx-auto">
-          <div className="auth-sheet py-8 anim-fade-up">
+          <div className="auth-sheet py-8">
             <div className="flex flex-col items-center text-center">
               <img src="/karzar-shield-detailed.png" alt="نشان سپر کارزار" className="w-14 h-14 mb-4"
                    style={{ filter: "drop-shadow(0 6px 16px rgba(0,0,0,0.22))" }} />

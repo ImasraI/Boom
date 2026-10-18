@@ -5,7 +5,7 @@ import { StudySymbol } from "../components/StudySymbols";
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} className="w-9 h-9 rounded-xl bg-[#F0EBE3] flex items-center justify-center text-[var(--muted)] hover:bg-[#E5DDD4] transition-colors">
+    <button onClick={onClick} className="w-9 h-9 rounded-xl bg-[var(--chip)] flex items-center justify-center text-[var(--muted)] hover:bg-[var(--chip)] transition-colors">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: "scaleX(-1)" }}>
         <path d="M19 12H5M12 5l-7 7 7 7"/>
       </svg>
@@ -20,7 +20,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
   const maxXP = Math.max(...PAST_RECORDS.map(r => r.xp));
 
   return (
-    <div className="min-h-screen bg-[#F8F6F2]">
+    <div className="min-h-screen bg-[var(--surface)]">
       <div className="px-5 pt-12 pb-4 flex items-center gap-4">
         <BackButton onClick={() => nav("home")} />
         <h1 className="font-display text-xl text-[var(--text)]">استریک شما</h1>
@@ -28,12 +28,12 @@ export default function Streak({ nav }: { nav: NavFn }) {
 
       {/* Streak hero */}
       <div className="study-section mx-5 mt-2 p-6 flex items-center gap-5">
-        <div className="w-20 h-20 rounded-2xl bg-[#FFF5F0] flex items-center justify-center">
+        <div className="w-20 h-20 rounded-2xl bg-[var(--accent-soft)] flex items-center justify-center">
           <StudySymbol kind="streak" size={36} className="text-[var(--accent)]" />
         </div>
         <div>
           <p className="text-[11px] font-bold text-[var(--muted-2)]">استریک فعلی</p>
-          <p className="text-5xl font-bold text-[#C4714A] leading-tight">{currentStreak()}</p>
+          <p className="text-5xl font-bold text-[var(--accent)] leading-tight">{currentStreak()}</p>
           <p className="text-[13px] text-[var(--muted)] font-medium">روز متوالی</p>
         </div>
       </div>
@@ -68,12 +68,12 @@ export default function Streak({ nav }: { nav: NavFn }) {
                     style={{
                       height: `${height}%`,
                       background: isToday
-                        ? "linear-gradient(to top, #C4714A, #E8A070)"
-                        : pct === 100 ? "#6B9E7A" : "#E5DDD4",
+                        ? "linear-gradient(to top, var(--accent), #e8a070)"
+                        : pct === 100 ? "var(--success-text)" : "var(--chip)",
                     }}
                   />
                 </div>
-                <span className={`text-[9px] font-bold ${isToday ? "text-[#C4714A]" : "text-[var(--muted-2)]"}`}>
+                <span className={`text-[9px] font-bold ${isToday ? "text-[var(--accent)]" : "text-[var(--muted-2)]"}`}>
                   {weekday(r.date).slice(0, 1)}
                 </span>
               </div>
@@ -96,7 +96,7 @@ export default function Streak({ nav }: { nav: NavFn }) {
                   <p className="text-[11px] text-[var(--muted-2)] font-medium">{r.tasksDone}/{r.tasksTotal} تکلیف · {r.xp} XP</p>
                 </div>
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-[12px] font-bold ${
-                  pct === 100 ? "bg-[#EAF5EC] text-[#6B9E7A]" : pct >= 50 ? "bg-[#FFF5F0] text-[#C4714A]" : "bg-[#F5F5F5] text-[var(--muted-2)]"
+                  pct === 100 ? "bg-[var(--success-bg)] text-[var(--success-text)]" : pct >= 50 ? "bg-[var(--accent-soft)] text-[var(--accent)]" : "bg-[var(--neutral-chip)] text-[var(--muted-2)]"
                 }`}>
                   {pct === 100 ? <CheckMark size={12} /> : `${pct}%`}
                 </div>

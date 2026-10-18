@@ -7,9 +7,9 @@ const WIDTH = 440,
   TOP = 28,
   RIGHT = 412,
   BOTTOM = 236
-const accent = "var(--accent, #ca854c)",
-  ink = "var(--text, #241b14)",
-  muted = "var(--muted, #8c8177)"
+const accent = "var(--accent)",
+  ink = "var(--text)",
+  muted = "var(--muted)"
 const names: Record<string, string> = {
   geometry: "شکل هندسی",
   function_plot: "نمودار تابع",
@@ -67,7 +67,7 @@ function Axes({
         <g key={`x${i}`}>
           <path
             d={`M ${map.x(x)} ${TOP} V ${BOTTOM}`}
-            stroke="var(--border, #ddd)"
+            stroke="var(--border)"
             strokeDasharray="3 5"
             fill="none"
           />
@@ -80,7 +80,7 @@ function Axes({
         <g key={`y${i}`}>
           <path
             d={`M ${LEFT} ${map.y(y)} H ${RIGHT}`}
-            stroke="var(--border, #ddd)"
+            stroke="var(--border)"
             strokeDasharray="3 5"
             fill="none"
           />
@@ -342,7 +342,7 @@ export default function QuestionFigure({ figure }: { figure?: unknown }) {
               x2={RIGHT}
               y1={map.y(v)}
               y2={map.y(v)}
-              stroke="var(--border, #ddd)"
+              stroke="var(--border)"
             />
             <text
               x={LEFT - 8}

@@ -5,16 +5,11 @@ import { NavFn, SignupData, normalizeSignupData } from "../types";
 import { MAJORS, GRADES, STUDY_HOURS_OPTIONS, TEST_EXAM_OPTIONS } from "../data";
 import { GradeSymbol, SubjectSymbol } from "../components/StudySymbols";
 import {
-  AuthOrbs, BackButton, ErrorBanner, StepHeading, PrimaryButton,
+  BackButton, ErrorBanner, StepHeading, PrimaryButton,
   PhoneInput, PasswordInput, StrengthMeter, OtpInput, ChoiceButton,
 } from "../components/ui";
 
 interface Props { nav: NavFn; onComplete: (data: SignupData) => void; }
-
-/** Stagger delay class for the i-th choice in a list. */
-function stagger(i: number): string {
-  return ["", "delay-1", "delay-2", "delay-3", "delay-4"][i % 5] || "";
-}
 
 export default function Signup({ nav, onComplete }: Props) {
   const [step, setStep] = useState(0);
@@ -210,7 +205,7 @@ export default function Signup({ nav, onComplete }: Props) {
             onEnter={() => canContinue && advance()}
           />
           {phoneTaken && (
-            <div className="mt-4 rounded-2xl border border-[var(--accent-soft-border)] bg-[var(--accent-soft)] p-4 anim-fade-up">
+            <div className="mt-4 rounded-2xl border border-[var(--accent-soft-border)] bg-[var(--accent-soft)] p-4">
               <p className="text-[13.5px] font-bold text-[var(--text)] text-right">
                 این شماره قبلاً ثبت‌نام کرده است
               </p>
@@ -291,8 +286,8 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "برنامه‌ی درسی‌ات رو بر اساسش تنظیم می‌کنیم.",
       content: (
         <div className="flex flex-col gap-2">
-          {MAJORS.map((m, i) => (
-            <ChoiceButton key={m} selected={major === m} onClick={() => pick(setMajor, m)} delay={stagger(i)}>
+          {MAJORS.map(m => (
+            <ChoiceButton key={m} selected={major === m} onClick={() => pick(setMajor, m)}>
               <span className="inline-flex items-center gap-3"><SubjectSymbol subject={m} size={22} className="shrink-0" />{m}</span>
             </ChoiceButton>
           ))}
@@ -304,8 +299,8 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "بر اساسش زمان‌بندی‌ات رو تنظیم می‌کنیم.",
       content: (
         <div className="flex flex-col gap-2">
-          {GRADES.map((g, i) => (
-            <ChoiceButton key={g} selected={grade === g} onClick={() => pick(setGrade, g)} delay={stagger(i)}>
+          {GRADES.map(g => (
+            <ChoiceButton key={g} selected={grade === g} onClick={() => pick(setGrade, g)}>
               <span className="inline-flex items-center gap-3"><GradeSymbol grade={g} size={22} className="shrink-0" />{g}</span>
             </ChoiceButton>
           ))}
@@ -317,8 +312,8 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "یه روز معمولی — نه بهترین و نه بدترین روزت.",
       content: (
         <div className="flex flex-col gap-2">
-          {STUDY_HOURS_OPTIONS.map((h, i) => (
-            <ChoiceButton key={h} selected={studyHours === h} onClick={() => pick(setStudyHours, h)} delay={stagger(i)}>
+          {STUDY_HOURS_OPTIONS.map(h => (
+            <ChoiceButton key={h} selected={studyHours === h} onClick={() => pick(setStudyHours, h)}>
               {h}
             </ChoiceButton>
           ))}
@@ -330,8 +325,8 @@ export default function Signup({ nav, onComplete }: Props) {
       sub: "همه رو انتخاب کن. نتایجت رو باهاشون هماهنگ می‌کنیم.",
       content: (
         <div className="flex flex-col gap-2">
-          {TEST_EXAM_OPTIONS.map((e, i) => (
-            <ChoiceButton key={e} selected={testExams.includes(e)} onClick={() => toggleExam(e)} delay={stagger(i)}>
+          {TEST_EXAM_OPTIONS.map(e => (
+            <ChoiceButton key={e} selected={testExams.includes(e)} onClick={() => toggleExam(e)}>
               {e}
             </ChoiceButton>
           ))}
@@ -363,7 +358,6 @@ export default function Signup({ nav, onComplete }: Props) {
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--page-bg)]">
-      <AuthOrbs />
       {/* Segmented progress + counter + back */}
       <div className="sticky top-0 z-10 bg-[var(--page-bg)]/90 backdrop-blur-sm px-5 pt-5 pb-3">
         <div className="max-w-lg mx-auto">
@@ -383,7 +377,7 @@ export default function Signup({ nav, onComplete }: Props) {
 
       <div className="relative flex-1 flex flex-col px-5 pt-4 pb-8 overflow-y-auto">
         <div className="w-full max-w-lg mx-auto flex flex-col flex-1">
-          <div key={step} className="anim-fade-up">
+          <div key={step}>
             <StepHeading title={steps[step].q} sub={steps[step].sub} />
             <div className="mt-6">{steps[step].content}</div>
             <ErrorBanner message={error} />

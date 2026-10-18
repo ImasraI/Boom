@@ -41,6 +41,6 @@ export default function Landing({ nav }: { nav: NavFn }) {
         {kind:"award" as const,n:"۰۳",title:"میدان تمرین",body:"آزمون بده، اشتباه‌هایت را بشناس و در کولوسئوم رقابت کن."}].map(item =>
         <article key={item.n}><div><StudySymbol kind={item.kind} size={22} /><span>{item.n}</span></div><h2>{item.title}</h2><p>{item.body}</p></article>)}
     </section>
-    <footer className="landing-footer"><span>بوم · برای مسیر کنکور تو</span><span dir="ltr">STUDY / UNDERSTAND / REPEAT</span></footer>
+    <footer className="landing-footer"><span>بوم · برای مسیر کنکور تو</span></footer>
   </div>;
 }

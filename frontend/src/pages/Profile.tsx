@@ -263,12 +263,12 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
             </div>
             <div>
               <div className="flex justify-between mb-1">
-                <span className="text-[11px] font-bold text-[#5C8BA8]">{confidence[s]}%</span>
+                <span className="text-[11px] font-bold text-[var(--syntax-blue)]">{confidence[s]}%</span>
                 <span className="text-[11px] font-bold text-[var(--muted-2)]">سطح اعتماد به نفس</span>
               </div>
               <input type="range" min={0} max={100} step={5} value={confidence[s]}
                 onChange={e => setConfidence(c => ({ ...c, [s]: Number(e.target.value) }))}
-                className="w-full" style={{ accentColor: "#5C8BA8" }} />
+                className="w-full" style={{ accentColor: "var(--syntax-blue)" }} />
             </div>
           </div>
         </div>
@@ -378,7 +378,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
         <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5 text-right">حال‌وهوای رنگی برنامه</p>
         <div className="flex gap-2 mt-3">
           {(["coral", "mint", "iris"] as const).map(id => {
-            const color = id === "coral" ? "#ad332b" : id === "mint" ? "#278575" : "#8060c6";
+            const color = id === "coral" ? "var(--accent)" : id === "mint" ? "#278575" : "#8060c6";
             const label = id === "coral" ? "غروب" : id === "mint" ? "جنگل" : "یاس";
             return (
               <button key={id} onClick={() => setPalette(id)} aria-pressed={prefs.palette === id}

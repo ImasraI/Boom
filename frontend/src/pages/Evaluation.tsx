@@ -24,7 +24,7 @@ function SubjectCard({ test, onClick }: { test: SubjectTest; onClick: () => void
       <div className="flex items-center gap-4">
         <div
           className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl font-bold flex-shrink-0"
-          style={{ backgroundColor: test.color + "20", color: test.color }}
+          style={{ backgroundColor: `color-mix(in srgb, ${test.color} 13%, transparent)`, color: test.color }}
         >
           <SubjectSymbol subject={test.name} size={29} />
         </div>
@@ -380,7 +380,7 @@ function ResultView({
                 cy="40"
                 r="34"
                 fill="none"
-                stroke={pct >= 70 ? "var(--accent)" : pct >= 50 ? "#EAB308" : "#EF4444"}
+                stroke={pct >= 70 ? "var(--accent)" : pct >= 50 ? "var(--warn-text)" : "var(--error-text)"}
                 strokeWidth="6"
                 strokeDasharray={`${(pct / 100) * 213.6} 213.6`}
                 strokeLinecap="round"

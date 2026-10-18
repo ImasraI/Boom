@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { apiJson } from "../api";
 import RagVisualMap, { roleOf, stageOutput } from "./RagPipelineMap";
+import type { EmbeddingMapPayload } from "./RagPipelineMap";
 import { RagRequestFence } from "./ragRequestFence";
 import { SettingsIcon } from "./icons";
 import "./rag-inspector.css";
@@ -271,8 +272,19 @@ function StageCard({ stage, index, max, selected, openAll, onSelect, id }: {
   );
 }
 
-export function TraceView({ trace, settings }: { trace: TraceRecord; settings?: RagViewSettings }) {
-  return <TraceViewBody key={trace.id} trace={trace} settings={settings} />;
+/**
+ * Only a run that recorded cosine-scored vector rows can have a vector map:
+ * the map is derived from those rows' similarities and the stored vectors.
+ */
+export function traceHasSemanticRows(trace: TraceRecord): boolean {
+  return (trace.stages ?? []).some(stage => stage.name.endsWith("semantic_search")
+    && (stage.rows?.length ?? 0) >= 3);
+}
+
+export function TraceView({ trace, settings, embeddingMap }: {
+  trace: TraceRecord; settings?: RagViewSettings; embeddingMap?: EmbeddingMapPayload;
+}) {
+  return <TraceViewBody key={trace.id} trace={trace} settings={settings} embeddingMap={embeddingMap} />;
 }
 
 /**
@@ -288,7 +300,9 @@ const TRACE_TABS = [
 
 type TraceTab = typeof TRACE_TABS[number]["id"];
 
-function TraceViewBody({ trace, settings }: { trace: TraceRecord; settings?: RagViewSettings }) {
+function TraceViewBody({ trace, settings, embeddingMap }: {
+  trace: TraceRecord; settings?: RagViewSettings; embeddingMap?: EmbeddingMapPayload;
+}) {
   const stages = trace.stages ?? [];
   const view = settings ?? DEFAULT_RAG_VIEW_SETTINGS;
   const [tab, setTab] = useState<TraceTab>("visual");
@@ -375,7 +389,7 @@ function TraceViewBody({ trace, settings }: { trace: TraceRecord; settings?: Rag
               <button type="button" onClick={() => openStageDetails(selectedStage)}>جزئیات مرحله</button>
             </div>}
             <RagVisualMap trace={trace} selectedStage={selectedStage ?? undefined} onSelectStage={setSelectedStage}
-              docCap={view.docCap} chunksPerDoc={view.chunksPerDoc} />
+              docCap={view.docCap} chunksPerDoc={view.chunksPerDoc} embeddingMap={embeddingMap} />
           </section>
 
           <section className="rag-tab-panel" role="tabpanel" id={`rag-panel-stages-${trace.id}`}
@@ -424,6 +438,7 @@ export default function RagInspector() {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [embeddingMap, setEmbeddingMap] = useState<EmbeddingMapPayload | null>(null);
   const [listErr, setListErr] = useState("");
   const requests = useRef(new RagRequestFence());
   const activeKind = useRef("all");
@@ -479,14 +494,36 @@ export default function RagInspector() {
     try { window.localStorage.setItem(VIEW_SETTINGS_KEY, JSON.stringify(view)); } catch { /* private mode */ }
   }, [view]);
 
+  /**
+   * The vector map of one run, read lazily when the run is opened.
+   *
+   * It costs a Chroma read and a projection, so it is never built for the list
+   * and never on the chat path. A failure is not surfaced: the component that
+   * renders without coordinates is already the honest fallback.
+   */
+  const loadEmbeddingMap = useCallback(async (id: string) => {
+    const request = requests.current.begin("map");
+    try {
+      const data = await apiJson<EmbeddingMapPayload>(
+        `/api/admin/rag/traces/${encodeURIComponent(id)}/embedding-map`, { signal: request.signal });
+      if (!request.current() || activeTrace.current !== id) return;
+      setEmbeddingMap(data);
+    } catch {
+      if (request.current() && activeTrace.current === id) setEmbeddingMap(null);
+    }
+  }, []);
+
   const openTrace = useCallback(async (id: string, refresh = false) => {
     const request = requests.current.begin("detail");
     activeTrace.current = id; setSelectedId(id);
-    if (!refresh) { setSelected(null); setErr(""); setDetailLoading(true); }
+    if (!refresh) { setSelected(null); setEmbeddingMap(null); setErr(""); setDetailLoading(true); }
     try {
       const data = await apiJson<{ trace: TraceRecord }>(`/api/admin/rag/traces/${encodeURIComponent(id)}`, { signal: request.signal });
       if (!request.current() || activeTrace.current !== id) return;
       setSelected(data.trace);
+      // Fire-and-forget: the stage record is readable while the map is built.
+      if (traceHasSemanticRows(data.trace)) void loadEmbeddingMap(id);
+      else setEmbeddingMap(null);
     } catch (error) {
       if (!request.current() || activeTrace.current !== id) return;
       if (!refresh) setSelected(null);
@@ -494,7 +531,7 @@ export default function RagInspector() {
     } finally {
       if (request.current()) setDetailLoading(false);
     }
-  }, []);
+  }, [loadEmbeddingMap]);
 
   // Poll only the selected running trace, after each response has finished.
   // A slow endpoint is never aborted merely because another poll is due.
@@ -520,8 +557,9 @@ export default function RagInspector() {
   async function clearTraces() {
     const request = requests.current.begin("mutation");
     requests.current.invalidate("detail"); requests.current.invalidate("list");
+    requests.current.invalidate("map");
     activeTrace.current = "";
-    setSelected(null); setSelectedId(""); setDetailLoading(false);
+    setSelected(null); setSelectedId(""); setEmbeddingMap(null); setDetailLoading(false);
     setBusy(true); setErr("");
     try {
       await apiJson(`/api/admin/rag/traces?kind=${encodeURIComponent(activeKind.current)}`, { method: "DELETE", signal: request.signal });
@@ -566,7 +604,6 @@ export default function RagInspector() {
       <section className="study-section p-4">
         <div className="rag-topbar">
           <div className="min-w-0">
-            <span className="rag-kicker">RAG CONSOLE</span>
             <h2 className="font-bold text-sm mb-2">تنظیمات فعلی مسیر بازیابی (RAG)</h2>
             <p className="text-xs text-[var(--muted)] leading-relaxed">{config?.notice}</p>
           </div>
@@ -750,7 +787,7 @@ export default function RagInspector() {
       {selected && (
         <section className="study-section p-4">
           <h2 className="font-bold text-sm mb-3">جزئیات گام‌به‌گام</h2>
-          <TraceView trace={selected} settings={view} />
+          <TraceView trace={selected} settings={view} embeddingMap={embeddingMap ?? undefined} />
         </section>
       )}
     </div>

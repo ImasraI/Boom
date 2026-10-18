@@ -515,6 +515,8 @@ def test_rag_inspector_router_is_admin_gated():
         "/api/admin/rag/config",
         "/api/admin/rag/traces",
         "/api/admin/rag/traces/{trace_id}",
+        # The lazy vector map of one run: read-only, and behind the same gate.
+        "/api/admin/rag/traces/{trace_id}/embedding-map",
         "/api/admin/rag/playground",
     }
 

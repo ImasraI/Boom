@@ -419,7 +419,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
             <button
               type="button"
               onClick={createSession}
-              className="w-8 h-8 rounded-xl bg-[#C4714A] text-white font-bold text-lg flex items-center justify-center"
+              className="w-8 h-8 rounded-xl bg-[var(--accent)] text-white font-bold text-lg flex items-center justify-center"
               aria-label="گفتگوی جدید"
             >
               +
@@ -437,12 +437,12 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
                   onClick={() => switchSession(s.id)}
                   className={`w-full flex items-center gap-1.5 pe-7 ps-2.5 py-2.5 rounded-xl text-[11px] font-medium text-right border ${
                     selected
-                      ? "bg-[#C4714A] text-white border-[#C4714A]"
-                      : "bg-[#F5F0EA] text-[var(--text)] border-[#E5DDD4] hover:bg-[#EFE8E0]"
+                      ? "bg-[var(--accent)] text-white border-[var(--accent)]"
+                      : "bg-[var(--surface-2)] text-[var(--text)] border-[var(--chip)] hover:bg-[var(--surface-2)]"
                   }`}
                 >
                   {s.pending && (
-                    <span className={`w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0 ${selected ? "bg-[var(--card)]" : "bg-[#C4714A]"}`} />
+                    <span className={`w-1.5 h-1.5 rounded-full animate-pulse flex-shrink-0 ${selected ? "bg-[var(--card)]" : "bg-[var(--accent)]"}`} />
                   )}
                   <span className="truncate flex-1">{s.name}</span>
                 </button>
@@ -450,7 +450,7 @@ export default function Chat({ nav, userData }: { nav: NavFn; userData: SignupDa
                   type="button"
                   onClick={() => deleteSession(s.id)}
                   className={`absolute left-1 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md text-[10px] flex items-center justify-center ${
-                    selected ? "text-white/80 hover:bg-[var(--card)]/15" : "text-[var(--muted-2)] hover:bg-[#F8E8E4] hover:text-[#C45A4A]"
+                    selected ? "text-white/80 hover:bg-[var(--card)]/15" : "text-[var(--muted-2)] hover:bg-[var(--accent-soft)] hover:text-[var(--error-text)]"
                   }`}
                   aria-label={`حذف ${s.name}`}
                   title="حذف گفتگو"

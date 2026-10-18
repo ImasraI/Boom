@@ -79,10 +79,10 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
 
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/25 backdrop-blur-[2px]" onClick={onClose}>
-      <div className="w-full max-w-[430px] bg-[#F8F6F2] rounded-t-3xl p-6 pb-10 shadow-2xl"
+      <div className="w-full max-w-[430px] bg-[var(--surface)] rounded-t-3xl p-6 pb-10 shadow-2xl"
         onClick={e => e.stopPropagation()}>
         {/* Handle */}
-        <div className="w-10 h-1 bg-[#D5CCC3] rounded-full mx-auto mb-5" />
+        <div className="w-10 h-1 bg-[var(--chip)] rounded-full mx-auto mb-5" />
 
         {/* Type badge + title */}
         {error && <p role="alert" className="text-xs text-red-600 mb-3">{error}</p>}
@@ -94,13 +94,13 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
           <div className="flex-1 min-w-0">
             {editing ? (
               <input value={title} onChange={e => setTitle(e.target.value)}
-                className="w-full font-bold text-[16px] text-[var(--text)] bg-[var(--card)] border-2 border-[#C4714A] rounded-xl px-3 py-1.5 outline-none" />
+                className="w-full font-bold text-[16px] text-[var(--text)] bg-[var(--card)] border-2 border-[var(--accent)] rounded-xl px-3 py-1.5 outline-none" />
             ) : (
               <p className="font-bold text-[16px] text-[var(--text)] leading-snug">{task.title}</p>
             )}
             <div className="flex items-center gap-2 mt-1">
               <span className="text-[11px] font-bold" style={{ color }}>{task.subject}</span>
-              <span className="text-[11px] text-[#C4B8A8]">·</span>
+              <span className="text-[11px] text-[var(--muted-2)]">·</span>
               <span className="text-[11px] text-[var(--muted-2)] font-medium">{typeLabels[task.type]}</span>
             </div>
           </div>
@@ -108,30 +108,30 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
 
         {editing ? (
           <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3}
-            className="w-full text-[13px] text-[#5A4030] leading-relaxed mb-4 bg-[var(--card)] rounded-2xl px-4 py-3 border-2 border-[#C4714A] outline-none resize-none" />
+            className="w-full text-[13px] text-[var(--brown-text)] leading-relaxed mb-4 bg-[var(--card)] rounded-2xl px-4 py-3 border-2 border-[var(--accent)] outline-none resize-none" />
         ) : (
-          <p className="text-[13px] text-[#5A4030] leading-relaxed mb-4 bg-[var(--card)] rounded-2xl px-4 py-3 border border-[var(--border)]">
+          <p className="text-[13px] text-[var(--brown-text)] leading-relaxed mb-4 bg-[var(--card)] rounded-2xl px-4 py-3 border border-[var(--border)]">
             {task.description}
           </p>
         )}
 
         <div className="flex gap-2 mb-5">
-          <div className="flex-1 bg-[#F0EBE3] rounded-xl px-3 py-2.5">
+          <div className="flex-1 bg-[var(--chip)] rounded-xl px-3 py-2.5">
             <p className="text-[10px] font-bold text-[var(--muted-2)] mb-0.5">مدت</p>
             {editing ? (
               <input value={duration} onChange={e => setDuration(e.target.value)}
-                className="w-full text-[12px] font-bold text-[#3A2A1A] bg-transparent outline-none border-b border-[#C4714A]" />
+                className="w-full text-[12px] font-bold text-[var(--text-strong)] bg-transparent outline-none border-b border-[var(--accent)]" />
             ) : (
-              <p className="text-[13px] font-bold text-[#3A2A1A]">{task.duration}</p>
+              <p className="text-[13px] font-bold text-[var(--text-strong)]">{task.duration}</p>
             )}
           </div>
-          <div className="flex-1 bg-[#F0EBE3] rounded-xl px-3 py-2.5">
+          <div className="flex-1 bg-[var(--chip)] rounded-xl px-3 py-2.5">
             <p className="text-[10px] font-bold text-[var(--muted-2)] mb-0.5">ساعت</p>
             {editing ? (
               <input value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} dir="ltr"
-                className="w-full text-[12px] font-bold text-[#3A2A1A] bg-transparent outline-none border-b border-[#C4714A] text-left" />
+                className="w-full text-[12px] font-bold text-[var(--text-strong)] bg-transparent outline-none border-b border-[var(--accent)] text-left" />
             ) : (
-              <p className="text-[13px] font-bold text-[#3A2A1A]" dir="ltr">{task.scheduledTime}</p>
+              <p className="text-[13px] font-bold text-[var(--text-strong)]" dir="ltr">{task.scheduledTime}</p>
             )}
           </div>
         </div>
@@ -139,11 +139,11 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
         {editing ? (
           <div className="flex gap-2.5">
             <button onClick={() => setEditing(false)}
-              className="flex-1 py-3.5 rounded-2xl border border-[#E5DDD4] text-[var(--muted)] font-bold text-[13px] hover:bg-[#F0EBE3] transition-colors">
+              className="flex-1 py-3.5 rounded-2xl border border-[var(--chip)] text-[var(--muted)] font-bold text-[13px] hover:bg-[var(--chip)] transition-colors">
               انصراف
             </button>
             <button onClick={handleSave}
-              className="flex-1 py-3.5 rounded-2xl bg-[#C4714A] text-[#F8F6F2] font-bold text-[13px] hover:bg-[#A85C38] transition-colors">
+              className="flex-1 py-3.5 rounded-2xl bg-[var(--accent)] text-[var(--action-ink)] font-bold text-[13px] hover:bg-[var(--accent-ink)] transition-colors">
               ذخیره
             </button>
           </div>
@@ -152,11 +152,11 @@ function TaskSheet({ task, onClose, onPostpone, onSave }: {
             <ReportActualBlock task={task} onClose={onClose} />
             <div className="flex gap-2.5">
               <button onClick={() => { try { onPostpone(); } catch (cause) { setError(cause instanceof Error ? cause.message : "جابه‌جایی انجام نشد."); } }}
-                className="flex-1 py-3.5 rounded-2xl border border-[#E5DDD4] text-[var(--muted)] font-bold text-[13px] hover:bg-[#F0EBE3] transition-colors">
+                className="flex-1 py-3.5 rounded-2xl border border-[var(--chip)] text-[var(--muted)] font-bold text-[13px] hover:bg-[var(--chip)] transition-colors">
                 تعویق به فردا
               </button>
               <button onClick={() => setEditing(true)}
-                className="flex-1 py-3.5 rounded-2xl bg-[#C4714A] text-[#F8F6F2] font-bold text-[13px] hover:bg-[#A85C38] transition-colors">
+                className="flex-1 py-3.5 rounded-2xl bg-[var(--accent)] text-[var(--action-ink)] font-bold text-[13px] hover:bg-[var(--accent-ink)] transition-colors">
                 ویرایش
               </button>
             </div>
@@ -184,7 +184,7 @@ function ReportActualBlock({ task, onClose }: { task: HomeTask; onClose: () => v
 
   if (saved) {
     return (
-      <div className="mb-3 p-3 rounded-2xl bg-[#EAF3EA] text-[12px] font-bold text-[#2F6B3A] text-center">
+      <div className="mb-3 p-3 rounded-2xl bg-[var(--success-bg)] text-[12px] font-bold text-[var(--success-text)] text-center">
         ثبت شد — برنامه‌ریز آن را می‌بیند
       </div>
     );
@@ -197,22 +197,22 @@ function ReportActualBlock({ task, onClose }: { task: HomeTask; onClose: () => v
         {REPORT_PRESETS.map((m) => (
           <button key={m} onClick={() => setMinutes(m)}
             className={`flex-1 py-1.5 rounded-lg text-[11px] font-bold transition-colors ${
-              minutes === m ? "bg-[#C4714A] text-[#F8F6F2]" : "bg-[#F0EBE3] text-[var(--muted)]"}`}>
+              minutes === m ? "bg-[var(--accent)] text-[var(--action-ink)]" : "bg-[var(--chip)] text-[var(--muted)]"}`}>
             {m}
           </button>
         ))}
       </div>
       <div className="flex gap-1.5">
         <button onClick={() => report("completed")}
-          className="flex-1 py-2 rounded-xl bg-[#3E7C4F] text-white text-[11px] font-bold hover:bg-[#2F6B3A] transition-colors">
+          className="flex-1 py-2 rounded-xl bg-[var(--syntax-green)] text-white text-[11px] font-bold hover:bg-[var(--success-text)] transition-colors">
           کامل
         </button>
         <button onClick={() => report("partially_completed")}
-          className="flex-1 py-2 rounded-xl bg-[#C9862B] text-white text-[11px] font-bold hover:bg-[#A86F1E] transition-colors">
+          className="flex-1 py-2 rounded-xl bg-[var(--syntax-orange)] text-white text-[11px] font-bold hover:bg-[var(--warn-text)] transition-colors">
           ناقص
         </button>
         <button onClick={() => report("missed")}
-          className="flex-1 py-2 rounded-xl bg-[#B0523B] text-white text-[11px] font-bold hover:bg-[#8F3F2C] transition-colors">
+          className="flex-1 py-2 rounded-xl bg-[var(--error-text)] text-white text-[11px] font-bold hover:bg-[var(--error-text)] transition-colors">
           نشد
         </button>
       </div>
@@ -225,7 +225,7 @@ function QuizResultModal({ task, onClose, onSubmit }: { task: HomeTask; onClose:
   const [pct, setPct] = useState("");
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 backdrop-blur-[2px] p-6" onClick={onClose}>
-      <div className="w-full max-w-[360px] bg-[#F8F6F2] rounded-3xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+      <div className="w-full max-w-[360px] bg-[var(--surface)] rounded-3xl p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
         <div className="w-9 h-9 rounded-xl mb-4 flex items-center justify-center"
           style={{ background: typeBg[task.type], color: typeColor[task.type] }}>
           <TaskTypeIcon type={task.type} />
@@ -238,24 +238,24 @@ function QuizResultModal({ task, onClose, onSubmit }: { task: HomeTask; onClose:
             <label className="text-[11px] font-bold text-[var(--muted)] mb-1.5 block">زمان صرف‌شده (دقیقه)</label>
             <input type="number" value={time} onChange={e => setTime(e.target.value)}
               placeholder="مثلاً ۳۵" dir="ltr"
-              className="w-full bg-[var(--card)] border-2 border-[#E5DDD4] focus:border-[#C4714A] outline-none rounded-xl px-4 py-3 text-[14px] font-bold text-[var(--text)] placeholder:text-[#C4B8A8] transition-colors text-left" />
+              className="w-full bg-[var(--card)] border-2 border-[var(--chip)] focus:border-[var(--accent)] outline-none rounded-xl px-4 py-3 text-[14px] font-bold text-[var(--text)] placeholder:text-[var(--muted-2)] transition-colors text-left" />
           </div>
           <div>
             <label className="text-[11px] font-bold text-[var(--muted)] mb-1.5 block">درصد پاسخ درست</label>
             <input type="number" min="0" max="100" value={pct} onChange={e => setPct(e.target.value)}
               placeholder="مثلاً ۷۲" dir="ltr"
-              className="w-full bg-[var(--card)] border-2 border-[#E5DDD4] focus:border-[#C4714A] outline-none rounded-xl px-4 py-3 text-[14px] font-bold text-[var(--text)] placeholder:text-[#C4B8A8] transition-colors text-left" />
+              className="w-full bg-[var(--card)] border-2 border-[var(--chip)] focus:border-[var(--accent)] outline-none rounded-xl px-4 py-3 text-[14px] font-bold text-[var(--text)] placeholder:text-[var(--muted-2)] transition-colors text-left" />
           </div>
         </div>
 
         <div className="flex gap-2">
           <button onClick={onClose}
-            className="flex-1 py-3.5 rounded-2xl border border-[#E5DDD4] text-[var(--muted)] font-bold text-[13px] hover:bg-[#F0EBE3] transition-colors">
+            className="flex-1 py-3.5 rounded-2xl border border-[var(--chip)] text-[var(--muted)] font-bold text-[13px] hover:bg-[var(--chip)] transition-colors">
             انصراف
           </button>
           <button onClick={() => onSubmit(time, pct)} disabled={!time || !pct}
             className={`flex-1 py-3.5 rounded-2xl font-bold text-[13px] transition-all ${
-              time && pct ? "bg-[#C4714A] text-[#F8F6F2] hover:bg-[#A85C38]" : "bg-[#E5DDD4] text-[#B0A898] cursor-not-allowed"
+              time && pct ? "bg-[var(--accent)] text-[var(--action-ink)] hover:bg-[var(--accent-ink)]" : "bg-[var(--chip)] text-[var(--muted-2)] cursor-not-allowed"
             }`}>
             ثبت نتیجه
           </button>
@@ -358,7 +358,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
       <div className="desk-tasks bg-[var(--card)] border-b border-[var(--border)] px-4 pt-4 pb-2">
         <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
           <button onClick={() => setShowTime(s => !s)}
-            className="text-[11px] font-bold text-[var(--muted-2)] bg-[#F0EBE3] px-3 py-1 rounded-full hover:bg-[#E5DDD4] transition-colors">
+            className="text-[11px] font-bold text-[var(--muted-2)] bg-[var(--chip)] px-3 py-1 rounded-full hover:bg-[var(--chip)] transition-colors">
             {showTime ? "نمایش مدت" : "نمایش ساعت"}
           </button>
           <h2 className="font-display text-[18px] text-[var(--text)]">تکالیف امروز</h2>
@@ -382,7 +382,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                   برنامه هفتگی
                 </button>
                 <button onClick={() => nav("chat")}
-                  className="press px-4 py-2 rounded-xl border border-[var(--border-strong)] text-[var(--muted)] text-[12px] font-bold hover:bg-[#F0EBE3] transition-colors">
+                  className="press px-4 py-2 rounded-xl border border-[var(--border-strong)] text-[var(--muted)] text-[12px] font-bold hover:bg-[var(--chip)] transition-colors">
                   گفتگو با بوم AI
                 </button>
               </div>
@@ -407,7 +407,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                     aria-label={`${task.done ? "لغو انجام" : "انجام شد"}: ${task.title} (${task.scheduledTime})`}
                     aria-pressed={task.done}
                     className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all flex-shrink-0 ${
-                      task.done ? "border-[#C4714A] bg-[#C4714A]" : isQuizOrTest ? "border-[#9B7AAD] hover:border-[#7A4A9A]" : "border-[#D5CCC3] hover:border-[#C4714A]"
+                      task.done ? "border-[var(--accent)] bg-[var(--accent)]" : isQuizOrTest ? "border-[var(--syntax-purple)] hover:border-[var(--syntax-purple)]" : "border-[var(--chip)] hover:border-[var(--accent)]"
                     }`}
                   >
                     {task.done && (
@@ -416,7 +416,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                       </svg>
                     )}
                     {!task.done && isQuizOrTest && (
-                      <div className="w-2 h-2 rounded-full bg-[#9B7AAD] opacity-60" />
+                      <div className="w-2 h-2 rounded-full bg-[var(--syntax-purple)] opacity-60" />
                     )}
                   </button>
                 </div>
@@ -424,13 +424,13 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                 {/* Body — clickable to open sheet */}
                 <button onClick={() => setSelectedTask(task)}
                   className="flex-1 py-3 px-2 text-right min-w-0">
-                  <p className={`text-[13px] font-semibold leading-snug ${task.done ? "line-through text-[#B0A898]" : "text-[var(--text)]"}`}>
+                  <p className={`text-[13px] font-semibold leading-snug ${task.done ? "line-through text-[var(--muted-2)]" : "text-[var(--text)]"}`}>
                     {task.title}
                   </p>
                   <p className="text-[11px] text-[var(--muted-2)] mt-0.5 font-medium line-clamp-1">{task.description}</p>
                   <div className="flex items-center gap-1.5 mt-1">
                     <span className="text-[10px] font-bold" style={{ color }}>{task.subject}</span>
-                    <span className="text-[10px] text-[#D5CCC3]">·</span>
+                    <span className="text-[10px] text-[var(--chip)]">·</span>
                     <span className="text-[10px] font-medium" style={{ color: typeColor[task.type] }}>{typeLabels[task.type]}</span>
                   </div>
                 </button>
@@ -444,7 +444,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
                 </div>
 
                 {/* Time/Duration */}
-                <div className="flex flex-col items-center justify-center px-3 py-4 min-w-[58px] bg-[#FAFAF8] border-r border-[var(--border)]">
+                <div className="flex flex-col items-center justify-center px-3 py-4 min-w-[58px] bg-[var(--field)] border-r border-[var(--border)]">
                   <span className="text-[10px] font-bold text-[var(--muted-2)] text-center leading-tight" dir="ltr">
                     {showTime ? task.scheduledTime : task.duration}
                   </span>
@@ -458,9 +458,9 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
       {/* ── Planning and exam shortcuts ── */}
       <div className="desk-shortcuts bg-[var(--card)] grid grid-cols-2 [&>*+*]:border-r [&>*+*]:border-[var(--border)]">
         {[
-          { label: "آزمون‌ها", sub: "نتایج و تحلیل", screen: "exams" as const, bg: "#F0EBF5", color: "#9B7AAD",
+          { label: "آزمون‌ها", sub: "نتایج و تحلیل", screen: "exams" as const, bg: "var(--accent-soft)", color: "var(--syntax-purple)",
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg> },
-          { label: "برنامه", sub: "اهداف و تقویم", screen: "plan" as const, bg: "#EBF0F5", color: "#5C8BA8",
+          { label: "برنامه", sub: "اهداف و تقویم", screen: "plan" as const, bg: "var(--accent-soft)", color: "var(--syntax-blue)",
             icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
         ].map(({ label, sub, screen, icon }) => (
           <button key={label} onClick={() => { nav(screen); }}

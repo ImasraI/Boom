@@ -8,12 +8,30 @@
 .rag-section-heading h3 { font-size: 13px; font-weight: 750; }
 .rag-section-heading span, .rag-note { font-size: 11px; line-height: 1.9; color: var(--muted); }
 .rag-note { margin-block: 8px; }
-.rag-warning { font-size: 12px; line-height: 1.9; color: var(--desk-gold, #efbb69); border-inline-start: 2px solid currentColor; padding: 6px 12px; background: color-mix(in srgb, var(--desk-gold, #efbb69) 7%, transparent); }
-.rag-error { color: var(--desk-pink, #eb849f); }
-.rag-visual-workbench { display: grid; grid-template-columns:minmax(0,1fr); gap: 26px; min-width:0; }
+.rag-warning { font-size: 12px; line-height: 1.9; color: var(--warn-text); border-inline-start: 2px solid currentColor; padding: 6px 12px; background: color-mix(in srgb, var(--warn-text) 7%, transparent); }
+.rag-error { color: var(--error-text); }
+.rag-visual-workbench { display: grid; grid-template-columns:minmax(0,1fr); gap: 32px; min-width:0; }
 .rag-visual-workbench > * { min-width:0; }
-.rag-embedding-pane { border: 1px solid var(--border); border-radius: var(--rag-radius); background: linear-gradient(135deg, color-mix(in srgb, var(--desk-blue, #73a9ff) 5%, var(--surface)), var(--surface)); padding: 18px; }
+/* One block per visualisation; the shared heading is the block's only label, so
+   it owns no trailing margin of its own. */
+.rag-viz-block { display: flex; flex-direction: column; gap: 12px; }
+.rag-viz-block > .rag-section-heading { margin-bottom: 0; }
+.rag-viz-block > .rag-note { margin-block: 0; }
+.rag-embedding-pane { border: 1px solid var(--border); border-radius: var(--rag-radius); background: linear-gradient(135deg, color-mix(in srgb, var(--syntax-blue) 5%, var(--surface)), var(--surface)); padding: 18px; }
 .rag-embedding-pane svg { display: block; width: 100%; max-height: 400px; }
+/* Vector-space map: where the query sits among the chunks that run retrieved.
+   One block per collection, because two collections are two vector spaces. */
+.rag-embedding-map-block { display: flex; flex-direction: column; gap: 10px; }
+.rag-embedding-map-block + .rag-embedding-map-block { border-top: 1px solid var(--border); padding-top: 16px; }
+.rag-embedding-map { display: block; width: 100%; min-width: 620px; max-height: 360px; }
+.rag-scatter-point { cursor: pointer; outline: none; }
+.rag-scatter-point:hover > circle:first-of-type, .rag-scatter-point:focus-visible > circle:first-of-type { stroke: var(--accent); stroke-width: 2.4; }
+.rag-embedding-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; list-style: none; margin: 0; padding: 0; font-size: 11px; color: var(--muted); }
+.rag-embedding-legend li { display: inline-flex; align-items: center; gap: 7px; }
+.rag-legend-mark { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.rag-legend-mark.is-query { border: 1.6px solid var(--accent); }
+.rag-legend-mark.is-strong { background: var(--syntax-blue); }
+.rag-legend-mark.is-candidate { background: var(--surface); border: 1px solid color-mix(in srgb, var(--syntax-blue) 65%, transparent); }
 .rag-map-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--rag-radius); background: var(--surface); padding: 10px; }
 .rag-flow-map { display: block; width: 100%; min-width: 700px; }
 .rag-map-node { cursor: pointer; outline: none; }
@@ -30,11 +48,10 @@
 .rag-inspector pre { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
 .rag-inspector button:focus-visible, .rag-inspector summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .rag-trace-list { max-height: 320px; overflow: auto; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 8px; }
-.rag-detail-loading { padding: 16px; color: var(--muted); font-size: 12px; border-inline-start: 2px solid var(--desk-blue, #73a9ff); }
+.rag-detail-loading { padding: 16px; color: var(--muted); font-size: 12px; border-inline-start: 2px solid var(--syntax-blue); }
 .rag-inspector h2, .rag-inspector h3 { font-family: var(--font-body); }
 .rag-inspector h2 { font-size: 16px; }
 .rag-inspector .rag-section-heading h3 { font-size: 16px; margin-top: 4px; }
-.rag-kicker { font: 9px ui-monospace,monospace !important; letter-spacing: 1.7px; color: var(--desk-blue,var(--accent)) !important; direction: ltr; display: inline-block; }
 .rag-source-explorer { border-block:1px solid var(--border-strong); padding-block:20px; }
 .rag-source-tools { display:flex; align-items:center; flex-wrap:wrap; gap:18px; padding-bottom:16px; color:var(--muted); font-size:11px; }
 .rag-source-tools label { display:flex; align-items:center; flex-wrap:wrap; max-width:100%; gap:9px; }

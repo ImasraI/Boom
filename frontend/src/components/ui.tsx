@@ -20,29 +20,11 @@ export function BackButton({ onClick, label = "بازگشت" }: { onClick: () =>
   );
 }
 
-/* --------------------------------- Orbs ----------------------------------- */
-
-/** Ambient blurred orbs behind auth screens (decorative only). */
-export function AuthOrbs() {
-  return (
-    <div className="fixed inset-0 overflow-hidden pointer-events-none" aria-hidden>
-      <div
-        className="orb floaty"
-        style={{ width: 340, height: 340, top: "-6rem", insetInlineStart: "-7rem", background: "rgb(var(--accent-rgb) / 0.16)" }}
-      />
-      <div
-        className="orb"
-        style={{ width: 260, height: 260, bottom: "-4rem", insetInlineEnd: "-5rem", background: "rgb(var(--accent-rgb) / 0.10)", animation: "floaty 6s ease-in-out infinite reverse" }}
-      />
-    </div>
-  );
-}
-
 /* ------------------------------ Step heading ------------------------------ */
 
 export function StepHeading({ title, sub }: { title: string; sub?: string }) {
   return (
-    <div className="anim-fade-up" key={title}>
+    <div key={title}>
       <h2 className="font-display text-[32px] text-[var(--text)] leading-snug">{title}</h2>
       {sub && <p className="text-[13.5px] text-[var(--muted)] mt-1.5 leading-relaxed">{sub}</p>}
     </div>
@@ -58,7 +40,7 @@ export function ErrorBanner({ message }: { message: string }) {
       role="alert"
       className="anim-shake mt-4 flex items-center gap-2.5 rounded-2xl border border-red-300/60 bg-red-50 px-4 py-3"
     >
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--error-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
         <circle cx="12" cy="12" r="10" />
         <line x1="12" y1="8" x2="12" y2="12" />
         <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -86,7 +68,7 @@ export function PrimaryButton({
       disabled={!active}
       className={`w-full py-4 rounded-2xl font-bold text-[15px] transition-all ${
         active
-          ? "press bg-[var(--accent)] text-[var(--surface)] hover:brightness-105 glow-accent"
+          ? "press bg-[var(--accent)] text-[var(--action-ink)] hover:bg-[var(--accent-ink)]"
           : "bg-[var(--border-strong)] text-[var(--muted-2)] cursor-not-allowed"
       }`}
     >
@@ -308,9 +290,9 @@ export function ChoiceButton({
   return (
     <button
       onClick={onClick}
-      className={`press anim-fade-up ${delay || ""} w-full py-3.5 px-5 rounded-2xl text-right font-semibold text-[14px] flex items-center gap-3 transition-all ${
+      className={`press ${delay || ""} w-full py-3.5 px-5 rounded-2xl text-right font-semibold text-[14px] flex items-center gap-3 transition-all ${
         selected
-          ? "bg-[var(--accent)] text-[var(--surface)] glow-accent"
+          ? "bg-[var(--accent)] text-[var(--action-ink)]"
           : "bg-[var(--card)] border border-[var(--border-strong)] text-[var(--text-strong)] hover:border-[var(--accent)] shadow-soft"
       }`}
     >

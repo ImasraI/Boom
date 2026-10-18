@@ -23,7 +23,16 @@ def atomic_json(path: Path, value) -> None:
             json.dump(value, f, ensure_ascii=False, separators=(",", ":"))
             f.flush(); os.fsync(f.fileno())
         os.chmod(temp, 0o600)
-        os.replace(temp, path)
+        # Windows readers/antivirus can briefly deny replacing an open status
+        # file. Retry only permission/sharing failures, keeping the old file
+        # intact; persistent failures still propagate after a bounded wait.
+        for attempt in range(7):
+            try:
+                os.replace(temp, path)
+                break
+            except PermissionError:
+                if attempt==6:raise
+                time.sleep(.025*(2**attempt))
     finally:
         if os.path.exists(temp): os.unlink(temp)
 
@@ -200,6 +209,34 @@ def render_page(source: Path, page: int, target: Path, dpi=220) -> Path:
             atomic_json(metadata,signature)
         finally:
             if os.path.exists(temp): os.unlink(temp)
+    return target
+
+
+def render_region(source: Path, page: int, target: Path, bbox, dpi=220) -> Path:
+    """Render an original PDF region; retain exact source coordinates and hash."""
+    import math
+    import pymupdf
+    if (not isinstance(bbox,(list,tuple)) or len(bbox)!=4 or
+        any(type(v) not in (int,float) or not math.isfinite(v) for v in bbox)):
+        raise ValueError('Invalid source region')
+    with pymupdf.open(source) as pdf:
+        if type(page) is not int or not 1<=page<=pdf.page_count:raise ValueError('Invalid PDF page')
+        p=pdf[page-1]
+        if not (0<=bbox[0]<bbox[2]<=p.rect.width and 0<=bbox[1]<bbox[3]<=p.rect.height):
+            raise ValueError('Source region is outside the original page')
+        signature={'source_sha256':digest(source),'pdf_page':page,'dpi':dpi,
+                   'bbox_pdf':list(bbox),'engine_version':pymupdf.VersionBind}
+        metadata=target.with_suffix('.render.json')
+        if target.is_file() and read_json(metadata)==signature:return target
+        target.parent.mkdir(parents=True,exist_ok=True)
+        image=p.get_pixmap(matrix=pymupdf.Matrix(dpi/72,dpi/72),clip=pymupdf.Rect(bbox),alpha=False)
+        fd,temp=tempfile.mkstemp(prefix=target.name,suffix='.tmp',dir=target.parent)
+        try:
+            with os.fdopen(fd,'wb') as handle:
+                handle.write(image.tobytes('png'));handle.flush();os.fsync(handle.fileno())
+            os.replace(temp,target);atomic_json(metadata,signature)
+        finally:
+            if os.path.exists(temp):os.unlink(temp)
     return target
 
 

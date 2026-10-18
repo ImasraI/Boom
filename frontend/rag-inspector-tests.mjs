@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -217,6 +218,89 @@ test('the source layout wraps documents into rows inside its own width', () => {
   assert.equal(map.buildMindLayout([], 3).bands.length, 0);
 });
 
+test('labels are trimmed to the width of the box they are drawn in', () => {
+  const long = 'ریاضی خیلی سبز دوازدهم تجربی جلد اول پاسخ‌های تشریحی.pdf';
+  // A long name is cut with an ellipsis and the result always fits the box.
+  const fitted = map.fitText(long, 176, 11);
+  assert.notEqual(fitted, long);
+  assert.ok(fitted.endsWith('…'));
+  assert.ok(fitted.length < long.length);
+  assert.ok(map.textWidth(fitted, 11) <= 176,
+    `the trimmed label must fit: ${map.textWidth(fitted, 11)} > 176`);
+  // Short labels are never touched, and no width is ever exceeded.
+  assert.equal(map.fitText('هندسه ۲.pdf', 176, 11), 'هندسه ۲.pdf');
+  for (const [value, width, size] of [[long, 88, 10.5], [long, 148, 10], [long, 19, 8.5], ['', 20, 9]]) {
+    assert.ok(map.textWidth(map.fitText(value, width, size), size) <= width,
+      `${value.slice(0, 10)} did not fit ${width}px at ${size}px`);
+  }
+});
+
+test('a long document name is trimmed inside its card, not through the border', () => {
+  // Real corpora carry names far longer than the fixture's; the card must hold
+  // them rather than letting the text run out of the box.
+  const name = 'ریاضی خیلی سبز دوازدهم تجربی جلد اول پاسخ‌های تشریحی.pdf';
+  const t = trace([
+    stage('books · semantic_search', { collection: 'books', hits: 1 },
+      [{ id: 'long-1', doc: name, chunk: 3, rank: 1, preview: 'متن' }]),
+    stage('retrieval_assembly', { final_chunks: 1 }, [{ id: 'long-1', doc: name, chunk: 3, rank: 1 }]),
+  ]);
+  const docs = map.buildDocumentCoverage(t, map.buildRankChart(t));
+  const html = renderToStaticMarkup(React.createElement(map.SourceMindMap,
+    { trace: t, docs, selectedDoc: '', onSelectDoc() {} }));
+  const start = html.indexOf('g class="rag-mind-card"');
+  const card = html.slice(start, html.indexOf('</g>', start));
+  const label = card.match(/font-size="11"[^>]*>([^<]+)</)[1];
+  assert.ok(label.endsWith('…'), `the card label must be trimmed: ${label}`);
+  assert.ok(map.textWidth(label, 11) <= 204 - 28,
+    `the card label must fit the card: ${map.textWidth(label, 11)}`);
+  // The card keeps a margin: the label is not jammed edge to edge.
+  assert.ok(card.includes('aria-label'), 'the full name stays available to assistive tech');
+});
+
+test('the source map canvas clears the deepest chunk dot it draws', () => {
+  const html = mindHtml();
+  const start = html.indexOf('rag-source-map');
+  const svg = html.slice(start, html.indexOf('</svg>', start));
+  const height = Number(svg.match(/viewBox="0 0 \d+ ([\d.]+)"/)[1]);
+  const dots = [...svg.matchAll(/<circle cx="[-\d.]+" cy="([-\d.]+)" r="([\d.]+)"/g)]
+    .map(match => Number(match[1]) + Number(match[2]));
+  assert.ok(dots.length > 0, 'the fixture must draw chunk dots');
+  // The dots hang below their cards. If the canvas ignores them the last row
+  // is cut off by the SVG viewport, which is invisible in the markup alone.
+  assert.ok(Math.max(...dots) <= height,
+    `the deepest dot (${Math.max(...dots)}) must fit the canvas (${height})`);
+});
+
+test('the RAG maps keep the page direction instead of pinning their own', () => {
+  // SVG resolves `text-anchor` against the inline direction. Pinning the maps
+  // to `ltr` aligns the labels but reorders every label that starts with a
+  // number - the number jumps to the other end of the line and the label reads
+  // backwards. The maps must inherit the page's RTL direction and use the
+  // anchors that go with it.
+  const css = readFileSync(new URL('./src/components/rag-inspector.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /\.rag-inspector svg\s*\{[^}]*direction:/,
+    'the RAG svgs must not pin their own direction');
+});
+
+test('right-aligned map labels use the anchor that the RTL page resolves to it', () => {
+  // In RTL, `start` is the right edge. The card title is pinned by its right
+  // edge inside the card; writing `end` there (the LTR spelling) would push the
+  // label out of the card and off the canvas.
+  const html = mindHtml();
+  const start = html.indexOf('g class="rag-mind-card"');
+  const card = html.slice(start, html.indexOf('</g>', start));
+  const title = card.match(/<text[^>]*font-size="11"[^>]*>/)[0];
+  assert.match(title, /text-anchor="start"/);
+  // The chart is the other way round: its track label grows rightwards from the
+  // first point, so it is anchored by its left edge - `end` in RTL.
+  const t = mindTrace();
+  const chart = map.buildRankChart(t);
+  const chartHtml = renderToStaticMarkup(
+    React.createElement(map.ChunkRankChart, { chart, docFilter: '', onSelectDoc() {} }));
+  const track = chartHtml.match(/<text[^>]*font-size="9"[^>]*>[^<]*تکه[^<]*<\/text>/)[0];
+  assert.match(track, /text-anchor="end"/);
+});
+
 test('the RAG tab carries a settings button at the top that owns the config', async () => {
   const { default: RagInspector } = await vite.ssrLoadModule('/src/components/RagInspector.tsx');
   const html = renderToStaticMarkup(React.createElement(RagInspector));
@@ -266,4 +350,137 @@ test('opening every stage card is a display setting, not the new default', async
   const trimmed = renderToStaticMarkup(React.createElement(TraceView, { trace: t,
     settings: { docCap: 0, chunksPerDoc: 0, openStageDetails: false } }));
   assert.match(trimmed, /نقشهٔ خط بازیابی/);
+});
+
+// ------------------------------------------------------- semantic vector map
+
+/** A payload shaped exactly like GET /api/admin/rag/traces/{id}/embedding-map. */
+const embeddingMap = (points, overrides = {}) => ({
+  trace_id: 'test-trace',
+  maps: [{
+    stage: 'books · semantic_search', collection: 'shared-books-demo', shelf: 'books',
+    shelf_label: 'کتاب‌ها', point_count: points.length, recorded_rows: points.length,
+    missing_vectors: 0, unscored_rows: 0, dimensions: 1024, metric: 'cosine',
+    components: 2, explained_variance_ratio: [0.4, 0.25],
+    query: { x: 1.2, y: -0.4 }, points, ...overrides,
+  }],
+  skipped: [], limitations: ['محدودیت نمونه برای آزمون'], notice: 'بردارها از مجموعه خوانده می‌شوند.',
+});
+const vectorPoint = (id, x, y, score, rank) => ({ id, x, y, doc: 'کتاب آزمایشی.pdf',
+  chunk: rank, rank, score, preview: `متن نمونه ${id}` });
+const vectorRows = [
+  { id: 'a', rank: 1, score: 0.9, doc: 'کتاب آزمایشی.pdf', chunk: 1, preview: 'یک' },
+  { id: 'b', rank: 2, score: 0.8, doc: 'کتاب آزمایشی.pdf', chunk: 2, preview: 'دو' },
+  { id: 'c', rank: 3, score: 0.7, doc: 'کتاب آزمایشی.pdf', chunk: 3, preview: 'سه' },
+];
+const vectorTrace = () => trace([
+  stage('embed_query', { model: 'gemini-embedding', dimensions: 1024, input: 'نیم‌ساز چیست؟' }),
+  stage('books · semantic_search', { collection: 'shared-books-demo', hits: 80 }, vectorRows),
+]);
+
+test('the vector map keeps every point and the query inside its frame', () => {
+  const points = [vectorPoint('a', -2, 1, 0.9, 1), vectorPoint('b', 0, -1, 0.7, 2),
+    vectorPoint('c', 3, 0.5, 0.5, 3), vectorPoint('d', 1, 2, 0.2, 4)];
+  const g = map.scatterGeometry(embeddingMap(points).maps[0]);
+  const inside = node => node.cx >= g.left && node.cx <= g.right && node.cy >= g.top && node.cy <= g.bottom;
+
+  assert.equal(g.points.length, 4);
+  assert.ok(g.points.every(inside), 'every point must be drawn inside the frame');
+  assert.ok(inside(g.query), 'the query marker must be drawn inside the frame');
+  // The extents are the data's (query included), not a fixed scale.
+  assert.deepEqual(g.extent.x, [-2, 3]);
+  assert.deepEqual(g.extent.y, [-1, 2]);
+  // The first principal axis grows leftwards, like every other map in the panel.
+  assert.ok(g.points.find(p => p.id === 'c').cx < g.points.find(p => p.id === 'a').cx);
+  // The three highest similarities are the emphasised ones, not the first three.
+  assert.equal(g.strongest, 3);
+  assert.deepEqual(g.points.filter(p => p.strongest).map(p => p.id).sort(), ['a', 'b', 'c']);
+});
+
+test('a degenerate cloud is centred instead of dividing by a zero span', () => {
+  const flat = map.scatterGeometry({ points: [vectorPoint('a', 0, 0, 0.5, 1), vectorPoint('b', 0, 0, 0.4, 2),
+    vectorPoint('c', 0, 0, 0.3, 3)], query: null });
+  assert.equal(flat.query, null);
+  assert.ok(flat.points.every(point => Number.isFinite(point.cx) && Number.isFinite(point.cy)));
+  const alone = map.scatterGeometry({ points: [vectorPoint('a', 1, 1, 0.5, 1)], query: null });
+  assert.ok(alone.points[0].cx > alone.left && alone.points[0].cx < alone.right);
+  assert.ok(alone.points[0].cy > alone.top && alone.points[0].cy < alone.bottom);
+  // A coordinate that is not a number is dropped, not drawn at the origin.
+  const broken = map.scatterGeometry({ points: [vectorPoint('a', 0, 0, 0.5, 1), vectorPoint('b', 1, 1, 0.4, 2),
+    { ...vectorPoint('c', 2, 2, 0.3, 3), x: Number.NaN }], query: null });
+  assert.deepEqual(broken.points.map(point => point.id), ['a', 'b']);
+});
+
+test('a plotted vector map replaces the no-coordinates diagram and stays selectable', () => {
+  const points = [vectorPoint('a', -2, 1, 0.9, 1), vectorPoint('b', 0, -1, 0.7, 2), vectorPoint('c', 3, 0.5, 0.5, 3)];
+  const html = renderToStaticMarkup(React.createElement(map.EmbeddingProvenance,
+    { trace: vectorTrace(), map: embeddingMap(points), onSelectDoc() {} }));
+
+  assert.match(html, /rag-embedding-map/);
+  assert.match(html, /بردار پرسش/);
+  assert.match(html, /بالاترین شباهت/);
+  assert.match(html, /۴۰٪/);                       // the recorded variance share
+  assert.match(html, /۱۰۲۴|۱٬۰۲۴/);                // the real vector size
+  assert.match(html, /۳ بردار بازیابی‌شده/);
+  // The fallback diagram claims no coordinates; it must be gone once one exists.
+  assert.doesNotMatch(html, /مختصات و بردارها در این رد ذخیره نشده/);
+  assert.doesNotMatch(html, /نقشهٔ روابط ثبت‌شده/);
+  // One reachable node per chunk, plus the query marker's two circles.
+  assert.equal((html.match(/rag-scatter-point/g) ?? []).length, points.length);
+  assert.equal((html.match(/<circle /g) ?? []).length, points.length + 2);
+  assert.match(html, /role="button" tabindex="0"/);
+});
+
+test('a map without a plane, and the reasons why, fall back instead of being invented', () => {
+  const two = embeddingMap([vectorPoint('a', 0, 0, 0.9, 1), vectorPoint('b', 1, 1, 0.8, 2)]);
+  const fallback = renderToStaticMarkup(React.createElement(map.EmbeddingProvenance,
+    { trace: vectorTrace(), map: two }));
+  assert.doesNotMatch(fallback, /rag-embedding-map/);
+  assert.match(fallback, /مختصات و بردارها در این رد ذخیره نشده/);
+
+  const withSkips = embeddingMap([vectorPoint('a', 0, 0, 0.9, 1), vectorPoint('b', 1, 1, 0.8, 2),
+    vectorPoint('c', 2, 2, 0.7, 3)]);
+  withSkips.skipped = [{ collection: 'questions-demo', stage: 'qbank · semantic_search',
+    reason: 'کمتر از سه بردار ذخیره‌شده پیدا شد', found_vectors: 0, recorded_rows: 2 }];
+  const html = renderToStaticMarkup(React.createElement(map.EmbeddingProvenance,
+    { trace: vectorTrace(), map: withSkips, onSelectDoc() {} }));
+  assert.match(html, /کمتر از سه بردار ذخیره‌شده پیدا شد/);
+  assert.match(html, /محدودیت نمونه برای آزمون/);
+  assert.match(html, /بردارها از مجموعه خوانده می‌شوند/);
+
+  const nothing = renderToStaticMarkup(React.createElement(map.EmbeddingProvenance,
+    { trace: vectorTrace(), map: { trace_id: 't', maps: [], skipped: [], limitations: [], reason: 'دلیل نمونه برای نبود نقشه' } }));
+  assert.match(nothing, /دلیل نمونه برای نبود نقشه/);
+  assert.match(nothing, /مختصات و بردارها در این رد ذخیره نشده/);
+});
+
+test('the inspector asks for a vector map only for runs that recorded one', async () => {
+  const { traceHasSemanticRows } = await vite.ssrLoadModule('/src/components/RagInspector.tsx');
+  const withRows = stage('books · semantic_search', { hits: 80 }, vectorRows);
+  assert.equal(traceHasSemanticRows(trace([withRows])), true);
+  // Fewer than three vectors cannot make a plane, so no request is worth it.
+  assert.equal(traceHasSemanticRows(trace([stage('books · semantic_search', { hits: 80 }, vectorRows.slice(0, 2))])), false);
+  assert.equal(traceHasSemanticRows(trace([stage('books · lexical_search', { hits: 80 }, vectorRows)])), false);
+  assert.equal(traceHasSemanticRows(trace([])), false);
+
+  const html = renderToStaticMarkup(React.createElement(TraceView, { trace: vectorTrace(),
+    embeddingMap: embeddingMap(vectorRows.map(row => vectorPoint(row.id, row.rank, row.rank, row.score, row.rank))) }));
+  assert.match(html, /rag-embedding-map/);
+});
+
+test('the map request the inspector makes is the route the backend serves', () => {
+  // The map is fetched lazily and a failure is silent by design (the diagram
+  // without coordinates is the fallback), so a typo in the URL would simply
+  // never show a map. Pin the two sides together here.
+  const inspector = readFileSync(new URL('./src/components/RagInspector.tsx', import.meta.url), 'utf8');
+  const called = inspector.match(/`(\/api\/admin\/rag\/[^`]*embedding-map)`/);
+  assert.ok(called, 'the inspector must request the trace embedding map');
+  const route = called[1].replace('${encodeURIComponent(id)}', '{trace_id}');
+  const backend = readFileSync(new URL('../backend/app/routers/rag_trace.py', import.meta.url), 'utf8');
+  // The router declares its prefix once, so the route the frontend calls is
+  // the prefix plus the decorator's own path.
+  const prefix = backend.match(/APIRouter\(prefix="([^"]+)"/)?.[1];
+  assert.ok(prefix && route.startsWith(prefix),
+    `the map route ${route} must live under the router prefix ${prefix}`);
+  assert.ok(backend.includes(`"${route.slice(prefix.length)}"`), `the backend must serve ${route}`);
 });

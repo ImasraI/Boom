@@ -1,10 +1,10 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const TYPE_COLORS = {
-  study: "#e2c983",
-  test: "#9B7AAD",
-  class: "#5C8BA8",
-  break: "#97b094",
+  study: "var(--syntax-yellow)",
+  test: "var(--syntax-purple)",
+  class: "var(--syntax-blue)",
+  break: "var(--syntax-teal)",
 };
 
 export default function GroqChart({
