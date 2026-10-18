@@ -98,7 +98,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
         pass
     evidence = topic_evidence(db, user_id, trusted_only=True)
     ignored_legacy_evidence = bool(topic_evidence(db, user_id)) and not evidence
-    major = student.get("major", "ریاضی")
+    major = student.get("major") or "ریاضی"
     subjects = next((v for k, v in SUBJECTS.items() if k in major), SUBJECTS["ریاضی"])
     confidence = student.get("confidence") or {}
     completion = student.get("completion") or {}
@@ -286,8 +286,9 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     available_dates = [week_start + timedelta(days=d) for d in range(7)
                        if profile_hours[str((week_start + timedelta(days=d)).weekday())] >= 1.5
                        and week_start + timedelta(days=d) >= now.date()]
-    mock_day = exam_in_week.date if exam_in_week else (outline["date"] if outline and outline["date"] <= week_start + timedelta(days=6)
-                                                     else (available_dates[-1] if available_dates else None))
+    dated_mocks = ([exam_in_week.date] if exam_in_week else []) + (
+        [outline['date']] if outline and outline['date'] <= week_start + timedelta(days=6) else [])
+    mock_day = min(dated_mocks) if dated_mocks else (available_dates[-1] if available_dates else None)
     if mock_day:
         mock_remaining = max(0, 60 - weekly_actual[("آزمون", "مرور مباحث", "test")])
         candidates.extend([
@@ -419,10 +420,13 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
             "count": item["target_count"], "description": reason,
             "color": "#9B7AAD" if item["task_type"] == "test" else "#e2c983"})
         if blocks[-1]["source_ref"] == "weekly-mock":
-            blocks[-1]["title"] = exam_in_week.title if exam_in_week else "آزمون زمان‌دار مباحث هفته"
+            blocks[-1]["color"] = "#98CAE1"
+            blocks[-1]["title"] = exam_in_week.title if exam_in_week and exam_in_week.date == mock_day else "آزمون زمان‌دار مباحث هفته"
             blocks[-1]["description"] += "؛ مباحث: " + "، ".join(f"{s}: {t}" for s, t in topic_scores)
             if outline and mock_day == outline["date"]:
-                blocks[-1]["title"] = f"آزمون آزمایشی — {outline['document']}"
+                blocks[-1]["title"] = f"آزمون {outline.get('provider') or 'آزمایشی'}"
+                blocks[-1]["count"] = None
+                blocks[-1]["description"] += "؛ مدت بلوک پیشنهادی است؛ ساعت رسمی و تعداد سؤال در این تخصیص تأیید نشده است."
                 blocks[-1]["description"] += "؛ برنامه آزمون: " + outline["document"]
         elif blocks[-1]["source_ref"] == "weekly-correction":
             blocks[-1]["title"] = "تحلیل آزمون و مرور پاسخ‌های غلط"
@@ -479,11 +483,14 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
         grounding_warnings.append("آزمون‌های قدیمیِ تأییدنشده مبنای انتخاب مبحث قرار نگرفتند؛ تاریخچهٔ پاسخ‌ها حفظ شده است.")
     if student.get("testExams") and not outline and not mock_topics:
         grounding_warnings.append("برنامهٔ معتبرِ آزمون انتخابی شما برای سه هفتهٔ آینده در منابع نیست؛ این هفته بر اساس نتایج شما و مباحث موجود در کتاب‌ها ساخته شد. برنامهٔ جدید آزمون را بارگذاری یا مباحث آن را ثبت کنید.")
+    from app.planner.mock_outline import upcoming_exam_entries
+    from app.routers.boom_ai import _jalali_date_str
+    mock_note = (f"آزمون بعدی: {outline.get('provider') or 'آزمایشی'}، {_jalali_date_str(outline['date'])}. " if outline else "")
     return {"week_start": week_start.isoformat(), "blocks": protected + blocks, "llm_used": False,
             "daily_minutes": workload, "target_daily_minutes": round(daily_hours * 60),
             "completed_minutes": [completed_minutes[d] for d in range(7)], "daily_targets": requested_minutes,
             "mock_source": outline["document"] if outline else None,
             "source_books": source_books, "planner": "adaptive-v3", "evidence": evidence,
             "warnings": result.warnings + resource_warnings + capacity_warnings + grounding_warnings, "unscheduled": result.unscheduled,
-            "note": f"هدف روزانه: {round(daily_hours * 60)} دقیقه. برنامه بر اساس زمان آزاد، نتایج معتبر و کارهای ثبت‌شده ساخته شد. " + ("مباحث آزمون پیش‌رو اعمال شد." if mock_topics else "برنامهٔ آزمون پیش‌رو در منابع پیدا نشد؛ انتخاب مبحث از نتایج معتبر و فهرست کتاب‌های موجود است."),
-            "exams": [{"title": e.title, "date": e.date.isoformat()} for e in exams]}
+            "note": mock_note + f"هدف روزانه: {round(daily_hours * 60)} دقیقه. برنامه بر اساس زمان آزاد، نتایج معتبر و کارهای ثبت‌شده ساخته شد. " + ("مباحث آزمون پیش‌رو اعمال شد." if mock_topics else "برنامهٔ آزمون پیش‌رو در منابع پیدا نشد؛ انتخاب مبحث از نتایج معتبر و فهرست کتاب‌های موجود است."),
+            "exams": upcoming_exam_entries(exams, outline)}

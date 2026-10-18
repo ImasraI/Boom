@@ -25,7 +25,7 @@ def next_mock_outline(student, week_start):
         identity = _norm(key + " " + text[:150])
         if selected and not any(any(alias in identity for alias in aliases.get(provider, (provider,))) for provider in selected):
             continue
-        major = _norm(student.get("major", "ریاضی"))
+        major = _norm(student.get("major") or "ریاضی")
         if any(track in norm and track not in major for track in ("ریاضی", "تجربی", "انسانی") if track in norm[:150]):
             continue
         # Documents dated in another year are not recurring exam schedules.
@@ -96,7 +96,7 @@ def _structured_outlines(student, start):
                 continue
             if data.get('provider') != 'ماز' or data.get('major') != 'riazi' or _grade(student) != data.get('grade'):
                 continue
-            if not any(word in _norm(student.get('major','ریاضی')) for word in ('ریاضی','riazi')):
+            if not any(word in _norm(student.get('major') or 'ریاضی') for word in ('ریاضی','riazi')):
                 continue
             filename = data['document']
             if not isinstance(filename, str) or Path(filename).name != filename or '/' in filename or '\\' in filename:
@@ -118,10 +118,25 @@ def _structured_outlines(student, start):
                         continue
                     topics.setdefault(_subject(section['subject']),[]).extend(section['topics'])
                 if topics:
-                    results.append({'date':actual,'document':data['document'],
+                    results.append({'date':actual,'document':data['document'], 'provider':data['provider'],
                         'topics':{s:list(dict.fromkeys(t)) for s,t in topics.items()},
                         'sections':row['sections'],'source_page':row['source_page'],
                         'source_digest':data['source_sha256']})
         except (OSError,ValueError,TypeError,KeyError):
             continue
     return results
+
+
+def upcoming_exam_entries(exams, outline):
+    """The planner and overview expose the same source-backed next exam."""
+    rows = [{'title': e.title, 'date': e.date.isoformat(), 'source': 'student'} for e in exams]
+    if outline:
+        provider = outline.get('provider') or ('ماز' if 'maz' in outline['document'].lower() else '')
+        duplicate = any(row['date'] == outline['date'].isoformat() and provider
+                        and _norm(provider) in _norm(row['title']) for row in rows)
+        if not duplicate:
+            rows.append({'title': f"آزمون {provider or 'آزمایشی'}",
+                         'date': outline['date'].isoformat(), 'source': 'mock_schedule',
+                         'document': outline['document'], 'topics': outline['topics'],
+                         'source_page': outline.get('source_page')})
+    return sorted(rows, key=lambda row: (row['date'], row['title']))

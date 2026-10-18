@@ -1827,7 +1827,8 @@ def generate_weekly_plan(request: WeeklyPlanRequest,
 
 @router.get("/plan-overview")
 def plan_overview(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    from app.planner.adaptive import topic_evidence
+    from app.planner.adaptive import topic_evidence, student_state
+    from app.planner.mock_outline import next_mock_outline, upcoming_exam_entries
     from app.planner.clock import planner_now
     from app.auth.database import TaskProgress
     today = planner_now().date()
@@ -1836,6 +1837,6 @@ def plan_overview(current_user: User = Depends(get_current_user), db: Session = 
     progress = db.query(TaskProgress).filter(TaskProgress.student_id == current_user.id,
         TaskProgress.date >= today - timedelta(days=6), TaskProgress.date <= today).all()
     return {"evidence": topic_evidence(db, current_user.id),
-            "exams": [{"title": e.title, "date": e.date.isoformat()} for e in exams],
+            "exams": upcoming_exam_entries(exams, next_mock_outline(student_state(db, current_user.id), today)),
             "completed": sum(p.status == "completed" for p in progress), "recorded": sum(p.status != "rescheduled" for p in progress),
             "actual_minutes": sum(p.actual_minutes for p in progress)}

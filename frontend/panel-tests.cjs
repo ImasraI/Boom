@@ -28,6 +28,16 @@ test('evaluation is absent from every navigation panel and cannot resume', () =>
   assert.equal(recovery.exports.consumeResumePage(), null);
 });
 
+test('calendar colors distinguish mocks, subject practice and old saved classes', () => {
+  const {exports:colors} = load('scheduleColors');
+  assert.equal(colors.scheduleColor({type:'class',color:'#0000ff'}),colors.CLASS_COLOR);
+  assert.equal(colors.scheduleColor({type:'test',source_ref:'weekly-mock',color:'#9B7AAD'}),colors.MOCK_COLOR);
+  assert.equal(colors.scheduleColor({type:'test',subject:'ریاضی'}),colors.PRACTICE_COLOR);
+  assert.equal(colors.scheduleColor({type:'study',task_type:'practice'}),colors.PRACTICE_COLOR);
+  assert.equal(colors.scheduleActivity({type:'study',subject:'آزمون',source_ref:'weekly-correction'}),'other');
+  assert.notEqual(colors.MOCK_COLOR,colors.PRACTICE_COLOR);
+});
+
 test('mock generation polls until verified results are ready using short requests', async () => {
   const calls = [];
   const replies = [{job_id:'own-job',status:'running'}, {job_id:'own-job',status:'running'},

@@ -183,6 +183,7 @@ def test_session_normalizes_timezone_and_has_real_subject_foreign_key(db):
 def test_saved_exam_is_scoped_and_visible_in_overview(db, monkeypatch):
     from datetime import datetime, timedelta, timezone
     from app.planner import clock
+    from app.planner import mock_outline
     from app.routers.profile import ExamIn, add_exam
     from app.routers.boom_ai import plan_overview
     from app.auth.database import Assessment
@@ -191,6 +192,8 @@ def test_saved_exam_is_scoped_and_visible_in_overview(db, monkeypatch):
     now = datetime(2026, 10, 6, 21, 30, tzinfo=timezone.utc).astimezone(
         timezone(timedelta(hours=3, minutes=30))).replace(tzinfo=None)
     monkeypatch.setattr(clock, "planner_now", lambda: now)
+    # Isolate account-owned exam visibility from shared local schedule files.
+    monkeypatch.setattr(mock_outline, "next_mock_outline", lambda *args: None)
     with pytest.raises(HTTPException) as error:
         add_exam(ExamIn(title="previous", date=date(2026, 10, 6), subjects=["math"]), SimpleNamespace(id=1), db)
     assert error.value.status_code == 422

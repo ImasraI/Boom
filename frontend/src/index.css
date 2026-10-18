@@ -621,3 +621,7 @@ nav[aria-label='ناوبری موبایل'] .text-\[10px\] {font-size:11px}
   .page-home .study-hero { padding: 32px; }
   .page-plan .study-section { padding-inline: 0; }
 }
+
+/* Keep text legible on the light mock and red class faces in both themes. */
+.schedule-block-frame[data-activity="mock"] .schedule-block { color: #193443; }
+.schedule-block-frame[data-activity="class"] .schedule-block { color: #291716; }

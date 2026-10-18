@@ -5,7 +5,7 @@ import { expandTemplates, type Recurrence } from "../recurrence";
 import { useEffect, useMemo, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
 import { apiUrl, authHeaders, readApiError } from "../api"
-import GroqChart from "../components/GroqChart"
+import { CLASS_COLOR, PRACTICE_COLOR, scheduleActivity, scheduleColor } from "../scheduleColors"
 import { RepeatIcon } from "../components/icons";
 import {
   addDays,
@@ -147,9 +147,9 @@ interface DragState {
 }
 
 const TYPE_COLORS: Record<BlockType, string> = {
-  class: "var(--syntax-blue)",
+  class: CLASS_COLOR,
   study: "var(--syntax-yellow)",
-  test: "var(--syntax-purple)",
+  test: PRACTICE_COLOR,
   break: "var(--syntax-teal)",
 }
 
@@ -348,7 +348,6 @@ export default function Schedule({
   const genAbortRef = useRef<Record<string, AbortController>>({})
   const skipPersistRef = useRef(true)
 
-  const [showChart, setShowChart] = useState(false)
   const gridRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<DragState | null>(null)
   const blocksRef = useRef(blocks)
@@ -934,12 +933,7 @@ export default function Schedule({
               {generating && !isCurrentWeekGenerating ? "در حال ساخت..." : "بازسازی برنامه"}
             </button>
           )}
-          <button
-            onClick={() => setShowChart(v => !v)}
-            className={`px-3 h-9 rounded-xl border text-[11px] font-bold transition-colors ${showChart ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--border-strong)] text-[var(--muted)] hover:text-[var(--accent)]"}`}
-          >
-            {showChart ? "تقویم" : "نمودار"}
-          </button>
+
           <button
             onClick={() => openAdd(0, HOUR_START)}
             className="w-9 h-9 rounded-xl bg-[var(--accent)] text-white font-bold"
@@ -1005,7 +999,6 @@ export default function Schedule({
         </div>
       </div>
 
-      {!showChart && (
       <div className="flex-1 overflow-auto">
         <div
           ref={gridRef}
@@ -1092,13 +1085,14 @@ export default function Schedule({
               isStaticInstance(b) ? (
                 <div
                   key={b.id}
+                  data-activity={scheduleActivity(b)}
                   onPointerDown={(e) => startInteraction(e, b, "move")}
                   onClick={(e) => e.stopPropagation()}
                   title={`${b.title}\n${formatTime(b.startHour)} – ${formatTime(b.startHour + b.duration)}\nجابجایی این فعالیت، زمان تمام تکرارهای آن را تغییر می‌دهد.`}
                   className={`schedule-block-frame pointer-events-auto absolute z-10 ${isBlockDragging(b) ? "is-dragging z-30" : ""}`}
                   style={
                     {
-                      "--block-color": resolveColor(b.color),
+                      "--block-color": scheduleColor(b),
                       "--block-h": `${b.duration * 2 * SLOT_HEIGHT}px`,
                       top: `${(b.startHour - HOUR_START) * 2 * SLOT_HEIGHT}px`,
                       height: `${b.duration * 2 * SLOT_HEIGHT}px`,
@@ -1122,6 +1116,7 @@ export default function Schedule({
               ) : (
                 <div
                   key={b.id}
+                  data-activity={scheduleActivity(b)}
                   onPointerDown={(e) => startInteraction(e, b, "move")}
                   title={`${b.title}${b.description ? `\n${b.description}` : ""}`}
                   onClick={(e) => e.stopPropagation()}
@@ -1130,7 +1125,7 @@ export default function Schedule({
                   }`}
                   style={
                     {
-                      "--block-color": resolveColor(b.color),
+                      "--block-color": scheduleColor(b),
                       "--block-h": `${b.duration * 2 * SLOT_HEIGHT}px`,
                       top: `${(b.startHour - HOUR_START) * 2 * SLOT_HEIGHT}px`,
                       height: `${b.duration * 2 * SLOT_HEIGHT}px`,
@@ -1159,16 +1154,6 @@ export default function Schedule({
           </div>
         </div>
       </div>
-      )}
-
-      {showChart && (
-        <GroqChart
-          blocks={displayedBlocks
-            .filter((b) => !isStaticInstance(b))
-            .map((b) => ({ day: b.day, type: b.type, task_type: b.task_type, title: b.title, duration: b.duration }))}
-        />
-      )}
-
       {showModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-[var(--card)] rounded-2xl p-5 w-80 max-h-[85vh] overflow-y-auto max-w-[90vw]">
@@ -1226,7 +1211,8 @@ export default function Schedule({
                   رنگ
                 </label>
                 <div className="flex gap-2 justify-end overflow-x-auto py-1">
-                  {COLOR_OPTIONS.map((c) => (
+                  {(newBlock.type === "class" ? [CLASS_COLOR] : newBlock.type === "test"
+                    ? [scheduleColor(editingBlock || newBlock)] : COLOR_OPTIONS).map((c) => (
                     <button
                       key={c}
                       type="button"

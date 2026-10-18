@@ -51,6 +51,15 @@ def test_reviewed_schedule_rolls_to_next_date_without_a_three_week_limit(tmp_pat
     assert mock_outline.next_mock_outline(STUDENT, date(2026, 12, 5)) is None
 
 
+@pytest.mark.parametrize('major', ['', None])
+def test_legacy_empty_major_uses_the_same_math_default_as_planner(tmp_path, monkeypatch, major):
+    _schedule(tmp_path, monkeypatch)
+    result = mock_outline.next_mock_outline({'major':major,'grade':None,'testExams':[]}, date(2026,10,18))
+    assert result['date'] == date(2026,10,23)
+    assert result['provider'] == 'ماز'
+    assert result['topics'] == {'ریاضی':['تابع']}
+
+
 def test_changed_pdf_and_unreviewed_rows_are_not_activated(tmp_path, monkeypatch):
     path, pdf, data = _schedule(tmp_path, monkeypatch)
     pdf.write_bytes(b'a replacement schedule, not yet reviewed')

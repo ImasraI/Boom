@@ -144,6 +144,34 @@ def test_default_plan_prioritizes_problem_solving_over_reading(db):
     assert practice > reading, {'practice_hours': practice, 'reading_hours': reading}
 
 
+def test_maze_is_in_the_plan_and_overview_without_manual_exam_entry(db, monkeypatch):
+    from app.planner import clock
+    from app.routers.boom_ai import plan_overview
+    exam_date = WEEK + timedelta(days=4)
+    monkeypatch.setattr(clock, 'planner_now', lambda: datetime(2099,4,3))
+    monkeypatch.setattr(mock_outline, 'next_mock_outline', lambda *args: {
+        'provider':'ماز','date':exam_date,'document':'maze.pdf','topics':{'ریاضی':['تابع']}})
+    result = build_week(db, 1, {'major':''}, 8, WEEK, [], now=datetime(2099,4,3))
+    mocks = [b for b in result['blocks'] if b['source_ref']=='weekly-mock']
+    assert mocks and all(b['day']==4 and 'ماز' in b['title'] and b['color']=='#98CAE1' for b in mocks)
+    assert all(b['topic']=='تابع' for b in result['blocks'] if b['subject']=='ریاضی')
+    assert result['exams'][0]['source']=='mock_schedule'
+    overview = plan_overview(USER, db)
+    assert overview['exams']==result['exams']
+    assert not db.query(Assessment).count()  # Shared schedule is not copied into accounts.
+
+
+def test_nearer_maze_date_wins_over_later_manual_mock(db, monkeypatch):
+    monkeypatch.setattr(mock_outline, 'next_mock_outline', lambda *args: {
+        'provider':'ماز','date':WEEK+timedelta(days=2),'document':'maze.pdf','topics':{'ریاضی':['تابع']}})
+    db.add(Assessment(student_id=1,title='آزمون شخصی',date=WEEK+timedelta(days=5)))
+    db.commit()
+    result=build_week(db,1,{},8,WEEK,[],now=datetime(2099,4,3))
+    mocks=[b for b in result['blocks'] if b['source_ref']=='weekly-mock']
+    assert mocks and all(b['day']==2 and 'ماز' in b['title'] for b in mocks)
+    assert [e['date'] for e in result['exams']]==[(WEEK+timedelta(days=d)).isoformat() for d in (2,5)]
+
+
 def test_cached_mock_outline_uses_upcoming_dates_and_skips_old_year(db, tmp_path):
     path = tmp_path / "cache/mock_extraction.json"
     path.parent.mkdir()
