@@ -200,7 +200,7 @@ def _questions(plan, unique='paper'):
                 weekly_ranked_scope=row['weekly_ranked_scope'], maze_scope=row['maze_scope'][cid],
                 branch=bp.math_branch(nodes[cid]['subject'], nodes[cid]['title']),
                 grounding_status='book_ocr',book='کتاب واقعی',page=20,source_quote='متن واقعی کتاب',
-                topic=cid,text=f'{unique} {row["name"]} سوال {i}',options=['a','b','c','d'],
+                topic=cid,text=f'{unique} {row["name"]} {cid} سوال {i}',options=['a','b','c','d'],
                 answer=0,verification_status='verified'))
     return out
 
@@ -220,6 +220,80 @@ def _paper(db, questions):
                         questions=json.dumps(questions,ensure_ascii=False))
     db.add(paper);db.commit()
     return paper
+
+
+def _previous_scope(weekly, monkeypatch):
+    import copy
+    current=weekly_ranked.preview()
+    previous=copy.deepcopy(current)
+    previous.update(date='2026-10-09',scope='reviewed-previous-week')
+    for row in previous['plan']:row['weekly_ranked_scope']=previous['scope']
+    monkeypatch.setattr(weekly_ranked,'preview',lambda day=None:
+                        previous if day==date(2026,10,9) else current)
+    monkeypatch.setattr(mock_outline,'_structured_outlines',lambda *args:[{'date':date(2026,10,9)}])
+    return current,previous
+
+
+def test_arena_falls_back_to_verified_previous_scope_without_claiming_stock(weekly,sessions,monkeypatch):
+    current,previous=_previous_scope(weekly,monkeypatch)
+    with sessions() as db:
+        paper=_paper(db,_questions(previous['plan']))
+        result=weekly_ranked.available_preview(db,1,'دوازدهم')
+        assert result['fallback'] and result['stock_available']
+        assert result['date']=='2026-10-09' and result['requested_date']==current['date']
+        assert result['scope']==previous['scope'] and paper.status=='pending_use'
+        assert all(q.uses==0 for q in db.execute(select(BankQuestion)).scalars())
+
+
+def test_current_scope_keeps_priority_over_previous_stock(weekly,sessions,monkeypatch):
+    current,previous=_previous_scope(weekly,monkeypatch)
+    with sessions() as db:
+        _paper(db,_questions(previous['plan'],'old'))
+        _paper(db,_questions(current['plan'],'current'))
+        result=weekly_ranked.available_preview(db,1,'دوازدهم')
+        assert result['stock_available'] and not result['fallback'] and result['scope']==current['scope']
+
+
+def test_previous_valid_scope_is_available_while_next_curriculum_is_unmapped(weekly,sessions,monkeypatch):
+    current,previous=_previous_scope(weekly,monkeypatch)
+    current.update(available=False,code='maze_topics_unmapped')
+    with sessions() as db:
+        _paper(db,_questions(previous['plan']))
+        result=weekly_ranked.available_preview(db,1,'دوازدهم')
+        assert result['available'] and result['fallback'] and result['scope']==previous['scope']
+
+
+@pytest.mark.parametrize('invalid',['corrupt','private','partial-mixed-weeks'])
+def test_fallback_never_uses_corrupt_private_or_mixed_week_stock(weekly,sessions,monkeypatch,invalid):
+    current,previous=_previous_scope(weekly,monkeypatch)
+    with sessions() as db:
+        questions=_questions(previous['plan'])
+        if invalid=='partial-mixed-weeks':
+            questions=[q for q in questions if q['subject']!='ریاضی']
+            _paper(db,[q for q in _questions(current['plan'],'current') if q['subject']=='ریاضی'])
+        paper=_paper(db,questions)
+        if invalid=='private':
+            paper.student_id=99;paper.status='claimed';paper.bank_scope='private';db.commit()
+        elif invalid=='corrupt':
+            indexed=question_bank.index_mock(db,paper)
+            db.get(BankQuestion,indexed[-1]['bank_id']).status='corrupt';db.commit()
+        result=weekly_ranked.available_preview(db,1,'دوازدهم')
+        assert not result['stock_available'] and not result['fallback']
+
+
+def test_pairing_serves_both_players_one_previous_scope_without_live_generation(weekly,sessions,monkeypatch):
+    current,previous=_previous_scope(weekly,monkeypatch)
+    monkeypatch.setattr(arena,'_generate_duel_booklet',lambda *a,**k:pytest.fail('No provider call for archive fallback'))
+    with sessions() as db:
+        _paper(db,_questions(previous['plan']))
+        entries=[ArenaQueueEntry(student_id=i,elo=1000,major='ریاضی فیزیک',grade='دوازدهم') for i in (1,2)]
+        db.add_all(entries);db.commit()
+        with arena._LOCK:match=arena._try_pair(db,entries[1])
+        assert match and match.mock_ready
+        assert {match.student_a_id,match.student_b_id}=={1,2}
+        paper=db.get(GeneratedMock,match.mock_id)
+        questions=json.loads(paper.questions)
+        assert len(questions)==10 and {q['weekly_ranked_scope'] for q in questions}=={previous['scope']}
 
 
 @pytest.mark.parametrize('alter', ['unscoped','older-week','wrong-lesson','reported'])

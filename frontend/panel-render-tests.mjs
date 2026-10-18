@@ -38,6 +38,17 @@ test('Ranked page loads its controls before account and filter requests finish',
   assert.doesNotMatch(html, /صفحه آماده نشد/);
 });
 
+test('Colosseum clearly labels a previous Maze batch instead of presenting it as upcoming', async () => {
+  const {WeeklyStockNotice} = await vite.ssrLoadModule('/src/pages/Arena.tsx');
+  const html=renderToStaticMarkup(React.createElement(WeeklyStockNotice,{weekly:{
+    available:true,stock_available:true,fallback:true,date:'2026-10-09',requested_date:'2026-10-23',
+    message:'این مسابقه از نسخهٔ تأییدشدهٔ آزمون قبلی ماز است.',
+  }}));
+  assert.match(html,/نسخهٔ موجود از آزمون ماز/);
+  assert.match(html,/آزمون قبلی ماز/);
+  assert.doesNotMatch(html,/آزمون آینده:/);
+});
+
 test('Admin pool renders unlimited and targeted production controls', async () => {
   const {default:Admin} = await vite.ssrLoadModule('/src/pages/Admin.tsx');
   const html = renderToStaticMarkup(React.createElement(Admin, {nav(){}}));

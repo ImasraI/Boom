@@ -49,7 +49,7 @@ interface MatchInfo {
 
 /** GET /api/arena/filters — the server-owned duel filter checkboxes. */
 interface FilterOptions {
-  weekly?: { available: boolean; date?: string; document?: string; topics?: Record<string,string[]>; message?: string }
+  weekly?: { available: boolean; stock_available?: boolean; fallback?: boolean; requested_date?: string; date?: string; document?: string; topics?: Record<string,string[]>; message?: string }
   // every study subject the app knows
   all: string[]
   // the ones THIS player studies (the tickable set)
@@ -62,6 +62,16 @@ interface FilterOptions {
   major: string
   grade: string
 }
+
+export function WeeklyStockNotice({weekly}: {weekly?: FilterOptions['weekly']}) {
+  if (!weekly) return null;
+  return <>
+    {weekly.date && <span className="block mt-1">{weekly.fallback ? "نسخهٔ موجود از آزمون ماز: " : "آزمون آینده: "}{new Date(weekly.date+"T12:00:00+03:30").toLocaleDateString("fa-IR")}</span>}
+    {weekly.available && (weekly.fallback || weekly.stock_available === false) && <span role="status" className="block mt-2 text-[var(--muted)]">{weekly.message}</span>}
+    {!weekly.available && <span role="alert" className="block mt-2 text-orange-400">{weekly.message}</span>}
+  </>;
+}
+
 
 interface AQ {
   id: number
@@ -210,7 +220,7 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, error }: {
           <ul className="text-[12px] text-[var(--muted-2)] leading-relaxed space-y-1.5">
             <li>• وارد صف شو؛ تا وقتی حریف هم‌سطح پیدا نشود در صف می‌مانی — بدون ربات.</li>
             <li>• هر دو یک دفترچه یکسان با ۱۰ سوال می‌گیرید، با زمان واقعی.</li>
-            <li>• برای دوازدهم ریاضی‌فیزیک، سوال‌ها فقط از مباحث آزمون آیندهٔ ماز هستند.</li>
+            <li>• برای دوازدهم ریاضی‌فیزیک، اولویت با آزمون آیندهٔ ماز است؛ در نبود سؤال آماده، نسخهٔ تأییدشدهٔ آزمون قبلی استفاده می‌شود.</li>
             <li>• پایه تحصیلی کوچک‌تر تعیین می‌شود؛ سوال از مطالبی که هنوز نخوانده‌ای پرسیده نمی‌شود.</li>
             <li>• تصحیح با نمره منفی کنکور؛ امتیاز بیشتری بگیری، Elo بیشتری می‌گیری.</li>
             <li>• برنده‌ها بالا می‌روند: تازه‌کار → رنک C → رنک B → حرفه‌ای → نابغه → استاد → اسطوره.</li>
@@ -218,10 +228,9 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, error }: {
         </div>
 
         <p className="text-xs text-[var(--muted)] border-b border-[var(--border)] pb-4 leading-relaxed">
-          کولوسئوم هفتگی: ۱۰ سوال از آزمون آیندهٔ ماز؛ انتخاب مبحث خودکار است و فیلتر درس ندارد.
+          کولوسئوم هفتگی: ۱۰ سوال از آزمون آیندهٔ ماز؛ در نبود موجودی از نسخهٔ قبلی استفاده می‌شود. انتخاب مبحث خودکار است و فیلتر درس ندارد.
           {filters?.major && <span className="block mt-1">{filters.major} · {filters.grade}</span>}
-          {filters?.weekly?.date && <span className="block mt-1">آزمون آینده: {new Date(filters.weekly.date+"T12:00:00+03:30").toLocaleDateString("fa-IR")}</span>}
-          {filters?.weekly && !filters.weekly.available && <span role="alert" className="block mt-2 text-orange-400">{filters.weekly.message}</span>}
+          <WeeklyStockNotice weekly={filters?.weekly} />
         </p>
 
         {!!error && (

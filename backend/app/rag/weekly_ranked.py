@@ -2,7 +2,7 @@
 import hashlib
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
@@ -97,6 +97,44 @@ def require_plan(as_of=None):
     if not result['available']:
         raise HTTPException(409,detail={'code':result['code'],'message':result['message'],'missing':result.get('missing',[])})
     return result['plan']
+
+
+def available_preview(db, user_id, grade='', as_of=None):
+    """Prefer the upcoming exam, then complete stock from reviewed older scopes.
+
+    This only checks availability: it neither claims papers nor marks questions
+    used. Assembly keeps reports, verification, curriculum and scope checks.
+    """
+    from app.planner.mock_outline import _structured_outlines
+    from app.rag import question_bank
+    current = preview(as_of)
+    result = {**current, 'fallback': False, 'requested_date': current.get('date'),
+              'stock_available': False}
+    if not current['available'] and not current.get('date'):
+        return result
+
+    def ready(candidate):
+        return bool(question_bank.assemble(db, user_id, candidate['plan'], ['ریاضی فیزیک'],
+                                          grade=grade or 'دوازدهم', shared_only=True, prefer_used=False))
+
+    if current['available'] and ready(current):
+        return {**result, 'stock_available': True}
+    student = {'major':'ریاضی فیزیک','grade':'دوازدهم','testExams':['ماز']}
+    cutoff = date.fromisoformat(current['date'])
+    dates = sorted({row['date'] for row in _structured_outlines(student, date(2000,1,1))
+                    if row['date'] < cutoff}, reverse=True)
+    seen = {current['scope']}
+    for previous_date in dates:
+        previous = preview(previous_date)
+        if (not previous['available'] or previous.get('date') != previous_date.isoformat()
+                or previous.get('scope') in seen):
+            continue
+        seen.add(previous['scope'])
+        if ready(previous):
+            return {**previous, 'fallback': True, 'stock_available': True,
+                    'requested_date': current['date'],
+                    'message': 'سؤال‌های آزمون آینده هنوز کافی نیست؛ این مسابقه از نسخهٔ تأییدشدهٔ آزمون قبلی ماز است.'}
+    return {**result, 'message': 'برای آزمون آینده یا نسخه‌های پیشین ماز هنوز ۱۰ سؤال تأییدشدهٔ سازگار آماده نیست.'}
 
 
 def prepare_config(config):
