@@ -5,6 +5,7 @@ import json
 import sys
 import threading
 import time
+import traceback
 from datetime import datetime, timezone, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +16,21 @@ from app.rag.exam_corpus import DEFAULT_ROOT
 from app.rag.exam_progress import snapshot, stored_counts
 from app.rag.exam_review import review_html,review_image,efficient_pilot_html,local_ocr_html
 
+
+def record_monitor_error(root, error):
+    """Keep diagnostic frames, never exception text or local variable values."""
+    frames = traceback.extract_tb(error.__traceback__)[-8:]
+    row = {'timestamp': time.time(), 'error_type': type(error).__name__,
+           'errno': getattr(error, 'errno', None),
+           'frames': [{'file': Path(frame.filename).name, 'line': frame.lineno,
+                       'function': frame.name} for frame in frames]}
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        with (root/'monitor-errors.jsonl').open('a', encoding='utf-8') as handle:
+            handle.write(json.dumps(row) + '\n')
+    except OSError:
+        pass  # A failed diagnostic write must not hide the original error.
+
 PAGE=r'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Exam OCR · live workers</title><style>
 *{box-sizing:border-box}body{margin:0;background:#191413;color:#f1e2da;font:14px system-ui,sans-serif}main{max-width:1240px;margin:auto;padding:32px}h1{font-size:30px;margin:10px 0}h2{font-size:18px;margin-top:32px}small,.muted{color:#b79c8b}header{border-bottom:1px solid #634638;padding-bottom:20px}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;margin-top:24px}.stat{border:1px solid #432f26;padding:18px;background:#231917}.stat strong{display:block;font-size:26px;margin-top:9px}.status{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:16px}#phase{background:#42261f;color:#ffa594;padding:8px 12px;border:1px solid #804336}.scroll{overflow:auto}table{border-collapse:collapse;width:100%;font-size:12px}th,td{text-align:left;padding:12px 10px;border-bottom:1px solid #432f26;vertical-align:top}th{color:#b79c8b}td.doc{min-width:210px;max-width:340px;overflow-wrap:anywhere}progress{width:100%;height:7px;accent-color:#a6473e}.note{line-height:1.8;border-left:2px solid #a6473e;padding-left:14px;margin-top:24px}#error{color:#ffa594} .tag{font-size:11px;border:1px solid #634638;padding:3px 6px;white-space:nowrap}a{color:#ffa594}@media(max-width:600px){main{padding:18px}h1{font-size:24px}}
 </style><main><header><small>LOCAL EXAM CORPUS · LIVE CHECKPOINTS</small><h1>Exam scanning workers</h1><div class="status"><span id="phase">Connecting…</span><span id="alive"></span><small id="updated"></small></div><p id="error" role="status"></p></header><section class="stats" id="stats"></section><p id="review-link" hidden><a href="/reviewed-page" target="_blank" rel="noopener">مشاهدهٔ صفحهٔ کامل بررسی‌شده و مقایسه با اصل</a></p><div class="note" id="job"></div><div class="note" id="local-pilot" hidden></div><p><a href="/local-ocr">Local OCR comparison</a> · Scanning continues automatically in 30-page batches. Run &quot;__EXAM_LAUNCHER__&quot; stop to finish active requests and stop safely. Restarting resumes saved work.</p><h2>Worker activity</h2><div class="scroll"><table><thead><tr><th>Worker</th><th>State / stage</th><th>Page</th><th>Source</th><th>Credential / model</th><th>HTTP / age</th></tr></thead><tbody id="workers"></tbody></table></div><h2>Provider availability</h2><div class="scroll"><table><thead><tr><th>Credential label</th><th>Model</th><th>Availability</th><th>Last response</th><th>Retry after</th></tr></thead><tbody id="providers"></tbody></table></div><p class="note">Saved candidates are OCR output awaiting review. Qualified style references are separate; none of these counts certify scientific correctness. This monitor is read-only, uses local files, and sends no requests to AI providers.</p><p class="muted">To resume after closing the laptop, run START-EXAM-WORKERS.cmd again. Saved compatible page and question checkpoints are reused. A sleeping or powered-off laptop cannot scan.</p></main><script>
@@ -24,12 +40,20 @@ async function update(){try{const r=await fetch('/status',{cache:'no-store'});if
 
 
 class Reader:
-    def __init__(self, root): self.root,self.lock,self.cached,self.updated=root,threading.Lock(),None,0
+    def __init__(self, root):
+        self.root,self.lock,self.cached,self.updated=root,threading.Lock(),None,0
+        self.last_error_at = 0
     def get(self):
         with self.lock:
-            if time.time()-self.updated>10 or self.cached is None:
-                self.cached=stored_counts(self.root);self.updated=time.time()
-            return snapshot(self.root,counts=self.cached)
+            try:
+                if time.time()-self.updated>10 or self.cached is None:
+                    self.cached=stored_counts(self.root);self.updated=time.time()
+                return snapshot(self.root,counts=self.cached)
+            except Exception as error:
+                if time.time()-self.last_error_at >= 30:
+                    record_monitor_error(self.root, error)
+                    self.last_error_at = time.time()
+                raise
 
 
 def main():
@@ -80,7 +104,15 @@ def main():
         print(f'Live read-only dashboard: http://127.0.0.1:{args.port}/',flush=True)
     try:
         while True:
-            s=reader.get()
+            try:
+                s=reader.get()
+            except Exception as error:
+                if not (args.watch or args.serve):
+                    raise
+                print(f'Monitor could not read progress ({type(error).__name__}); retrying in 5s. '
+                      'The scanner is independent. Details: monitor-errors.jsonl',flush=True)
+                time.sleep(5)
+                continue
             print(f"{s['phase']} | alive={s['worker_alive']} | OCR pages {s['full_ocr_pages']}/{s['total_pages']} | "
                   f"question candidates {s['saved_question_candidates']} | active {s['active_candidates']} | "
                   f"requests {s['requests_this_run']} | references {s['qualified_references']}",flush=True)
@@ -94,4 +126,10 @@ def main():
         if args.serve:server.shutdown();server.server_close()
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    try:
+        main()
+    except Exception as error:
+        record_monitor_error(DEFAULT_ROOT, error)
+        print(f'Monitor stopped ({type(error).__name__}). See monitor-errors.jsonl; scanner was not stopped.',flush=True)
+        raise SystemExit(1) from None
