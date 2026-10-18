@@ -46,7 +46,10 @@ const HOURS = Array.from({ length: SLOT_COUNT }, (_, i) => {
 })
 
 const SLOT_HEIGHT = 40
-const HEADER_HEIGHT = 52
+const HEADER_HEIGHT = 76
+// Raised block faces extend 8px above their time-aligned back plane.
+const GRID_TOP_GUTTER = 10
+const GRID_BODY_TOP = HEADER_HEIGHT + GRID_TOP_GUTTER
 const MIN_DURATION = 0.5
 const MAX_DURATION = 6
 
@@ -725,7 +728,7 @@ export default function Schedule({
     const rect = grid.getBoundingClientRect()
     const isRtl = getComputedStyle(grid).direction === "rtl"
     const x = isRtl ? rect.right - clientX : clientX - rect.left
-    const y = clientY - rect.top - HEADER_HEIGHT
+    const y = clientY - rect.top - GRID_BODY_TOP
     const colWidth = rect.width / 8
     const visualCol = Math.floor(x / colWidth)
     const day = clamp(visualCol - 1, 0, DAYS.length - 1)
@@ -1008,7 +1011,7 @@ export default function Schedule({
           ref={gridRef}
           className="relative grid grid-cols-8 min-w-[720px] select-none"
           style={{
-            gridTemplateRows: `${HEADER_HEIGHT}px repeat(${SLOT_COUNT}, ${SLOT_HEIGHT}px)`,
+            gridTemplateRows: `${HEADER_HEIGHT}px ${GRID_TOP_GUTTER}px repeat(${SLOT_COUNT}, ${SLOT_HEIGHT}px)`,
           }}
         >
           <div className="sticky top-0 z-20 bg-[var(--card)] border-b border-l border-[var(--border)] p-2 text-center text-xs font-bold text-[var(--muted)]">
@@ -1045,6 +1048,7 @@ export default function Schedule({
             )
           })}
 
+          <div aria-hidden="true" className="col-span-8" />
           {HOURS.map((hour, hIdx) => (
             <div key={hour} className="contents">
               <div className="border-l border-b border-[var(--border)] p-1 text-center text-xs text-[var(--muted)] flex items-center justify-center">
@@ -1078,7 +1082,7 @@ export default function Schedule({
           <div
             className="absolute pointer-events-none"
             style={{
-              top: HEADER_HEIGHT,
+              top: GRID_BODY_TOP,
               left: 0,
               right: "calc(100% / 8)",
               bottom: 0,
@@ -1161,7 +1165,7 @@ export default function Schedule({
         <GroqChart
           blocks={displayedBlocks
             .filter((b) => !isStaticInstance(b))
-            .map((b) => ({ day: b.day, type: b.type, title: b.title, duration: b.duration }))}
+            .map((b) => ({ day: b.day, type: b.type, task_type: b.task_type, title: b.title, duration: b.duration }))}
         />
       )}
 

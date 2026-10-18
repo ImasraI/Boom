@@ -10,7 +10,7 @@ const TYPE_COLORS = {
 export default function GroqChart({
   blocks,
 }: {
-  blocks: Array<{ day: number; type: string; title: string; duration: number }>;
+  blocks: Array<{ day: number; type: string; task_type?: string; title: string; duration: number }>;
 }) {
   const dayLabels = ["شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه"];
 
@@ -18,8 +18,8 @@ export default function GroqChart({
     const dayBlocks = blocks.filter((b) => b.day === i);
     return {
       name: label,
-      study: dayBlocks.filter((b) => b.type === "study").reduce((s, b) => s + b.duration, 0),
-      test: dayBlocks.filter((b) => b.type === "test").reduce((s, b) => s + b.duration, 0),
+      study: dayBlocks.filter((b) => b.type === "study" && b.task_type !== "practice").reduce((s, b) => s + b.duration, 0),
+      test: dayBlocks.filter((b) => b.type === "test" || b.task_type === "practice").reduce((s, b) => s + b.duration, 0),
       class: dayBlocks.filter((b) => b.type === "class").reduce((s, b) => s + b.duration, 0),
       break: dayBlocks.filter((b) => b.type === "break").reduce((s, b) => s + b.duration, 0),
     };

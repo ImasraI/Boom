@@ -22,7 +22,6 @@ import Profile from "./pages/Profile";
 const KnowledgeGraph = lazy(() => import("./pages/KnowledgeGraph"));
 const Chat = lazy(() => import("./pages/Chat"));
 const Schedule = lazy(() => import("./pages/Schedule"));
-const Evaluation = lazy(() => import("./pages/Evaluation"));
 const Mock = lazy(() => import("./pages/Mock"));
 const Arena = lazy(() => import("./pages/Arena"));
 const Admin = lazy(() => import("./pages/Admin"));
@@ -37,7 +36,6 @@ const NAV_ITEMS: { screen: Screen; label: string; icon: React.ReactNode }[] = [
   { screen: "plan", label: "برنامه", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
   { screen: "knowledge", label: "نقشه یادگیری", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="12" r="2"/><circle cx="6" cy="18" r="2"/><path d="M8 7l8 4M8 17l8-4"/></svg> },
    { screen: "schedule", label: "برنامه هفتگی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
-   { screen: "evaluation", label: "ارزیابی", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg> },
   { screen: "mock", label: "آزمون هوشمند", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg> },
   { screen: "arena", label: "کولوسئوم", icon: <ColosseumIcon /> },
    { screen: "profile", label: "پروفایل", icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
@@ -327,7 +325,6 @@ export default function App() {
       {screen === "plan" && <Plan {...p} userData={userData} />}
       {screen === "schedule" && <Schedule {...p} userData={userData} />}
       {screen === "chat" && <Chat {...p} userData={userData} />}
-      {screen === "evaluation" && <Evaluation {...p} />}
       {screen === "mock" && <Mock {...p} userData={userData} />}
       {screen === "arena" && <Arena {...p} userData={userData} />}
       {screen === "leaderboard" && <Arena {...p} userData={userData} initialPhase="board" />}

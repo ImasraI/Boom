@@ -2,7 +2,7 @@ import type { Screen } from "./types";
 
 const RETRY_KEY = "boom-page-retry";
 const RESUME_KEY = "boom-page-resume";
-const PAGES: Screen[] = ["chat", "schedule", "evaluation", "mock", "arena", "leaderboard", "knowledge", "admin"];
+const PAGES: Screen[] = ["chat", "schedule", "mock", "arena", "leaderboard", "knowledge", "admin"];
 
 export function isPageDownloadError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);

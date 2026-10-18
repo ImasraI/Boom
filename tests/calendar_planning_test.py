@@ -131,7 +131,17 @@ def test_missing_question_ranges_never_become_unspecified_test_assignments(db):
                for b in result["blocks"] if b["task_type"] == "test" and b["subject"] != "آزمون")
     practice = [b for b in result["blocks"] if b["task_type"] == "practice"]
     assert practice and all(b["count"] is None and "تمرین تشریحی" in b["title"] for b in practice)
+    assert all(b["title"].startswith("حل تمرین") and b["color"] == "#9B7AAD" for b in practice)
+    assert all("تعداد یا شمارهٔ سؤال مشخصی تخصیص داده نشده" in b["description"] for b in practice)
     assert sum(result["daily_minutes"]) >= 3300
+
+
+def test_default_plan_prioritizes_problem_solving_over_reading(db):
+    result = build_week(db, 1, {}, 8, WEEK, [], now=datetime(2099, 4, 3))
+    learning = [b for b in result['blocks'] if b['subject'] != 'آزمون']
+    practice = sum(b['duration'] for b in learning if b['task_type'] in ('test', 'practice'))
+    reading = sum(b['duration'] for b in learning if b['task_type'] in ('study', 'review'))
+    assert practice > reading, {'practice_hours': practice, 'reading_hours': reading}
 
 
 def test_cached_mock_outline_uses_upcoming_dates_and_skips_old_year(db, tmp_path):

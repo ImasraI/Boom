@@ -613,10 +613,6 @@ nav[aria-label='ناوبری موبایل'] .text-\[10px\] {font-size:11px}
 .page-home .study-hero { background: transparent; padding-block: 28px; }
 .page-home .study-hero::before { display: none; }
 .page-home .task-tile:hover { box-shadow: none; }
-.page-evaluation .eval-card {
-  border: 0; border-block-end: 1px solid var(--border-strong);
-  box-shadow: none !important; transform: none;
-}
 .page-profile .study-field > p:first-child { color: var(--muted); font-size: 12px; }
 .page-profile .study-field input:not([type='range']), .page-profile .study-field select { min-height: 32px; }
 .page-knowledge .study-section { scroll-margin-block-start: 80px; }

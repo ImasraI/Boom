@@ -19,6 +19,15 @@ function load(name, extra = {}) {
   return {exports, values, reloads:()=>reloads};
 }
 
+test('evaluation is absent from every navigation panel and cannot resume', () => {
+  const {exports:nav} = load('navConfig');
+  assert.equal(nav.panelOf('evaluation'), null);
+  assert.ok(Object.values(nav.PANELS).every(panel => panel.items.every(item => item.screen !== 'evaluation')));
+  const recovery = load('pageRecovery');
+  recovery.values.set('boom-page-resume', 'evaluation');
+  assert.equal(recovery.exports.consumeResumePage(), null);
+});
+
 test('mock generation polls until verified results are ready using short requests', async () => {
   const calls = [];
   const replies = [{job_id:'own-job',status:'running'}, {job_id:'own-job',status:'running'},

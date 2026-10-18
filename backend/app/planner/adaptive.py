@@ -310,7 +310,7 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
     # must not become 25+5 minutes. Rebalance useful 15–25 minute parts instead.
     minimum = MIN_FRAGMENT_MINUTES if max_block >= 30 else 15
     quantum = 30 if max_block >= 30 else 15
-    study_ratio = {"بیشتر تمرین": 0.3, "بیشتر مطالعه نظری": 0.65}.get(student.get("studyStyle"), 0.45)
+    study_ratio = {"بیشتر تمرین": 0.2, "بیشتر مطالعه نظری": 0.5}.get(student.get("studyStyle"), 0.25)
     total = max(0, int(sum(profile_hours.values()) * 60)
                 - sum(t["planned_minutes"] for t in candidates))
     weights = {key: 0.5 + weakness for key, weakness in topic_scores.items()}
@@ -338,7 +338,12 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
         pkg["days_since"] = max(pkg["days_since"], days_since)
         pkg["topics"].append(topic)
         study_minutes = 0 if key in studied else max(quantum, int(minutes * study_ratio / quantum) * quantum)
-        review_minutes = min(30, max(quantum, int(minutes * 0.2 / quantum) * quantum))
+        # Reserve actual problem solving before adding a separate review.
+        # A short 60-minute package must not become study + review with no test.
+        if minutes >= 2 * quantum:
+            study_minutes = min(study_minutes, minutes - quantum)
+        review_minutes = (min(30, quantum, max(0, minutes - study_minutes - quantum))
+                          if minutes >= 4 * quantum else 0)
         pkg["study"] += study_minutes
         pkg["test"] += max(0, minutes - study_minutes - review_minutes)
         pkg["review"] += min(review_minutes, max(0, minutes - study_minutes))
@@ -428,16 +433,16 @@ def build_week(db, user_id, supplied, daily_hours, week_start, statics, *, now=N
         if block["task_type"] != "test" or block["subject"] == "آزمون":
             continue
         if not block.get("question_start"):
-            # A timed question assignment must name a verified range. Where
-            # indexing is incomplete, fill the study goal with lesson work
-            # instead of presenting an invented or unspecified test count.
+            # Numbered test assignments require verified ranges. Keep the
+            # problem-solving session when indexing is incomplete, but disclose
+            # that no particular count/range was assigned; never invent one.
             from pathlib import Path
             resource = Path(block.get("resource") or "").stem
-            block.update(task_type="practice", type="study", count=None, color="#e2c983")
-            block["title"] = f"مرور درس‌نامه و تمرین تشریحی {block['subject']}: {block['topic']}"
+            block.update(task_type="practice", type="study", count=None, color="#9B7AAD")
+            block["title"] = f"حل تمرین تشریحی و تحلیل پاسخ‌ها {block['subject']}: {block['topic']}"
             if resource:
                 block["title"] += f" — کتاب {resource}"
-            block["description"] += "؛ بازهٔ تست معتبر برای این مبحث موجود نیست؛ این زمان به مرور و تمرین درس اختصاص دارد."
+            block["description"] += "؛ شمارهٔ تست معتبر برای این مبحث ثبت نشده؛ تمرین‌های همین مبحث را حل و پاسخ‌ها را تحلیل کن. تعداد یا شمارهٔ سؤال مشخصی تخصیص داده نشده است."
         elif block["count"] * 3 + 20 < round(block["duration"] * 60):
             block["title"] += " + تحلیل پاسخ‌ها و مرور درس"
             block["description"] += "؛ پس از حل تست‌های مشخص‌شده، زمان باقی‌مانده برای تحلیل پاسخ‌ها و مرور درس‌نامه است."
