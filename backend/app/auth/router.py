@@ -27,6 +27,27 @@ from fastapi.security import OAuth2PasswordRequestForm
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
+@router.get("/guest-status")
+def guest_status():
+    return {"enabled": bool(get_settings().PUBLIC_GUEST_ACCESS)}
+
+
+@router.post("/guest", response_model=None)
+def guest_login(http: Request, db: Session = Depends(get_db)):
+    if not get_settings().PUBLIC_GUEST_ACCESS:
+        raise HTTPException(status_code=404, detail="ورود مهمان فعال نیست")
+    rate_limit(http, limit=5, window_s=3600)
+    # No caller-supplied identifier: guests cannot select another account.
+    user = User(username="guest_" + secrets.token_hex(16), phone=None,
+                hashed_password=get_password_hash(secrets.token_urlsafe(48)),
+                phone_verified=False, is_admin=False)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"access_token": create_access_token({"sub": str(user.id)}),
+            "token_type": "bearer", "guest": True}
+
+
 REQUEST_COOLDOWN_SECONDS = 90  # per phone, between code sends
 MAX_VERIFY_ATTEMPTS = 5        # per code
 

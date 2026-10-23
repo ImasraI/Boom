@@ -120,6 +120,8 @@ class Settings(BaseSettings):
     # code verification entirely - the client goes straight from the phone
     # step to setting a password. Never enable this in production.
     DISABLE_AUTH: bool = False
+    # Public preview creates separate unverified accounts; never bypasses OTP/reset.
+    PUBLIC_GUEST_ACCESS: bool = False
 
     # ====== Per-user daily AI quotas (0 or negative = unlimited) =========
     # Counts successful AI requests per user per UTC day; adjust in .env.

@@ -25,6 +25,28 @@ export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: s
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const [guestEnabled, setGuestEnabled] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(apiUrl("/api/auth/guest-status"), { signal: controller.signal })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setGuestEnabled(data?.enabled === true))
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
+
+  async function enterGuest() {
+    if (loading) return;
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(apiUrl("/api/auth/guest"), { method: "POST" });
+      if (!res.ok) { setError(await readApiError(res, "ورود مهمان انجام نشد")); return; }
+      const data = await res.json();
+      onLogin(data.access_token, normalizeSignupData({ name: "مهمان", phone: "" }, ""));
+    } catch { setError("خطا در ارتباط با سرور"); }
+    finally { setLoading(false); }
+  }
+
   async function handleSubmit() {
     if (!phone || !password || loading) return;
     setLoading(true);
@@ -106,6 +128,10 @@ export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: s
               <div className="flex-1 h-px bg-[var(--border-strong)]" />
             </div>
 
+            {guestEnabled && <div className="mt-5 text-center">
+              <PrimaryButton onClick={enterGuest} disabled={loading}>بازدید از سایت بدون شماره موبایل</PrimaryButton>
+              <p className="mt-2 text-xs text-[var(--muted)]">ورود مهمان؛ با خروج، دسترسی به این حساب ممکن است از دست برود.</p>
+            </div>}
             <p className="mt-5 text-center text-[13px] text-[var(--muted)]">
               هنوز ثبت‌نام نکردی؟{" "}
               <button onClick={() => nav("signup")} className="text-[var(--accent)] font-bold underline underline-offset-2">ثبت‌نام</button>
