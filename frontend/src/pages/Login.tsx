@@ -110,6 +110,8 @@ export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: s
             </div>
 
             <ErrorBanner message={error} />
+            <button type="button" onClick={() => { localStorage.setItem("boom-reset-phone", phone); nav("signup"); }}
+              className="mt-4 text-sm text-[var(--accent)] underline underline-offset-4">رمز عبورم را فراموش کرده‌ام</button>
 
             <div className="mt-7">
               <PrimaryButton

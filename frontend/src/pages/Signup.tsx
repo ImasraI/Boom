@@ -1,5 +1,5 @@
 import { accountStorage } from "../accountStorage";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { apiUrl, readApiError } from "../api";
 import { NavFn, SignupData, normalizeSignupData } from "../types";
 import { MAJORS, GRADES, STUDY_HOURS_OPTIONS, TEST_EXAM_OPTIONS } from "../data";
@@ -12,9 +12,11 @@ import {
 interface Props { nav: NavFn; onComplete: (data: SignupData) => void; }
 
 export default function Signup({ nav, onComplete }: Props) {
-  const [step, setStep] = useState(0);
+  const [resetEntry] = useState(() => localStorage.getItem("boom-reset-phone") !== null);
+  const [step, setStep] = useState(() => localStorage.getItem("boom-reset-phone") !== null ? 1 : 0);
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(() => localStorage.getItem("boom-reset-phone") || "");
+  useEffect(() => { localStorage.removeItem("boom-reset-phone"); }, []);
   const [code, setCode] = useState("");
   const [bypassMode, setBypassMode] = useState(false);
   const [authDisabled, setAuthDisabled] = useState(false);
@@ -32,7 +34,7 @@ export default function Signup({ nav, onComplete }: Props) {
   // request-code): show the intercept instead of a fake fresh signup.
   const [phoneTaken, setPhoneTaken] = useState(false);
   // Explicit reset flow: the user chose "reset password" on the intercept.
-  const [resetMode, setResetMode] = useState(false);
+  const [resetMode, setResetMode] = useState(resetEntry);
 
   const TOTAL = 8;
 
@@ -123,6 +125,13 @@ export default function Signup({ nav, onComplete }: Props) {
       setDebugCode(data.debug_code || "");
       setBypassMode(Boolean(data.bypass_mode));
       setAuthDisabled(Boolean(data.auth_disabled));
+      if (resetEntry) {
+        if (!data.account_exists) { setError("حسابی برای این شماره پیدا نشد؛ برای ساخت حساب به ثبت‌نام برو."); return; }
+        setResetMode(true);
+        setPhoneTaken(false);
+        setStep(2);
+        return;
+      }
       if (data.account_exists) {
         // Existing account: intercept here — never continue as a fresh
         // signup (the old flow silently overwrote the password).
@@ -200,7 +209,7 @@ export default function Signup({ nav, onComplete }: Props) {
         <div>
           <PhoneInput
             value={phone}
-            onChange={v => { setPhone(v); setPhoneTaken(false); setResetMode(false); }}
+            onChange={v => { setPhone(v); setPhoneTaken(false); setResetMode(resetEntry); }}
             autoFocus
             onEnter={() => canContinue && advance()}
           />
@@ -362,14 +371,14 @@ export default function Signup({ nav, onComplete }: Props) {
       <div className="sticky top-0 z-10 bg-[var(--page-bg)]/90 backdrop-blur-sm px-5 pt-5 pb-3">
         <div className="max-w-lg mx-auto">
           <div className="flex items-center justify-between mb-3">
-            <span className="text-[12px] font-bold text-[var(--muted-2)] tabular-nums">{step + 1} از {TOTAL}</span>
+            <span className="text-[12px] font-bold text-[var(--muted-2)] tabular-nums">{resetEntry ? `بازیابی رمز عبور · ${Math.max(1, step)} از ۳` : `${step + 1} از ${TOTAL}`}</span>
             <BackButton
-              onClick={() => (step === 0 ? nav("landing") : setStep(s => ((authDisabled && s === 3) ? 1 : s - 1)))}
+              onClick={() => (resetEntry && step <= 1 ? nav("login") : step === 0 ? nav("landing") : setStep(s => ((authDisabled && s === 3) ? 1 : s - 1)))}
             />
           </div>
           <div className="flex gap-1.5">
-            {Array.from({ length: TOTAL }).map((_, i) => (
-              <span key={i} className={`progress-seg ${i < step ? "done" : i === step ? "current" : ""}`} />
+            {Array.from({ length: resetEntry ? 3 : TOTAL }).map((_, i) => (
+              <span key={i} className={`progress-seg ${i < (resetEntry ? step - 1 : step) ? "done" : i === (resetEntry ? step - 1 : step) ? "current" : ""}`} />
             ))}
           </div>
         </div>

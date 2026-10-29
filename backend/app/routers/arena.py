@@ -170,6 +170,21 @@ def _profile_of(db: Session, user_id: int) -> Optional[StudentProfile]:
     ).scalar_one_or_none()
 
 
+def _public_name(user, profile=None):
+    """A login phone number is private, not an arena display name."""
+    name = (getattr(profile, "name", None) or "").strip()
+    username = (getattr(user, "username", None) or "").strip()
+    for value in (name, username):
+        digits = "".join(c for c in value if c.isdecimal())
+        if value and not (len(digits) >= 10 and all(c.isdecimal() or c in "+- ()" for c in value)):
+            return value
+    return f"بازیکن {user.id}"
+
+
+def _arena_name(db, user):
+    return _public_name(user, _profile_of(db, user.id)) if user else "—"
+
+
 def _knowledge_base(db: Session, user_id: int,
                     student: Optional[dict]) -> tuple:
     """(major, grade) of a queued player - what we may test them on.
@@ -579,7 +594,7 @@ def status(
             opp = db.get(User, opp_id) if opp_id else None
             upcoming_view = {
                 "match_id": match.id,
-                "opponent": opp.username if opp else "—",
+                "opponent": _arena_name(db, opp),
                 "starts_at": invite.starts_at.isoformat(),
                 "seconds_until": int((invite.starts_at - datetime.utcnow()).total_seconds()),
                 "status": match.status,
@@ -817,7 +832,7 @@ def _invite_view(db: Session, invite: ArenaScheduledInvite) -> dict:
     host = db.get(User, invite.host_id)
     return {
         "id": invite.id,
-        "host": host.username if host else "—",
+        "host": _arena_name(db, host),
         "host_elo": invite.elo,
         "starts_at": invite.starts_at.isoformat(),
         "seconds_until": int((invite.starts_at - datetime.utcnow()).total_seconds()),
@@ -871,7 +886,7 @@ def list_scheduled(
         mine_list.append({
             "match_id": match.id,
             "invite_id": invite.id,
-            "opponent": opp.username if opp else "—",
+            "opponent": _arena_name(db, opp),
             "opponent_elo": match.elo_b if match.student_a_id == current_user.id else match.elo_a,
             "starts_at": invite.starts_at.isoformat(),
             "seconds_until": int((invite.starts_at - now).total_seconds()),
@@ -1236,13 +1251,15 @@ def leaderboard(
     rated player with positive delta - same behavior as before for new
     accounts, minus the full-table scan."""
     rows = db.execute(
-        select(User.id, User.username, User.rating)
+        select(User, StudentProfile)
+        .outerjoin(StudentProfile, StudentProfile.user_id == User.id)
         .where(User.rating != 1000)
         .order_by(User.rating.desc())
         .limit(50)
     ).all()
     out = []
-    for i, (sid, username, elo) in enumerate(rows, start=1):
+    for i, (user, profile) in enumerate(rows, start=1):
+        sid, username, elo = user.id, _public_name(user, profile), user.rating
         t = _title(elo)
         out.append({"user_id": sid, "username": username, "elo": elo,
                     "rank": i, "title": t["name"], "color": t["color"],
@@ -1330,7 +1347,7 @@ def get_match(
         "status": match.status,
         "generation_error": match.generation_error,
         "starts_at": match.starts_at.isoformat() if match.starts_at else None,
-        "opponent": opp.username if opp else (_AI_RIVAL_NAME if match.is_ai_opponent else "حریف"),
+        "opponent": _arena_name(db, opp) if opp else (_AI_RIVAL_NAME if match.is_ai_opponent else "حریف"),
         "opponent_elo": opp_elo,
         "opponent_delta": opp_delta,
         "your_elo": your_elo,

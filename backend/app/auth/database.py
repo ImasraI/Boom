@@ -351,6 +351,8 @@ class MockAttempt(Base):
     correct = Column(Integer, nullable=True)
     wrong = Column(Integer, nullable=True)
     blank = Column(Integer, nullable=True)
+    # Freeze the scored result/review; later bank quarantine must not rescore it.
+    result_snapshot = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -572,6 +574,7 @@ def _ensure_column(table: str, column: str, ddl_type: str) -> None:
 def ensure_schema() -> None:
     """Create missing tables and backfill columns added after initial create_all."""
     Base.metadata.create_all(bind=engine)
+    _ensure_column("mock_attempts", "result_snapshot", "TEXT")
     _ensure_column("task_progress", "source_ref", "VARCHAR")
     _ensure_column("task_progress", "resource", "VARCHAR")
     for column in ("question_start", "question_end", "page_start", "page_end"):

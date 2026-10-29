@@ -167,7 +167,8 @@ def test_list_shows_open_offers_and_booked_duels(db):
     listing = arena.list_scheduled(current_user=_ctx(rival), db=db)
     assert len(listing["open"]) == 1
     entry = listing["open"][0]
-    assert entry["host"] == host.username and entry["can_accept"] is True
+    assert entry["host"] == f"بازیکن {host.id}" and entry["can_accept"] is True
+    assert host.username not in entry["host"]
     assert entry["seconds_until"] > 0
 
     listing_far = arena.list_scheduled(current_user=_ctx(far), db=db)
@@ -185,7 +186,7 @@ def test_list_shows_open_offers_and_booked_duels(db):
     assert listing["open"] and len(booked["mine"]) == 1
     row = booked["mine"][0]
     assert row["status"] == "scheduled" and row["you_booked"] is True
-    assert row["opponent"] == host.username
+    assert row["opponent"] == f"بازیکن {host.id}"
     # Booked duels leave the open list.
     after = arena.list_scheduled(current_user=_ctx(rival), db=db)
     assert all(o["id"] != invite["id"] for o in after["open"])

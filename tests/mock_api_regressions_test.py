@@ -15,7 +15,7 @@ def test_history_route_is_not_consumed_by_mock_id():
     app.include_router(mocks.router)
     app.dependency_overrides[mocks.get_current_user] = lambda: SimpleNamespace(id=1)
     app.dependency_overrides[mocks.get_db] = lambda: SimpleNamespace(
-        execute=lambda *a: SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])))
+        execute=lambda *a: SimpleNamespace(all=lambda: []))
     response = TestClient(app).get("/api/mocks/history")
     assert response.status_code == 200
     assert response.json() == []

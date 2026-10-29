@@ -546,20 +546,19 @@ def submit_mock(
         ).scalar_one_or_none()
         if challenge_invite is None:
             raise HTTPException(status_code=404, detail="آزمون پیدا نشد")
-    questions = question_bank.active_questions(db, mock)
-    if not questions:
-        raise HTTPException(status_code=409, detail="سوال معتبری برای تصحیح این دفترچه باقی نمانده است")
-
     # A database write lock serializes submissions for this student across processes.
     # This preserves historical rows while making retries return the first result.
     db.execute(update(User).where(User.id == current_user.id).values(rating=User.rating))
     prior = db.execute(select(MockAttempt).where(MockAttempt.student_id == current_user.id,
         MockAttempt.mock_id == mock_id).order_by(MockAttempt.id).limit(1)).scalar_one_or_none()
     if prior is not None:
-        saved = SubmitPayload(answers=json.loads(prior.answers or "{}"), duration_seconds=prior.duration_seconds or 0)
-        response = _submission_response(prior, _score(questions, saved.answers), questions, saved)
+        response = _replay_submission(prior, mock)
         db.rollback()
         return response
+
+    questions = question_bank.active_questions(db, mock)
+    if not questions:
+        raise HTTPException(status_code=409, detail="سوال معتبری برای تصحیح این دفترچه باقی نمانده است")
 
     result = _score(questions, payload.answers)
 
@@ -574,6 +573,10 @@ def submit_mock(
         blank=result["blank"],
     )
     db.add(attempt)
+    db.flush()
+    response = _submission_response(attempt, result, questions, payload)
+    attempt.result_snapshot = json.dumps({"schema_version": 1, "mock_id": mock.id,
+        "student_id": current_user.id, "response": response}, ensure_ascii=False)
 
     # Weakness memory: every miss feeds the planner.
     for q in questions:
@@ -605,7 +608,49 @@ def submit_mock(
         logger.info("Challenge invite %s auto-completed by submit",
                     challenge_invite.invite_code)
 
-    return _submission_response(attempt, result, questions, payload)
+    return response
+
+
+def _replay_submission(attempt, mock):
+    """Completed results are historical. Quarantine only changes future selection.
+
+    Legacy attempts lack a result snapshot. Recover from the immutable booklet
+    only when its counts agree with stored results; otherwise preserve totals and
+    explicitly withhold a per-question review that cannot be reconstructed.
+    """
+    try:
+        snapshot = json.loads(attempt.result_snapshot or "null")
+        response = snapshot.get("response") if isinstance(snapshot, dict) else None
+        if (snapshot.get("schema_version") == 1 and snapshot.get("mock_id") == mock.id
+                and snapshot.get("student_id") == attempt.student_id and isinstance(response, dict)
+                and response.get("attempt_id") == attempt.id
+                and all(response.get(k) == getattr(attempt, k) for k in ("score", "correct", "wrong", "blank"))
+                and all(k in response for k in ("raw_score", "subjects", "review"))):
+            return response
+    except (ValueError, TypeError, AttributeError):
+        pass
+    try:
+        saved = SubmitPayload(answers=json.loads(attempt.answers or "{}"), duration_seconds=attempt.duration_seconds or 0)
+        original = json.loads(mock.questions or "[]")
+        if not isinstance(original, list) or any(not isinstance(q, dict) for q in original):
+            raise ValueError("Malformed historical booklet")
+        result = _score(original, saved.answers)
+    except (ValueError, TypeError):
+        saved = SubmitPayload(answers={})
+        original = []
+        result = _score([], {})
+    complete = (all(result[k] == getattr(attempt, k) for k in ("correct", "wrong", "blank"))
+                and result["percent"] == attempt.score)
+    # Stored totals remain authoritative even when an old scored subset is unknown.
+    result.update(percent=attempt.score, correct=attempt.correct, wrong=attempt.wrong, blank=attempt.blank)
+    result["raw_score"] = (round(attempt.correct-attempt.wrong/3.0, 2)
+                           if attempt.correct is not None and attempt.wrong is not None else None)
+    if not complete:
+        result["subjects"] = []
+    response = _submission_response(attempt, result, original if complete else [], saved)
+    if not complete:
+        response["historical_review_incomplete"] = True
+    return response
 
 
 def _submission_response(attempt, result, questions, payload):
@@ -638,17 +683,23 @@ def _submission_response(attempt, result, questions, payload):
 def history(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    offset: int = 0,
 ):
+    if offset < 0:
+        raise HTTPException(status_code=422, detail="صفحه تاریخچه معتبر نیست")
     rows = db.execute(
-        select(MockAttempt)
+        select(MockAttempt, GeneratedMock.title)
+        .outerjoin(GeneratedMock, GeneratedMock.id == MockAttempt.mock_id)
         .where(MockAttempt.student_id == current_user.id)
-        .order_by(MockAttempt.created_at.desc())
+        .order_by(MockAttempt.id.desc())
+        .offset(offset)
         .limit(20)
-    ).scalars().all()
+    ).all()
     return [
         {
             "attempt_id": r.id,
             "mock_id": r.mock_id,
+            "title": title or "آزمون پیشین",
             "score": r.score,
             "correct": r.correct,
             "wrong": r.wrong,
@@ -656,5 +707,19 @@ def history(
             "duration_seconds": r.duration_seconds,
             "created_at": r.created_at.isoformat() if r.created_at else None,
         }
-        for r in rows
+        for r, title in rows
     ]
+
+
+@router.get("/attempts/{attempt_id:int}")
+def get_attempt(attempt_id: int, current_user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    """Read a completed attempt without submitting again or changing its score."""
+    attempt = db.get(MockAttempt, attempt_id)
+    if attempt is None or attempt.student_id != current_user.id:
+        raise HTTPException(status_code=404, detail="نتیجه آزمون پیدا نشد")
+    mock = db.get(GeneratedMock, attempt.mock_id)
+    if mock is None:
+        raise HTTPException(status_code=404, detail="دفترچه آزمون پیدا نشد")
+    return {"mock_id": mock.id, "title": mock.title,
+            "result": _replay_submission(attempt, mock)}

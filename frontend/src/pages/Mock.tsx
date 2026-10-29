@@ -33,6 +33,14 @@ interface ReviewQuestion extends MockQuestion {
   your_answer?: string | null
 }
 
+interface MockHistoryItem {
+  attempt_id: number
+  mock_id: number
+  title: string
+  score: number
+  created_at: string | null
+}
+
 interface MockResult {
   attempt_id: number
   score: number
@@ -42,6 +50,7 @@ interface MockResult {
   blank: number
   subjects: { name: string; score: number; correct: number; wrong: number; blank: number }[]
   review: ReviewQuestion[]
+  historical_review_incomplete?: boolean
 }
 
 const LABELS = ["الف", "ب", "ج", "د"]
@@ -352,6 +361,11 @@ function ResultView({ result, mockId, onBack, onRetry }: { result: MockResult; m
       </div>
 
       <div className="px-4 py-4 max-w-[560px] mx-auto space-y-3">
+        {result.historical_review_incomplete && (
+          <p role="status" className="border-s-2 border-[var(--accent)] ps-3 text-[12px] leading-7 text-[var(--muted)]">
+            نمرهٔ ثبت‌شدهٔ این آزمون قدیمی حفظ شده است؛ جزئیات کامل سؤال‌های تصحیح‌شده در دسترس نیست.
+          </p>
+        )}
         {tab === "summary" ? (
           <>
             {result.subjects.map(s => (
@@ -436,9 +450,59 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
   const [error, setError] = useState("")
 
   const generationRef = useRef<AbortController | null>(null)
+  const [history, setHistory] = useState<MockHistoryItem[]>([])
+  const [historyError, setHistoryError] = useState("")
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyRefresh, setHistoryRefresh] = useState(0)
+  const [openingAttempt, setOpeningAttempt] = useState<number | null>(null)
+  const [hasMoreHistory, setHasMoreHistory] = useState(false)
+  const historyRequest = useRef<AbortController | null>(null)
+  useEffect(() => {
+    if (phase !== "config") return
+    const controller = new AbortController()
+    setHistoryLoading(true); setHistoryError("")
+    apiJson<MockHistoryItem[]>("/api/mocks/history", { signal: controller.signal })
+      .then(rows => { if (!controller.signal.aborted) { setHistory(rows); setHasMoreHistory(rows.length === 20) } })
+      .catch(e => { if (!controller.signal.aborted) setHistoryError(e instanceof Error ? e.message : "دریافت تاریخچه ناموفق بود") })
+      .finally(() => { if (!controller.signal.aborted) setHistoryLoading(false) })
+    return () => controller.abort()
+  }, [phase, historyRefresh])
+  useEffect(() => () => historyRequest.current?.abort(), [])
+
+  async function loadOlderAttempts() {
+    if (historyLoading || openingAttempt !== null) return
+    const controller = new AbortController()
+    historyRequest.current = controller
+    setHistoryLoading(true); setHistoryError("")
+    try {
+      const rows = await apiJson<MockHistoryItem[]>(`/api/mocks/history?offset=${history.length}`, { signal: controller.signal })
+      if (controller.signal.aborted) return
+      setHistory(previous => [...previous, ...rows.filter(row => !previous.some(old => old.attempt_id === row.attempt_id))])
+      setHasMoreHistory(rows.length === 20)
+    } catch (e) {
+      if (!controller.signal.aborted) setHistoryError(e instanceof Error ? e.message : "دریافت تاریخچه ناموفق بود")
+    } finally { if (!controller.signal.aborted) setHistoryLoading(false) }
+  }
+
+  async function openAttempt(attemptId: number) {
+    if (openingAttempt !== null || historyLoading) return
+    const controller = new AbortController()
+    historyRequest.current = controller
+    setOpeningAttempt(attemptId); setHistoryError("")
+    try {
+      const saved = await apiJson<{ mock_id: number; title: string; result: MockResult }>(`/api/mocks/attempts/${attemptId}`, { signal: controller.signal })
+      if (controller.signal.aborted) return
+      setInfo({ mock_id: saved.mock_id, title: saved.title, duration_minutes: 0, total_questions: saved.result.review.length, subjects: [] })
+      setResult(saved.result); setPhase("result")
+    } catch (e) {
+      if (!controller.signal.aborted) setHistoryError(e instanceof Error ? e.message : "دریافت پاسخنامه ناموفق بود")
+    } finally { if (!controller.signal.aborted) setOpeningAttempt(null) }
+  }
   useEffect(() => () => generationRef.current?.abort(), [])
 
   async function start(cfg: Record<string, unknown>) {
+    historyRequest.current?.abort()
+    setOpeningAttempt(null)
     const controller = new AbortController()
     generationRef.current = controller
     setPhase("loading")
@@ -483,6 +547,17 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
   return (
     <>
       <div hidden={phase !== "config"}>
+        <section aria-label="آزمون‌های قبلی" className="max-w-[560px] mx-auto px-4 pt-6 text-[var(--text)]">
+          <h2 className="font-bold">آزمون‌های قبلی و پاسخنامه‌ها</h2>
+          {historyLoading && <p role="status" className="text-sm py-3">در حال دریافت تاریخچه…</p>}
+          {historyError && <div role="alert" className="text-sm py-3 text-red-500"><p>{historyError}</p><button type="button" onClick={() => setHistoryRefresh(value => value + 1)} className="underline mt-2">تلاش دوباره</button></div>}
+          {!historyLoading && !historyError && history.length === 0 && <p className="text-sm py-3 text-[var(--muted)]">هنوز آزمونی ثبت نکرده‌ای.</p>}
+          <ul className="divide-y divide-[var(--border)]">{history.map(item => <li key={item.attempt_id} className="py-3 flex items-center justify-between gap-3">
+            <div><p className="text-sm">{item.title}</p><p className="text-xs text-[var(--muted)]">{item.score}٪ · {item.created_at ? new Date(item.created_at.endsWith("Z") || /[+-]\d\d:\d\d$/.test(item.created_at) ? item.created_at : item.created_at + "Z").toLocaleDateString("fa-IR") : "تاریخ ثبت نشده"}</p></div>
+            <button type="button" disabled={openingAttempt !== null || historyLoading} onClick={() => openAttempt(item.attempt_id)} className="text-sm text-[var(--accent)] underline underline-offset-4 disabled:opacity-50">{openingAttempt === item.attempt_id ? "در حال دریافت…" : "مرور پاسخنامه"}</button>
+          </li>)}</ul>
+          {hasMoreHistory && <button type="button" disabled={historyLoading || openingAttempt !== null} onClick={loadOlderAttempts} className="text-sm py-3 text-[var(--accent)] underline">آزمون‌های قدیمی‌تر</button>}
+        </section>
         <ConfigView onStart={start} onBack={() => nav("home")} error={error} />
       </div>
       {phase === "loading" && (
