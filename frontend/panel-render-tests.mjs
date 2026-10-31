@@ -38,16 +38,24 @@ test('Ranked page loads its controls before account and filter requests finish',
   assert.doesNotMatch(html, /صفحه آماده نشد/);
 });
 
-test('Full mock failure offers an explicit short practice selection without silently starting it', async () => {
+test('Mock config hides the debug option and long practice notice in normal mode', async () => {
   const {ConfigView} = await vite.ssrLoadModule('/src/pages/Mock.tsx');
   let started=false;
   const html=renderToStaticMarkup(React.createElement(ConfigView, {
-    onStart(){started=true},onBack(){},error:'دفترچهٔ کامل آماده نیست',
+    onStart(){started=true},onBack(){},error:'آزمون فعلاً آماده نیست',debugMode:false,
   }));
-  assert.match(html,/انتخاب تمرین ۱۰ سوالی/);
-  assert.match(html,/جای دفترچهٔ کامل کنکور را نمی‌گیرد/);
-  assert.match(html,/موجودی همین سطح دشواری/);
+  assert.match(html,/آزمون فعلاً آماده نیست/);
+  assert.doesNotMatch(html,/دیباگ|debug_10|انتخاب تمرین ۱۰ سوالی|تمرین کوتاه جای/);
   assert.equal(started,false);
+});
+
+test('Mock config exposes a distinct ten-question option when debug mode is enabled', async () => {
+  const {ConfigView} = await vite.ssrLoadModule('/src/pages/Mock.tsx');
+  const html=renderToStaticMarkup(React.createElement(ConfigView, {
+    onStart(){},onBack(){},error:'',debugMode:true,
+  }));
+  assert.match(html,/<option value="debug_10">تمرین ۱۰ سوالی \(دیباگ\)<\/option>/);
+  assert.match(html,/<option value="general" selected="">آزمون کامل کنکور<\/option>/);
 });
 
 test('Colosseum clearly labels a previous Maze batch instead of presenting it as upcoming', async () => {

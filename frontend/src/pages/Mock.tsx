@@ -7,6 +7,7 @@ import QuestionFigure from "../components/QuestionFigure"
 import type { QuestionFigureData } from "../questionFigures"
 import { requestMockGeneration } from "../mockGeneration"
 import { CheckMark, CrossMark } from "../components/icons"
+import { DEBUG_MODE } from "../debugMode"
 
 type Phase = "config" | "loading" | "ready" | "test" | "result"
 
@@ -79,15 +80,17 @@ function BackButton({ onClick }: { onClick: () => void }) {
 
 /* ---------------- Config screen ---------------- */
 
-export function ConfigView({ onStart, onBack, error }: {
+export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE }: {
   onStart: (cfg: Record<string, unknown>) => void
   onBack: () => void
   error: string
+  debugMode?: boolean
 }) {
   const [difficulty, setDifficulty] = useState("konkur")
   const [count, setCount] = useState(0) // Full mock by default; short counts remain for practice.
   const [topics, setTopics] = useState("")
   const [mode, setMode] = useState("general")
+  const practice = mode === "practice" || mode === "practice_weak_areas"
 
   return (
     <div className="min-h-screen bg-[var(--surface)] pb-16">
@@ -103,11 +106,6 @@ export function ConfigView({ onStart, onBack, error }: {
         {error && (
           <div role="alert" className="border-s-4 border-red-500 bg-red-500/10 px-4 py-3 text-[13px] text-[var(--text)] leading-relaxed">
             <p>{error}</p>
-            {mode === "general" && <div className="mt-3 border-t border-[var(--border)] pt-3">
-              <p>برای استفاده از سوال‌های موجود، تمرین کوتاه را انتخاب کن. تمرین کوتاه جای دفترچهٔ کامل کنکور را نمی‌گیرد و به موجودی همین سطح دشواری بستگی دارد.</p>
-              <button type="button" onClick={() => { setMode("practice"); setCount(10); setTopics("") }}
-                className="mt-2 underline underline-offset-4 font-bold">انتخاب تمرین ۱۰ سوالی</button>
-            </div>}
           </div>
         )}
         <div className="border-b border-[var(--border)] pb-4">
@@ -116,6 +114,7 @@ export function ConfigView({ onStart, onBack, error }: {
               <option value="practice">تمرین از سوال‌های قبلی</option>
               <option value="practice_weak_areas">تمرین نقاط ضعف</option>
               <option value="general">آزمون کامل کنکور</option>
+              {debugMode && <option value="debug_10">تمرین ۱۰ سوالی (دیباگ)</option>}
             </select>
           </label>
           <p className="text-[11px] text-[var(--muted-2)] mt-2">آزمون کامل، همه درس‌های دفترچه رشته‌ات را پوشش می‌دهد. برای ریاضی‌فیزیک: ۴۰ ریاضی، ۳۵ فیزیک و ۳۰ شیمی. تمرین، سوال‌های قبلی را در اولویت می‌گذارد.</p>
@@ -136,7 +135,7 @@ export function ConfigView({ onStart, onBack, error }: {
           </div>
         </div>
 
-        {mode !== "general" && <div className="study-section p-4">
+        {practice && <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">تعداد کل سوال‌ها</p>
           <div className="grid grid-cols-3 gap-2">
             {[5, 10, 0].map(n => (
@@ -152,7 +151,7 @@ export function ConfigView({ onStart, onBack, error }: {
           </div>
         </div>}
 
-        {mode !== "general" && <div className="study-section p-4">
+        {practice && <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2">مباحث هدف (اختیاری)</p>
           <textarea rows={2} value={topics} onChange={e => setTopics(e.target.value)}
             placeholder="مثلاً: حرکت‌شناسی، اثر داپلر، استوکیومتری — هر مبحث در یک خط"
@@ -160,7 +159,7 @@ export function ConfigView({ onStart, onBack, error }: {
           <p className="text-[10px] text-[var(--muted-2)] mt-1.5">خالی بگذاری، سوالات از کل مباحث کنکوری می‌آید. برای تمرکز بر آزمون پیش رو، مباحث آن را وارد کن.</p>
         </div>}
 
-        <button onClick={() => onStart({ mode, difficulty, stock_only: true, total_questions: mode === "general" ? undefined : count || undefined, topics: mode !== "general" && topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
+        <button onClick={() => onStart({ mode: mode === "debug_10" ? "practice" : mode, difficulty, stock_only: true, total_questions: mode === "debug_10" ? 10 : mode === "general" ? undefined : count || undefined, topics: practice && topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
           className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all">
           ساخت دفترچه آزمون
         </button>
@@ -518,7 +517,11 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
       setPhase("ready")
     } catch (e) {
       if (controller.signal.aborted) return
-      setError(e instanceof Error ? e.message : "خطای نامشخص")
+      const message = e instanceof Error ? e.message : "خطای نامشخص"
+      // Older API deployments still return the retired long pool notice.
+      setError(message.startsWith("دفترچهٔ کامل با پوشش لازم")
+        ? "آزمون در سطح انتخاب‌شده فعلاً آماده نیست؛ لطفاً بعداً دوباره تلاش کن."
+        : message)
       setPhase("config")
     } finally {
       if (generationRef.current === controller) generationRef.current = null

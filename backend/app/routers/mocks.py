@@ -324,11 +324,8 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
 
     from app.config import get_settings
     if config.stock_only or not get_settings().POOL_ALLOW_LIVE_GENERATION:
-        required = "، ".join(f"{row['questions']} {row['name']}" for row in plan)
         message = (
-            f"دفترچهٔ کامل با پوشش لازم ({required}) در سطح انتخاب‌شده هنوز آماده نیست. "
-            "وجود سوال یا مسابقهٔ ۱۰ سوالی به معنی آماده بودن دفترچهٔ کامل نیست. "
-            "می‌توانی «تمرین از سوال‌های قبلی» را با تعداد ۵ یا ۱۰ سوال انتخاب کنی؛ آماده بودن آن به موجودی سطح انتخاب‌شده بستگی دارد."
+            "آزمون در سطح انتخاب‌شده فعلاً آماده نیست؛ لطفاً بعداً دوباره تلاش کن."
             if not practice else
             "برای رشته، پایه، سطح دشواری و مباحث انتخاب‌شده سوال تأییدشدهٔ قابل استفاده پیدا نشد. سطح دشواری یا مباحث تمرین را تغییر بده."
         )
