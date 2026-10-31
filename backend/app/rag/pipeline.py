@@ -208,6 +208,14 @@ IMAGE_SYSTEM_PROMPT = """تو «بوم» هستی؛ مربی هوشمند کنک
 
 
 # Build a single context string from retrieved chunks
+def _retrieval_score(chunk: dict) -> float:
+    """Accept policy and hybrid hits without treating a valid zero as missing."""
+    value = chunk.get("score")
+    if value is None:
+        value = chunk.get("hybrid_score", 0.0)
+    return float(value) if value is not None else 0.0
+
+
 def _build_context_block(chunks: List[dict]) -> str:
     parts = []
 
@@ -1093,7 +1101,7 @@ def _answer_question(
                 document_name=c["document_name"],
                 chunk_index=c["chunk_index"],
                 content=c["content"],
-                score=c["hybrid_score"],
+                score=_retrieval_score(c),
             )
             for c in retrieved_chunks
         ]
@@ -1122,7 +1130,7 @@ def _answer_question(
             document_name=c["document_name"],
             chunk_index=c["chunk_index"],
             content=c["content"],
-            score=c["hybrid_score"],
+            score=_retrieval_score(c),
         )
         for c in retrieved_chunks
     ]
@@ -1404,7 +1412,7 @@ def _answer_question_stream_impl(
                 "document_name": c["document_name"],
                 "chunk_index": c["chunk_index"],
                 "content": c["content"],
-                "score": c["hybrid_score"],
+                "score": _retrieval_score(c),
             }
             for c in retrieved_chunks
         ]
@@ -1434,7 +1442,7 @@ def _answer_question_stream_impl(
             "document_name": c["document_name"],
             "chunk_index": c["chunk_index"],
             "content": c["content"],
-            "score": c["hybrid_score"],
+            "score": _retrieval_score(c),
         }
         for c in retrieved_chunks
     ]

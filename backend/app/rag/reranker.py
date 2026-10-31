@@ -1,10 +1,10 @@
 """
 Cross-encoder reranking on top of hybrid retrieval.
 
-Uses ``BAAI/bge-reranker-base`` (multilingual, works well on Persian) via
-sentence-transformers. The model runs on CPU (the project's torch build is
-CPU-only) and takes ~2-4s for 20 candidate pairs - acceptable for chat
-retrieval, and it measurably lifts the right question to rank 1.
+Uses the configured cross-encoder via sentence-transformers. The default
+``BAAI/bge-reranker-base`` model documents Chinese/English coverage; Persian
+quality and latency must be measured on the target corpus and hardware.
+Device selection follows the library/runtime unless explicitly configured.
 
 The wrapper degrades gracefully: if sentence-transformers or the model is
 unavailable, reranking is skipped and hybrid results pass through.
@@ -35,7 +35,7 @@ class CrossEncoderReranker:
         try:
             from sentence_transformers import CrossEncoder
 
-            logger.info("Loading reranker model %s (CPU)...", self.model_name)
+            logger.info("Loading reranker model %s...", self.model_name)
             self._model = CrossEncoder(self.model_name, max_length=512)
             logger.info("Reranker model loaded.")
         except Exception as e:

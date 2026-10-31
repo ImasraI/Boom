@@ -97,6 +97,32 @@ def test_load_page_images_all_missing(monkeypatch):
 BOOK_Q = "کتاب شیمی، مبحث استوکیومتری صفحه ۱۰۸ رو توضیح بده"  # grounded: must run retrieval
 
 
+@pytest.mark.parametrize("hit,expected", [
+    ({"score": 0.0, "hybrid_score": 0.8}, 0.0),
+    ({"score": 0.7}, 0.7),
+    ({"hybrid_score": 0.03}, 0.03),
+    ({}, 0.0),
+])
+def test_source_score_accepts_policy_and_hybrid_contracts(hit, expected):
+    assert pipeline._retrieval_score(hit) == expected
+
+
+def test_policy_hit_can_reach_text_answer_sources(monkeypatch):
+    _patch_nothing_available(monkeypatch)
+    hit = dict(id="policy:q", document_name="Book", chunk_index=0,
+               content="Source-backed statement", score=0.0)
+    monkeypatch.setattr(pipeline, "_assemble_retrieval",
+                        lambda *a, **kw: ([hit], [], "disabled", {}))
+    monkeypatch.setattr(pipeline, "rewrite_query", lambda q, **kw: q)
+    monkeypatch.setattr(pipeline, "get_vision_llm_client", lambda: pipeline.MockLLMClient())
+    monkeypatch.setattr(pipeline, "get_llm_client", lambda: SimpleNamespace(
+        last_usage=SimpleNamespace(total_tokens=0),
+        generate=lambda messages: "Source-backed answer"))
+    result = pipeline.answer_question(BOOK_Q, user_id=1)
+    assert result["answer"] == "Source-backed answer"
+    assert result["sources"][0].score == 0.0
+
+
 def test_answer_question_falls_back_to_text_when_images_missing(monkeypatch):
     """The exact user-reported crash: vision hit whose PNG is absent must
     produce a text answer, not FileNotFoundError."""
