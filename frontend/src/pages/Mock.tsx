@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
-import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
+import { apiUrl, apiJson, authHeaders, readApiError, ApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
 import QuestionFigure from "../components/QuestionFigure"
@@ -8,6 +8,7 @@ import type { QuestionFigureData } from "../questionFigures"
 import { requestMockGeneration } from "../mockGeneration"
 import { CheckMark, CrossMark } from "../components/icons"
 import { DEBUG_MODE } from "../debugMode"
+import { fetchPreviousMaze, openPreviousMaze, type PreviousMazeMock } from "../previousMaze"
 
 type Phase = "config" | "loading" | "ready" | "test" | "result"
 
@@ -26,6 +27,25 @@ interface MockInfo {
   duration_minutes: number
   total_questions: number
   subjects: { name: string; questions: number; minutes: number }[]
+}
+
+export function PreviousMazeOptions({ items, loading, error, onSelect, onRetry }: {
+  items: PreviousMazeMock[]; loading: boolean; error: string
+  onSelect: (item: PreviousMazeMock) => void; onRetry: () => void
+}) {
+  return <section aria-label="آزمون‌های قبلی ماز" className="max-w-[430px] mx-auto px-4 pt-5 text-[var(--text)]">
+    <h2 className="font-bold">تمرین‌های آماده از آزمون‌های قبلی ماز</h2>
+    <p className="text-sm text-[var(--muted)] mt-2">یکی از تمرین‌های موجود با مباحث آزمون قبلی را انتخاب کن.</p>
+    {loading && <p role="status" className="text-sm py-3">در حال دریافت آزمون‌های قبلی…</p>}
+    {error && <p role="alert" className="text-sm text-red-500 py-3">{error}</p>}
+    {!loading && !error && items.length === 0 && <p className="text-sm py-3">تمرین آماده‌ای از آزمون‌های قبلی ماز پیدا نشد.</p>}
+    <ul className="divide-y divide-[var(--border)]">{items.map(item => <li key={item.exam_date} className="py-4">
+      <p className="text-sm font-bold">{item.title}</p>
+      <p className="text-xs text-[var(--muted)] mt-1">{item.total_questions} سوال · استاندارد کنکور</p>
+      <button type="button" disabled={loading} onClick={() => onSelect(item)} className="mt-3 px-4 py-2 rounded-xl bg-[var(--accent)] text-white text-sm font-bold disabled:opacity-50">باز کردن تمرین ماز</button>
+    </li>)}</ul>
+    {!loading && <button type="button" onClick={onRetry} className="text-sm text-[var(--accent)] underline py-2">تازه‌سازی فهرست</button>}
+  </section>
 }
 
 interface ReviewQuestion extends MockQuestion {
@@ -447,6 +467,9 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
   const [questions, setQuestions] = useState<MockQuestion[]>([])
   const [result, setResult] = useState<MockResult | null>(null)
   const [error, setError] = useState("")
+  const [previousMaze, setPreviousMaze] = useState<PreviousMazeMock[] | null>(null)
+  const [previousLoading, setPreviousLoading] = useState(false)
+  const [previousError, setPreviousError] = useState("")
 
   const generationRef = useRef<AbortController | null>(null)
   const [history, setHistory] = useState<MockHistoryItem[]>([])
@@ -499,7 +522,17 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
   }
   useEffect(() => () => generationRef.current?.abort(), [])
 
-  async function start(cfg: Record<string, unknown>) {
+  async function loadPreviousMaze(signal?: AbortSignal) {
+    setPreviousMaze([]); setPreviousLoading(true); setPreviousError("")
+    try {
+      const items = await fetchPreviousMaze({ major: userData?.major, grade: userData?.grade }, signal)
+      if (!signal?.aborted) setPreviousMaze(items)
+    } catch (e) {
+      if (!signal?.aborted) setPreviousError(e instanceof Error ? e.message : "دریافت آزمون‌های قبلی ناموفق بود")
+    } finally { if (!signal?.aborted) setPreviousLoading(false) }
+  }
+
+  async function start(cfg: Record<string, unknown>, previous?: PreviousMazeMock) {
     historyRequest.current?.abort()
     setOpeningAttempt(null)
     const controller = new AbortController()
@@ -507,9 +540,10 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
     setPhase("loading")
     setError("")
     try {
-      const data = await requestMockGeneration<MockInfo>(
-        { ...cfg, student: { major: userData?.major, grade: userData?.grade } }, controller.signal,
-      )
+      const student = { major: userData?.major, grade: userData?.grade }
+      const data = previous
+        ? await openPreviousMaze<MockInfo>(previous, student, controller.signal)
+        : await requestMockGeneration<MockInfo>({ ...cfg, student }, controller.signal)
       const qData = await apiJson<{ questions: MockQuestion[] }>(`/api/mocks/${data.mock_id}`, { signal: controller.signal })
       if (!Array.isArray(qData.questions) || !qData.questions.length) throw new Error("سوال معتبری در این دفترچه باقی نمانده است؛ دفترچه دیگری انتخاب کن.")
       setInfo(data)
@@ -517,6 +551,11 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
       setPhase("ready")
     } catch (e) {
       if (controller.signal.aborted) return
+      if (e instanceof ApiError && e.code === "pool_empty") {
+        setError(""); setPhase("config")
+        await loadPreviousMaze(controller.signal)
+        return
+      }
       const message = e instanceof Error ? e.message : "خطای نامشخص"
       // Older API deployments still return the retired long pool notice.
       setError(message.startsWith("دفترچهٔ کامل با پوشش لازم")
@@ -561,7 +600,9 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
           </li>)}</ul>
           {hasMoreHistory && <button type="button" disabled={historyLoading || openingAttempt !== null} onClick={loadOlderAttempts} className="text-sm py-3 text-[var(--accent)] underline">آزمون‌های قدیمی‌تر</button>}
         </section>
-        <ConfigView onStart={start} onBack={() => nav("home")} error={error} />
+        {previousMaze !== null && <PreviousMazeOptions items={previousMaze} loading={previousLoading}
+          error={previousError} onSelect={item => start({}, item)} onRetry={() => { void loadPreviousMaze() }} />}
+        <ConfigView onStart={cfg => { setPreviousMaze(null); void start(cfg) }} onBack={() => nav("home")} error={error} />
       </div>
       {phase === "loading" && (
       <div className="min-h-screen bg-[var(--surface)] flex flex-col items-center justify-center gap-4">

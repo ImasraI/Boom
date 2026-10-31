@@ -263,6 +263,83 @@ def test_previous_valid_scope_is_available_while_next_curriculum_is_unmapped(wee
         assert result['available'] and result['fallback'] and result['scope']==previous['scope']
 
 
+def test_mock_archive_lists_and_opens_previous_maze_without_reassigning_the_source(weekly,sessions,monkeypatch):
+    from app.rag import previous_maze
+    from app.routers import mocks
+    current, previous = _previous_scope(weekly, monkeypatch)
+    monkeypatch.setattr(weekly_ranked, 'today', lambda: date(2026, 10, 31))
+    monkeypatch.setattr(mg, 'generate_booklet', lambda *_a, **_k: pytest.fail('Archive must not call an LLM'))
+    with sessions() as db:
+        db.add(User(id=1, username='archive-reader', hashed_password='unused'))
+        source = _paper(db, _questions(previous['plan']))
+        items = previous_maze.available(db, 1, STUDENT)
+        assert len(items) == 1 and items[0]['exam_date'] == '2026-10-09'
+        assert items[0]['total_questions'] == 10
+        original_questions = source.questions
+        response = previous_maze.create(db, 1, STUDENT, date(2026, 10, 9))
+        assert response['mock_id'] != source.id and response['source'] == 'previous_maze'
+        assert response['total_questions'] == 10 and response['fallback']
+        assert source.student_id == 0 and source.status == 'pending_use'
+        assert source.questions == original_questions
+        copy = db.get(GeneratedMock, response['mock_id'])
+        assert {q['weekly_ranked_scope'] for q in json.loads(copy.questions)} == {previous['scope']}
+        public = mocks.get_mock(copy.id, db.get(User, 1), db)
+        assert len(public['questions']) == 10
+        assert all('answer' not in q and 'explanation' not in q for q in public['questions'])
+
+
+def test_mock_archive_http_selection_refunds_a_failed_open(weekly,sessions,monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.auth.deps import get_current_user, get_db
+    from app.routers import mocks
+    _, previous = _previous_scope(weekly, monkeypatch)
+    monkeypatch.setattr(weekly_ranked, 'today', lambda: date(2026, 10, 31))
+    charges, refunds = [], []
+    monkeypatch.setattr(mocks, 'consume_ai_use', lambda *args: charges.append(args))
+    monkeypatch.setattr(mocks, 'release_ai_use', lambda *args: refunds.append(args))
+    with sessions() as db:
+        user = User(id=1, username='archive-http', hashed_password='unused')
+        db.add(user); _paper(db, _questions(previous['plan']))
+        app = FastAPI(); app.include_router(mocks.router)
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_current_user] = lambda: user
+        with TestClient(app) as client:
+            listing = client.get('/api/mocks/previous-maze').json()['items']
+            assert listing
+            assert listing[0]['exam_date'] == '2026-10-09'
+            response = client.post('/api/mocks/previous-maze', json={'exam_date':'2026-10-09'})
+            assert response.status_code == 200 and response.json()['total_questions'] == 10
+            assert len(client.get(f"/api/mocks/{response.json()['mock_id']}").json()['questions']) == 10
+            failed = client.post('/api/mocks/previous-maze', json={'exam_date':'2026-11-06'})
+            assert failed.status_code == 409 and len(charges) == 2 and len(refunds) == 1
+
+
+@pytest.mark.parametrize('invalid', ['corrupt', 'private', 'mixed-scope', 'wrong-grade', 'wrong-major', 'future'])
+def test_mock_archive_rechecks_stock_and_access_when_opening(weekly,sessions,monkeypatch,invalid):
+    from app.rag import previous_maze
+    _, previous = _previous_scope(weekly, monkeypatch)
+    monkeypatch.setattr(weekly_ranked, 'today', lambda: date(2026, 10, 31))
+    student = dict(STUDENT)
+    with sessions() as db:
+        questions = _questions(previous['plan'])
+        if invalid == 'mixed-scope': questions[0]['weekly_ranked_scope'] = 'other'
+        source = _paper(db, questions)
+        if invalid == 'private':
+            source.student_id = 999; source.bank_scope = 'private'; source.status = 'claimed'
+        if invalid == 'corrupt':
+            indexed = question_bank.index_mock(db, source)
+            db.get(BankQuestion, indexed[0]['bank_id']).status = 'corrupt'
+        if invalid == 'wrong-grade': student['grade'] = 'یازدهم'
+        if invalid == 'wrong-major': student['major'] = 'علوم تجربی'
+        db.commit()
+        with pytest.raises(HTTPException) as error:
+            previous_maze.create(db, 1, student,
+                date(2026, 11, 6) if invalid == 'future' else date(2026, 10, 9))
+        assert error.value.status_code == 409
+        assert db.query(GeneratedMock).count() == 1
+
+
 @pytest.mark.parametrize('invalid',['corrupt','private','partial-mixed-weeks'])
 def test_fallback_never_uses_corrupt_private_or_mixed_week_stock(weekly,sessions,monkeypatch,invalid):
     current,previous=_previous_scope(weekly,monkeypatch)

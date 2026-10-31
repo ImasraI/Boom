@@ -58,6 +58,19 @@ test('Mock config exposes a distinct ten-question option when debug mode is enab
   assert.match(html,/<option value="general" selected="">آزمون کامل کنکور<\/option>/);
 });
 
+test('empty mock stock shows previous Maze practices as dated selectable alternatives', async () => {
+  const {PreviousMazeOptions} = await vite.ssrLoadModule('/src/pages/Mock.tsx');
+  const html = renderToStaticMarkup(React.createElement(PreviousMazeOptions, {
+    items:[{exam_date:'2026-10-23',title:'تمرین از مباحث آزمون قبلی ماز — 2026-10-23',total_questions:10,difficulty:'konkur'}],
+    loading:false,error:'',onSelect(){},onRetry(){},
+  }));
+  assert.match(html,/آزمون‌های قبلی ماز/);
+  assert.match(html,/2026-10-23/);
+  assert.match(html,/10 سوال/);
+  assert.match(html,/باز کردن تمرین ماز/);
+  assert.doesNotMatch(html,/دفترچهٔ کامل با پوشش لازم|پاسخ صحیح/);
+});
+
 test('Colosseum clearly labels a previous Maze batch instead of presenting it as upcoming', async () => {
   const {WeeklyStockNotice} = await vite.ssrLoadModule('/src/pages/Arena.tsx');
   const html=renderToStaticMarkup(React.createElement(WeeklyStockNotice,{weekly:{

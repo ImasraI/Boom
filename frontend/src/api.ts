@@ -32,13 +32,26 @@ export function formatApiDetail(detail: unknown, fallback: string): string {
   return fallback;
 }
 
-export async function readApiError(res: Response, fallback: string): Promise<string> {
+export class ApiError extends Error {
+  constructor(message: string, public status: number, public code?: string) {
+    super(message)
+    this.name = "ApiError"
+  }
+}
+
+async function apiFailure(res: Response, fallback: string): Promise<ApiError> {
   try {
     const data = await res.json();
-    return formatApiDetail(data?.detail, fallback);
+    const detail = data?.detail;
+    return new ApiError(formatApiDetail(detail, fallback), res.status,
+      typeof detail?.code === "string" ? detail.code : undefined);
   } catch {
-    return fallback;
+    return new ApiError(fallback, res.status);
   }
+}
+
+export async function readApiError(res: Response, fallback: string): Promise<string> {
+  return (await apiFailure(res, fallback)).message;
 }
 
 /** Bound panel requests so a broken connection cannot leave a spinner forever. */
@@ -55,7 +68,7 @@ export async function apiJson<T>(path: string, init: RequestInit = {}, timeoutMs
     const response = await fetch(apiUrl(path), { ...init, headers, signal: controller.signal });
     if (!response.ok) {
       const fallback = response.status === 401 ? "نشست ورود منقضی شده است؛ دوباره وارد حساب شو." : "دریافت اطلاعات ناموفق بود؛ دوباره تلاش کن.";
-      throw new Error(await readApiError(response, fallback));
+      throw await apiFailure(response, fallback);
     }
     return await response.json() as T;
   } catch (error) {

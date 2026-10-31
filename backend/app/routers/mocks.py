@@ -29,7 +29,7 @@ live generation call.
 import json
 import threading
 from threading import Thread
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -106,6 +106,45 @@ class _MockQuestion(BaseModel):
     explanation: str = ""
     book: str = ""
     page: Optional[int] = None
+
+
+class PreviousMazeRequest(BaseModel):
+    exam_date: date
+    student: Optional[dict] = None
+
+
+def _previous_maze_student(db, user_id, supplied=None):
+    student = dict(supplied or {})
+    profile = db.execute(select(StudentProfile).where(StudentProfile.user_id == user_id)).scalar_one_or_none()
+    if profile:
+        for field in ('major', 'grade'):
+            if getattr(profile, field, None):
+                student[field] = getattr(profile, field)
+    return student
+
+
+@router.get('/previous-maze')
+def previous_maze_list(major: str = '', grade: str = '',
+                       current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.rag import previous_maze
+    student = _previous_maze_student(db, current_user.id, {'major':major, 'grade':grade})
+    items = previous_maze.available(db, current_user.id, student)
+    db.commit()
+    return {'items':items}
+
+
+@router.post('/previous-maze')
+def start_previous_maze(request: PreviousMazeRequest,
+                        current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.rag import previous_maze
+    consume_ai_use(current_user.id, 'mock_generate')
+    try:
+        student = _previous_maze_student(db, current_user.id, request.student)
+        return previous_maze.create(db, current_user.id, student, request.exam_date)
+    except Exception:
+        db.rollback()
+        release_ai_use(current_user.id, 'mock_generate')
+        raise
 
 
 def _resolve_plan(config: "MockConfig") -> Tuple[bool, List[dict], str]:
