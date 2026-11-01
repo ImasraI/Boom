@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Boom GitHub main for tested updates every two minutes
+
+[Timer]
+OnBootSec=60s
+OnUnitInactiveSec=2min
+AccuracySec=10s
+RandomizedDelaySec=10s
+Unit=boom-autodeploy.service
+
+[Install]
+WantedBy=timers.target

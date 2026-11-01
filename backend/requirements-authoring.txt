@@ -1,3 +1,4 @@
 # Optional local-only unpublished mathematical construction/evaluation.
 # Not imported by production app startup; no model downloads or paid services.
 sympy==1.14.0
+jsonschema>=4.23,<5

@@ -282,6 +282,7 @@ def test_review_render_keeps_aliases_and_withholds_answers():
     import shutil
     root=Path(__file__).resolve().parents[1]
     parent=root/'backend/data/authoring_work'
+    parent.mkdir(parents=True,exist_ok=True)
     folder=Path(tempfile.mkdtemp(prefix='synthetic-benchmark-render-',dir=parent))
     try:
         page=dict(review_only=True,proof_kind='independent_assistant',questions=[dict(id='R17',stem='Synthetic $\\invalidCommand$',
