@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 240" width="720" height="240" role="img" aria-label="برش ساختگی پرسش یک">
+  <rect width="720" height="240" fill="#fbfaf7"/>
+  <rect x="12" y="12" width="696" height="216" fill="none" stroke="#d9d3c8"/>
+  <text x="30" y="34" font-family="Georgia, serif" font-size="10" fill="#a49c8f" letter-spacing="1.2">SYNTHETIC CROP · QUESTION 1</text>
+  <text x="30" y="66" font-family="Georgia, serif" font-size="15" fill="#2f2b26">1)</text>
+  <text x="54" y="66" font-family="Vazirmatn, Tahoma, sans-serif" font-size="15" fill="#3a352e" direction="rtl">ریشه‌های معادلهٔ زیر کدام‌اند؟</text>
+  <text x="54" y="112" font-family="Cambria Math, Georgia, serif" font-size="26" fill="#1f1b17">f(x) = x² − 5x + 6 = 0</text>
+  <g font-family="Georgia, serif" font-size="14" fill="#4a443c">
+    <text x="58" y="160">①</text><rect x="78" y="150" width="86" height="7" fill="#e2dbd0"/>
+    <text x="206" y="160">②</text><rect x="226" y="150" width="86" height="7" fill="#e2dbd0"/>
+    <text x="354" y="160">③</text><rect x="374" y="150" width="86" height="7" fill="#e2dbd0"/>
+    <text x="502" y="160">④</text><rect x="522" y="150" width="86" height="7" fill="#e2dbd0"/>
+  </g>
+  <text x="30" y="206" font-family="Georgia, serif" font-size="10" fill="#a49c8f">Synthetic crop. Not a real question.</text>
+</svg>

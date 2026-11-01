@@ -121,7 +121,7 @@ button, a, input, textarea, select { -webkit-tap-highlight-color:transparent; }
 .dial-legend { display:flex; justify-content:center; flex-wrap:wrap; gap:14px; font-size:10px; color:var(--muted); padding:0 10px 12px; }
 .dial-legend span { display:flex; align-items:center; gap:5px; }
 .dial-legend i { width:6px; height:6px; border-radius:50%; }
-.desk-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border-top:1px solid var(--border-strong); border-bottom:1px solid var(--border-strong); }
+.desk-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); border-top:1px solid var(--border-strong); border-bottom:1px solid var(--border-strong); }
 .desk-metrics button { text-align:start; padding:20px 22px; border-inline-end:1px solid var(--border); border-radius:0 !important; }
 .desk-metrics button:first-child { padding-inline-start:0; }
 .desk-metrics button:last-child { border-inline-end:0; }

@@ -12,7 +12,7 @@ const {readPreferences}=await vite.ssrLoadModule('/src/components/Experience.tsx
 const render=(component,props)=>renderToStaticMarkup(React.createElement(component,props));
 const task=(id,subject,done=false,skipped=false)=>({id,subject,done,skipped,title:'وظیفه '+id,
   scheduledTime:'10:00',description:'',duration:'۱ ساعت',type:'study',planBlock:{day:0,startHour:10,duration:1,title:'وظیفه '+id,type:'study'}});
-const props={userData:{name:'آرسام',major:'ریاضی فیزیک',grade:'دوازدهم'},nav(){},logout(){},streak:0,daysLeft:'—',date:'2026-10-14'};
+const props={userData:{name:'آرسام',major:'ریاضی فیزیک',grade:'دوازدهم'},nav(){},logout(){},daysLeft:'—',date:'2026-10-14'};
 
 test('Sunset is the default, including corrupt preferences, while explicit palette choices persist',()=>{
   const previous=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
@@ -50,7 +50,7 @@ test('an unplanned day shows no invented percentage, progress or subject ring',(
   const hero=render(StudyDeskHero,{...props,tasks:[]});
   assert.match(hero,/ساخت برنامهٔ من/);
   assert.match(hero,/زمان‌های آزادت را مشخص کن/);
-  assert.match(hero,/پیوستگی مطالعه/);
+  assert.doesNotMatch(hero,/پیوستگی مطالعه|استریک/);
   assert.doesNotMatch(hero,/۹۰٪|۸ ساعت|رتبهٔ پیش‌بینی/);
 });
 

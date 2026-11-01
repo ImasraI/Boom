@@ -578,7 +578,12 @@ def _load_page_images(
     usable_hits: List[dict] = []
     for hit in image_hits:
         try:
-            loaded.append(get_object(hit["content"]))
+            import hashlib
+            data=get_object(hit["content"])
+            if getattr(get_settings(), 'SOURCE_POLICY_ENABLED', True) and (not hit.get("image_sha256") or hashlib.sha256(data).hexdigest()!=hit["image_sha256"]):
+                logger.info("Page image held: missing or stale source hash binding")
+                continue
+            loaded.append(data)
             usable_hits.append(hit)
         except FileNotFoundError:
             logger.warning(
@@ -614,6 +619,12 @@ def _retrieve_image_hits(
     from app.rag.image_embeddings import get_image_embedding_model
     from app.utils.storage import has_page_images
 
+    from app.rag.source_routing import load_policy, filter_records, search_store
+    policy=load_policy()
+    image_policy={**policy,"records":[r for r in policy.get("records",[]) if r.get("modality")=="image"]}
+    eligible,_=filter_records(image_policy["records"],image_policy,purpose="factual_grounding",
+        major=policy.get("major"),curriculum_version=policy.get("curriculum_version"))
+    if getattr(get_settings(), 'SOURCE_POLICY_ENABLED', True) and not eligible:return []
     try:
         # A transferred vector corpus can arrive before its PNGs. Do not load
         # CLIP or search vectors that cannot supply a readable page yet.
@@ -638,12 +649,17 @@ def _retrieve_image_hits(
     # Retrieve extra candidates, then filter by actual similarity.
 
         candidate_k = max(k * 4, 20) if category else max(k * 3, 10)
-        candidates = image_vector_store.similarity_search(
-            query_embedding=query_embedding,
-            top_k=candidate_k,
-            user_id=user_id,
-            category=category,
-        )
+        if getattr(settings, 'SOURCE_POLICY_ENABLED', True):
+            candidates,audit = search_store(image_vector_store,query_text=search_query,
+                query_embedding=query_embedding,user_id=user_id,
+                shared_user_id=int(settings.DEMO_USER_ID),purpose="factual_grounding",
+                major=policy.get("major"),curriculum_version=policy.get("curriculum_version"),
+                top_k=candidate_k,policy=image_policy)
+            with trace_stage("image_source_policy","فیلتر منبع تصویر") as st:
+                st["meta"]=audit
+        else:
+            candidates=image_vector_store.similarity_search(query_embedding=query_embedding,
+                top_k=candidate_k,user_id=user_id,category=category)
 
         for hit in candidates:
             hit["category"] = str(
@@ -737,6 +753,7 @@ def _assemble_retrieval(
         user_id=user_id,
         top_k=k,
         label="books",
+        purpose="factual_grounding",
     )
 
     # Question bank: structured per-question chunks (text, options, figure
@@ -853,6 +870,7 @@ def _retrieve_question_bank_chunks(
                 user_id=user_id,
                 top_k=top_k,
                 label="qbank",
+                purpose="factual_grounding",
             )
             st["meta"]["hits"] = len(hits)
             st["columns"] = [
@@ -891,6 +909,13 @@ def _resolve_ocr_page_images(
     OCR text alone cannot represent.  Returns image-hit dicts compatible with
     ``_retrieve_image_hits`` output.
     """
+    from app.rag.source_routing import load_policy, filter_records
+    policy=load_policy()
+    allowed,_=filter_records([r for r in policy.get("records",[]) if r.get("modality")=="image"],policy,
+        purpose="factual_grounding",major=policy.get("major"),curriculum_version=policy.get("curriculum_version"))
+    allowed_ids={r["id"] for r in allowed}
+    if getattr(get_settings(), 'SOURCE_POLICY_ENABLED', True):
+        text_chunks=[c for c in text_chunks if c.get("id") in allowed_ids]
     import re as _re
 
     from app.utils.storage import get_object
@@ -929,6 +954,7 @@ def _resolve_ocr_page_images(
             continue
         seen.add(dedupe)
         hits.append({
+            "id":c.get("id"),
             "document_name": name,
             "chunk_index": page - 1,
             "content": key,
@@ -936,6 +962,9 @@ def _resolve_ocr_page_images(
         })
     if hits:
         logger.info("OCR text hits resolved %d page image(s) for the vision read.", len(hits))
+    hashes={r["id"]:r["image_sha256"] for r in allowed}
+    for hit in hits:
+        hit["image_sha256"]=hashes.get(hit.get("id"))
     return hits
 
 
@@ -1357,6 +1386,7 @@ def _answer_question_stream_impl(
         query_embedding=query_embedding,
         user_id=user_id,
         top_k=k,
+        purpose="factual_grounding",
     )
 
     # Question bank merge (same as the non-streaming path)

@@ -478,6 +478,8 @@ def scan(root,workers=4,limit=0,provider='auto',progress=None,method='structured
     if method not in ('structured','whole-page'):raise ValueError('Unsupported scan method')
     fleet.scan_method=method
     fleet.reclassify_network_refusals()
+    from app.rag.exam_control import apply_quota_recheck
+    apply_quota_recheck(fleet)
     state={'phase':'scanning','pid':os.getpid(),'heartbeat':time.time(),'scanned_this_run':0,'failed_this_run':0,
            'total_pages':sum(d.get('pages',0) for d in inventory['documents'])}
     previous_status=read_json(root/'scan-status.json',{})

@@ -41,7 +41,6 @@ export const PANELS: Record<PanelKey, PanelDef> = {
     label: "پروفایل",
     items: [
       { screen: "profile", label: "پروفایل" },
-      { screen: "streak", label: "استریک" },
       { screen: "admin", label: "مدیریت" },
     ],
   },

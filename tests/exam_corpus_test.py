@@ -346,8 +346,18 @@ def test_review_is_bound_to_exact_transcript_and_original_image(tmp_path):
     assert scanning.standardize(tmp_path)['qualified_references']==0
 
 
-def test_style_retrieval_requires_current_subject_major_topic_and_qualified_record(tmp_path):
+def allow_synthetic_style(monkeypatch,index):
+    from app.rag import source_routing
+    raw=corpus.read_json(index)['records'][0]
+    receipt=dict(state='passed',reviewer='synthetic fixture',evidence_refs=['synthetic'],content_sha256=raw['literal_sha256'],image_sha256='synthetic-image',curriculum_version='synthetic-cat',revision=1)
+    record=dict(id=raw['id'],document_id=raw['document_id'],role='mock_exam',classification_state='confirmed',split='development',major='riazi',curriculum_version='synthetic-cat',revision=1,knowledge_ids=['synthetic-lesson'],content_sha256=raw['literal_sha256'],image_sha256='synthetic-image',contains_answer=False,issues=[],reviews={d:dict(receipt) for d in ['extraction','curriculum','design']})
+    policy=dict(schema_version='0.1',curriculum_version='synthetic-cat',development_document_ids=[raw['document_id']],allowed_knowledge_ids=['synthetic-lesson'],records=[record])
+    monkeypatch.setattr(source_routing,'load_policy',lambda:policy)
+
+
+def test_style_retrieval_requires_current_subject_major_topic_and_qualified_record(tmp_path,monkeypatch):
     save_review(tmp_path);scanning.standardize(tmp_path);index=tmp_path/'style-index.json'
+    allow_synthetic_style(monkeypatch,index)
     plan=[{'name':'ریاضی','major':'riazi'}];topics=['تابع درجه دوم: ۱ سوال']
     assert len(style.references(plan,topics,path=index))==1
     assert not style.references([{'name':'ریاضی','major':'tajrobi'}],topics,path=index)
@@ -522,6 +532,7 @@ def test_prompt_style_stays_separate_from_grounding(monkeypatch,tmp_path):
     from app.rag import mock_generation as mg
     save_review(tmp_path);scanning.standardize(tmp_path)
     monkeypatch.setattr(style,'INDEX',tmp_path/'style-index.json')
+    allow_synthetic_style(monkeypatch,tmp_path/'style-index.json')
     plan=[{'name':'ریاضی','major':'riazi','questions':1}]
     grounded=mg.build_booklet_prompt(plan,['تابع درجه دوم'],'hard','[source_id: valid-book] current allowed concept')
     assert '<exam_style_data>' in grounded and 'current allowed concept' in grounded

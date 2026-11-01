@@ -789,3 +789,14 @@ idle system sleep is inhibited during the coordinator lifetime and restored on
 exit; explicit sleep, closing the lid, reboot or terminal close still interrupts.
 177 focused tests passed,1 skipped, including final partial batch, end-of-input,
 stop-between-batches and refusal/incomplete-batch non-advancement.
+
+
+## 22 October local resume
+
+Scanner resumed via START-EXAM-WORKERS.cmd (OS lock prevents duplicates).
+Frozen batch-5000-v1 embeddings complete: 17,605/17,605. Do not re-embed the
+same snapshot or merge newer OCR into it silently. Local retrieval rerun uses
+all stored vectors with no overlay; console is retrieval-complete-console.log.
+Query cache is exact text/model/dimensions/task-bound. Reports are archived in
+retrieval-history. Run scripts/exam_release_status.py from backend for current
+saved-evidence gates. No VM upload, production activation or push performed.

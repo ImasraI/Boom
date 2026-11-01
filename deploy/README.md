@@ -2,6 +2,16 @@
 
 Frontend: Cloudflare Pages. Backend: Oracle Ubuntu ARM VM, `/home/ubuntu/Boom/backend`, served by Caddy at `https://api.boomedu.ir`.
 
+## Source-policy activation boundary
+
+The local reviewed-source authoring policy depends on separately qualified corpus
+records. Keep `SOURCE_POLICY_ENABLED=false` in the production backend environment
+until those policies and data are validated and deployed together. This explicit
+setting preserves the existing shared/private retrieval and Maze extraction;
+it does not promote experimental questions or transfer local review data.
+Local source-policy evaluation retains the strict path. Optional authoring tests
+use `requirements-authoring.txt`; production startup does not require SymPy.
+
 ## Current audit (3 October 2026)
 
 Read-only SSH inspection found:

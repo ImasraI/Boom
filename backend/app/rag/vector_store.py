@@ -7,9 +7,11 @@ Responsibilities:
 - List stored documents
 - Delete documents
 
-All operations are scoped to a single user via the "user_id" field
-stored in each chunk's metadata. This keeps every account's documents
-isolated inside one shared Chroma collection.
+The legacy "user_id" metadata identifies the owner namespace. Writes and
+document-management operations target that namespace; similarity search includes
+both the requesting user and the configured DEMO_USER_ID shared-corpus namespace.
+This field is access-scoping metadata, not a student-specific embedding model.
+Private documents must never be written under the shared-corpus owner.
 """
 
 from functools import lru_cache

@@ -1,7 +1,7 @@
 import { useId, type ReactNode, type SVGProps } from "react";
 
 type SymbolKind = "math" | "geometry" | "statistics" | "discrete" | "physics" | "chemistry" |
-  "biology" | "humanities" | "art" | "language" | "document" | "plan" | "streak" | "award";
+  "biology" | "humanities" | "art" | "language" | "document" | "plan" | "award";
 interface SymbolProps extends SVGProps<SVGSVGElement> { size?: number; title?: string }
 
 /** Fixed geometry and currentColor keep the marks consistent across themes and platforms. */
@@ -28,7 +28,6 @@ const shapes: Record<SymbolKind, ReactNode> = {
   language: <><path d="M3 5h12M9 3v2M5 8c1 3 4 6 8 8M12 5c0 5-4 9-9 11M13 21l4-10 4 10M14.5 18h5" /></>,
   document: <><path d="M6 3h9l4 4v14H6V3ZM15 3v5h4M9 12h7M9 16h7" /><path d="m3 13 1 1" opacity=".45" /></>,
   plan: <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M7 2v4M17 2v4M3 9h18m-13 6 3 3 5-6" /></>,
-  streak: <><path d="M4 20h16M7 17v-4M12 17V9M17 17V5" /><path d="m4 9 4-3 4 1 7-5" /><path d="M16 2h3v3" /></>,
   award: <><path d="M12 2 20 5v6c0 5-8 10-8 10S4 16 4 11V5l8-3Z" fill="currentColor" fillOpacity=".07" /><path d="m8 11 3 3 5-6" /></>,
 };
 

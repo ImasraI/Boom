@@ -15,7 +15,6 @@ import { SCHEDULE_CHANGED_EVENT, toISO } from "../scheduleStore";
 import WeaknessMap from "../components/WeaknessMap";
 import StudyDeskHero from "../components/StudyDeskHero";
 
-import { currentStreak } from "../studyStats";
 import { apiUrl, authHeaders } from "../api";
 import { calendarSyncError, flushCalendar, pullCalendar } from "../calendarSync";
 
@@ -269,7 +268,6 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
   const [todayISO, setTodayISO] = useState(() => toISO(new Date()));
   const [syncError, setSyncError] = useState("");
   const [tasks, setTasks] = useState<HomeTask[]>(() => homeTasksForDate(todayISO));
-  const STREAK = currentStreak();
   const [nextExamDate, setNextExamDate] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -347,7 +345,7 @@ export default function Home({ userData, nav, logout }: { userData: SignupData; 
     <div className="home-desk min-h-screen bg-[var(--surface)] pb-32">
 
       <StudyDeskHero tasks={tasks} userData={userData} nav={nav} logout={logout}
-        streak={STREAK} daysLeft={daysLeft} date={todayISO} />
+        daysLeft={daysLeft} date={todayISO} />
 
       {/* ── Weakness map (from wrong_answers across all tests) ── */}
       <div className="border-b border-[var(--border)]">

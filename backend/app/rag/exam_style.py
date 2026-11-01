@@ -48,7 +48,7 @@ def _load(path,mtime,size):
     return result
 
 
-def references(plan,topics,*,path=None,limit=3):
+def references(plan,topics,*,path=None,limit=3,_copy_check=False):
     path=Path(path or INDEX)
     if not isinstance(plan,list) or any(not isinstance(row,dict) or not isinstance(row.get('name'),str) for row in plan):return []
     majors=set()
@@ -64,6 +64,20 @@ def references(plan,topics,*,path=None,limit=3):
     target=terms(' '.join(topics))
     try:stat=path.stat();rows=_load(str(path.resolve()),stat.st_mtime_ns,stat.st_size)
     except OSError:return []
+    from app.rag.source_routing import load_policy, filter_records
+    policy=load_policy()
+    sidecars={r.get("id"):r for r in policy.get("records",[])}
+    permitted,audit=filter_records(list(sidecars.values()),policy,
+        purpose="authoring_design",major=major,curriculum_version=policy.get("curriculum_version"))
+    allowed={r["id"]:r for r in permitted}
+    missing_sidecars=[{"id":r["id"],"reasons":["no_eligible_review_sidecar"]} for r in rows if r["id"] not in allowed]
+    # Re-evaluated on every call: split changes cannot be hidden by the OCR cache.
+    if not _copy_check:
+        rows=[r for r in rows if r["id"] in allowed
+              and allowed[r["id"]].get("content_sha256")==r.get("literal_sha256")]
+    from app.rag.trace import stage as trace_stage
+    with trace_stage("authoring_source_policy","فیلتر نمونه‌های طراحی") as st:
+        st["meta"]={"filtered":audit+missing_sidecars,"permitted_ids":[r["id"] for r in rows]}
     ranked=[]
     for row in rows:
         if row['major']!=major or normalized_text(row.get('subject','')) not in subjects:continue
@@ -71,7 +85,11 @@ def references(plan,topics,*,path=None,limit=3):
         if not overlap:continue
         ranked.append((len(overlap),row))
     ranked.sort(key=lambda pair:(-pair[0],pair[1]['id']))
-    return [row for _,row in ranked[:min(3,max(0,limit))]]
+    selected=[row for _,row in ranked[:min(3,max(0,limit))]]
+    if not _copy_check:
+        with trace_stage("authoring_source_selection","نمونه‌های طراحی انتخاب‌شده") as st:
+            st["meta"]={"retrieved_ids":[r["id"] for r in selected],"purpose":"authoring_design"}
+    return selected
 
 
 def context(plan,topics,*,path=None):
@@ -113,8 +131,12 @@ def is_source_copy(text,plan,topics,*,path=None):
         value=re.sub(r'[αβγθλμ]','V',value)
         value=re.sub(r'\d+(?:\.\d+)?','N',value)
         return re.sub(r'[A-Za-z]+',lambda m:('V'*len(m[0]) if len(m[0])<=2 and m[0] not in ('ln','lg') else m[0]),value)
-    for row in references(plan,topics,path=path):
+    for row in references(plan,topics,path=path,_copy_check=True):
         original=row['literal']['text']
         if candidate==canonical_literal(original):return True
         if len(terms(original))>=8 and skeleton(text)==skeleton(original):return True
+        if len(terms(original))>=8:
+            from app.rag.authoring_originality import screen
+            if screen(text,[{'id':row['id'],'text':original}])['state']=='held_close_variant':
+                return True
     return False

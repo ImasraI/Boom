@@ -77,6 +77,10 @@ def audit(client, question, timeout=300):
         "فقط JSON: {\"valid\":true یا false یا null,\"reason\":\"دلیل کوتاه و نتیجه محاسبه قابل بررسی\"}. "
         "false فقط برای نقص مشخص و قابل توضیح است، نه به خاطر تردید بازبین.\n"
         + json.dumps(visible, ensure_ascii=False))
+    level = question.get('_requested_difficulty')
+    if level in ('easy', 'konkur', 'hard', 'extreme'):
+        from app.rag.question_design import audit_contract
+        prompt += audit_contract(level)
     try:
         with pool_usage.stage("quality_audit"):
             with trace.stage("quality_audit", "ارزیابی کیفیت سؤال (بازبین مستقل)") as st:
@@ -104,6 +108,16 @@ def audit(client, question, timeout=300):
         trace.note(audit="invalid protocol reply")
         return {"valid": None, "reason": "audit_protocol_error"}
     verdict = {"valid": result["valid"], "reason": result["reason"][:1500]}
+    if level in ('easy', 'konkur', 'hard', 'extreme') and verdict['valid'] is True:
+        from app.rag.question_design import assess_difficulty
+        review = result.get('difficulty_review')
+        accepted = assess_difficulty(level, review)
+        verdict['difficulty_review'] = review
+        verdict['content_valid'] = True
+        if accepted is None:
+            verdict.update(valid=None, reason='difficulty_audit_incomplete')
+        elif accepted is False:
+            verdict.update(valid=False, reason='difficulty_below_requested_tier: ' + str(review.get('reason', ''))[:1200])
     trace.note(audit=str(verdict["valid"]),
                audit_reason=trace.clip(verdict["reason"], 200))
     return verdict

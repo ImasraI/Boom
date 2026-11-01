@@ -41,9 +41,9 @@ export function StudyDial({ tasks }: { tasks: Pick<HomeTask, "subject" | "done" 
   </div>;
 }
 
-export default function StudyDeskHero({ tasks, userData, nav, logout, streak, daysLeft, date }: {
+export default function StudyDeskHero({ tasks, userData, nav, logout, daysLeft, date }: {
   tasks: HomeTask[]; userData: SignupData; nav: NavFn; logout: () => void;
-  streak: number; daysLeft: number | string; date: string;
+  daysLeft: number | string; date: string;
 }) {
   const active = tasks.filter(t => !t.skipped);
   const done = active.filter(t => t.done).length;
@@ -70,7 +70,6 @@ export default function StudyDeskHero({ tasks, userData, nav, logout, streak, da
     </div>
     <div className="desk-metrics">
       {[{ n: fa(done), suffix: `از ${fa(active.length)}`, label: "فعالیت انجام‌شده", color: tones[0], action: () => nav("schedule") },
-        { n: fa(streak), suffix: "روز", label: "پیوستگی مطالعه", color: tones[2], action: () => nav("streak") },
         { n: typeof daysLeft === "number" ? fa(daysLeft) : daysLeft, suffix: "روز", label: "تا آزمون ثبت‌شده", color: tones[1], action: () => nav("exams") }].map(item =>
         <button key={item.label} onClick={item.action} style={{ "--metric-tone": item.color } as CSSProperties}><span className="desk-metric-value">{item.n}<small>{item.suffix}</small></span><span className="desk-metric-label">{item.label}<span aria-hidden="true">↗</span></span></button>)}
     </div>

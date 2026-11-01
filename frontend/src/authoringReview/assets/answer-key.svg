@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 320" width="420" height="320" role="img" aria-label="برگهٔ کلید ساختگی">
+  <rect width="420" height="320" fill="#fbfaf7"/>
+  <rect x="12" y="12" width="396" height="296" fill="none" stroke="#d9d3c8"/>
+  <text x="30" y="36" font-family="Georgia, serif" font-size="10" fill="#a49c8f" letter-spacing="1.2">SYNTHETIC ANSWER KEY · NOT A REAL EXAM</text>
+  <text x="30" y="64" font-family="Georgia, serif" font-size="15" fill="#2f2b26">Answer key · Booklet A</text>
+  <g font-family="Georgia, serif" font-size="13" fill="#4a443c">
+    <line x1="30" y1="82" x2="390" y2="82" stroke="#d9d3c8"/>
+    <text x="40" y="108">1)</text><text x="120" y="108">②</text>
+    <text x="40" y="142">2)</text><text x="120" y="142">④</text>
+    <text x="40" y="176">3)</text><text x="120" y="176">①</text>
+    <text x="40" y="210">4)</text><text x="120" y="210">③</text>
+    <text x="40" y="244">5)</text><text x="120" y="244">②</text>
+    <line x1="30" y1="258" x2="390" y2="258" stroke="#d9d3c8"/>
+  </g>
+  <text x="30" y="288" font-family="Georgia, serif" font-size="10" fill="#a49c8f">Synthetic keys for layout testing only.</text>
+</svg>

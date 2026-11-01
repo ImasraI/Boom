@@ -1,6 +1,6 @@
 ﻿export type Screen =
   | "landing" | "login" | "signup" | "home"
-  | "streak" | "exams" | "plan" | "chat" | "profile" | "schedule"
+  | "exams" | "plan" | "chat" | "profile" | "schedule"
   | "mock" | "arena" | "leaderboard" | "knowledge" | "admin";
 
 export interface SignupData {
@@ -15,20 +15,10 @@ export interface SignupData {
   birthday?: string;
   city?: string;
   school?: string;
-  wakeTime?: string;
   dailyHours?: Record<string, number>;
   maxConsec?: number;
-  breakStyle?: string;
-  sleepHours?: number;
-  environment?: string;
-  phoneUsage?: string;
   completion?: Record<string, number>;
   confidence?: Record<string, number>;
-  strictness?: string;
-  difficulty?: string;
-  studyStyle?: string;
-  reminderTime?: string;
-  notifs?: boolean;
 }
 
 export interface Task {
@@ -68,7 +58,8 @@ export function emptySignupData(phone = ""): SignupData {
 export function normalizeSignupData(raw: unknown, phoneFallback = ""): SignupData {
   const base = emptySignupData(phoneFallback);
   if (!raw || typeof raw !== "object") return base;
-  const d = raw as Record<string, any>;
+  const d = { ...raw } as Record<string, any>;
+  for (const key of ["wakeTime", "sleepHours", "breakStyle", "environment", "phoneUsage", "strictness", "difficulty", "studyStyle", "reminderTime", "notifs", "mood"]) delete d[key];
   return {
     ...base,
     ...d,

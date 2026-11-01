@@ -81,7 +81,6 @@ test('screens render markup without emoji glyphs', async () => {
     Landing: {},
     Mock: { userData: null },
     Exams: {},
-    Streak: {},
     Arena: { userData: null },
   };
   for (const [name, props] of Object.entries(pages)) {

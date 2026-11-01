@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>بازبینی نویسندگی آزمون — پیش‌نمایش مستقل</title>
+  <style>
+    #preview-controls {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      z-index: 9999;
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      flex-wrap: wrap;
+      max-width: 330px;
+      padding: 6px;
+      background: #202526;
+      border: 1px solid #526166;
+      border-radius: 8px;
+      font: 11px sans-serif;
+      color: #dae8e5;
+    }
+    #preview-controls button {
+      background: #2b3534;
+      border: 1px solid #5b7270;
+      border-radius: 4px;
+      padding: 5px 7px;
+      color: inherit;
+      cursor: pointer;
+      font: inherit;
+    }
+    #preview-controls small { width: 100%; font-size: 9px; color: #a4bbb5; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <nav id="preview-controls" aria-label="کنترل پیش‌نمایش">
+    <small>پیش‌نمایش مستقل F2 · دادهٔ ساختگی · فقط‌خواندنی · بدون درخواست شبکه</small>
+    <button type="button" id="preview-theme">تیره / روشن</button>
+  </nav>
+  <script type="module">
+    import React from "react";
+    import { createRoot } from "react-dom/client";
+    import "/src/index.css";
+    import "/src/desk.css";
+    import Screen from "/src/authoringReview/AuthoringReviewView.tsx";
+    import { SYNTHETIC_REVIEW_DATASET } from "/src/authoringReview/fixtures.synthetic.ts";
+
+    // Optional deep link: ?q=syn-0004-q4 opens that record (handy for QA).
+    const initialQuestionId = new URLSearchParams(location.search).get("q") ?? undefined;
+
+    createRoot(document.getElementById("root")).render(
+      React.createElement(Screen, {
+        dataset: SYNTHETIC_REVIEW_DATASET,
+        initialQuestionId,
+      }),
+    );
+
+    document.getElementById("preview-theme").addEventListener("click", () => {
+      document.documentElement.classList.toggle("dark");
+    });
+  </script>
+</body>
+</html>

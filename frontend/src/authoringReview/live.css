@@ -1,0 +1,142 @@
+/* Standalone shell: the accepted F2 view supplies its own scoped inner layout. */
+.authoring-review-live {
+  max-width: 1640px;
+  min-height: 100vh;
+  margin-inline: auto;
+  padding: clamp(20px, 4vw, 56px);
+  color: var(--text);
+  background: var(--page-bg);
+  font: 400 14px/1.9 "Vazirmatn", system-ui, sans-serif;
+}
+.authoring-review-live > h1 {
+  margin: 0 0 12px;
+  color: var(--text-strong);
+  font-size: clamp(25px, 3vw, 38px);
+  font-weight: 800;
+  letter-spacing: -.04em;
+}
+.authoring-review-live > p:first-of-type {
+  max-width: 850px;
+  margin-bottom: 28px;
+  color: var(--muted);
+}
+.authoring-review-live > details {
+  margin-block: 20px;
+  padding: 18px 0;
+  border-block: 1px solid var(--border-strong);
+}
+.authoring-review-live > details > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+}
+.authoring-review-live > details form,
+.authoring-review-live > form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+  margin-block: 20px;
+}
+.authoring-review-live > label,
+.authoring-review-live form label {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-inline-end: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  vertical-align: bottom;
+}
+.authoring-review-live > button,
+.authoring-review-live > details button,
+.authoring-review-live > form button {
+  min-height: 44px;
+  margin-block: 6px;
+  padding: 10px 18px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-strong);
+  cursor: pointer;
+  font: inherit;
+}
+.authoring-review-live > form button,
+.authoring-review-live > details button {
+  background: var(--action, #a43f36);
+  color: var(--action-ink, #fff);
+  border-color: transparent;
+}
+.authoring-review-live input,
+.authoring-review-live select,
+.authoring-review-live textarea {
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--field);
+  color: var(--text);
+  font: inherit;
+}
+.authoring-review-live > form { padding-block: 20px; border-block: 1px solid var(--border); }
+.authoring-review-live > form label { flex: 1 1 460px; }
+.authoring-review-live > form textarea { min-height: 140px; resize: vertical; }
+.authoring-review-live :disabled { opacity: .45; cursor: not-allowed; }
+.authoring-review-live :is(button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+.review-live-status:not(:empty) {
+  margin-block: 20px;
+  padding: 14px 18px;
+  border-inline-start: 3px solid var(--accent);
+  background: var(--surface);
+  color: var(--text-strong);
+}
+.authoring-review-live > .authoring-review { padding-inline: 0; }
+@media (max-width: 600px) {
+  .authoring-review-live > button { width: 100%; margin-inline: 0; }
+  .authoring-review-live > label,
+  .authoring-review-live form label { width: 100%; margin-inline: 0; }
+  .authoring-review-live input { min-width: 0; width: 100%; }
+}
+
+.review-live-account { color: var(--success-text); font-weight: 700; }
+.source-check { margin-block: 28px; }
+.source-check h2 { margin-block: 6px 12px; font-size: 28px; font-weight: 800; }
+.source-check h3 { margin-bottom: 12px; color: var(--text-strong); font-weight: 750; font-size: 17px; }
+.source-check-step { color: var(--accent); font-size: 12px; font-weight: 700; }
+.source-check header > p,.source-check-hint { color: var(--muted); font-size: 13px; }
+.source-check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-block: 26px; }
+.source-check-grid > section { min-width: 0; padding-block: 20px; border-top: 1px solid var(--border-strong); }
+.source-check-image { overflow-x: auto; margin-block: 14px; border: 1px solid var(--border); background: white; border-radius: 6px; }
+.source-check-image img { display: block; width: 100%; height: auto; max-width: none; }
+.source-check-image[data-zoomed="true"] img { min-width: 1000px; }
+.source-check-stem { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding-block: 20px; font-size: 17px; line-height: 2.2; }
+.source-check-equation { display: inline-block; direction: ltr; unicode-bidi: isolate; min-width: 0; max-width: 100%; overflow-x: auto; overflow-y: hidden; padding: .85em .4em; }
+.source-check-equation .chat-markdown { direction: ltr; font-size: inherit; }
+.source-check-equation .chat-markdown p { margin: 0; white-space: normal; }
+.source-check-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; list-style: none; padding: 0; }
+.source-check-options li { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 12px 16px; }
+.source-check-options li > span { font-size: 12px; color: var(--muted); }
+.source-check-options bdi { font-family: "Cambria Math",serif; font-size: 23px; }
+.source-check-options li { min-width: 0; }
+.source-check-options:has(.source-check-option-math) { grid-template-columns: 1fr; }
+.source-check-option-math { min-width: 0; max-width: calc(100% - 60px); overflow-x: auto; overflow-y: hidden; padding: .85em .4em; direction: ltr; unicode-bidi: isolate; }
+.source-check-option-math .chat-markdown { direction: ltr; }
+.source-check-option-math p { margin: 0; white-space: normal; }
+.source-check-decision,.source-check-answer { border-top: 1px solid var(--border-strong); padding-block: 26px; }
+.source-check-decision label { width: 100%; }
+.source-check-decision textarea { min-height: 84px; resize: vertical; }
+.source-check-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-block: 14px; }
+.source-check button { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text-strong); padding: 10px 18px; border-radius: 6px; min-height: 44px; cursor: pointer; }
+.source-check-actions button:first-child { background: var(--action); color: var(--action-ink); border-color: var(--action); }
+.source-check-pending { border-inline-start: 3px solid var(--accent); padding: 16px; background: var(--surface); }
+.review-expert > .authoring-review { padding-inline: 0; }
+@media (max-width: 1050px) { .source-check-grid { grid-template-columns: 1fr; gap: 10px; } }
+.source-check-table { max-width:100%; overflow-x:auto; margin-block:12px 24px; }
+.source-check-table table { border-collapse:collapse; width:100%; white-space:nowrap; }
+.source-check-table th,.source-check-table td { padding:10px 12px; text-align:center; border:1px solid var(--border-strong); }
+.source-check-table th { font-weight:650; }
+.source-check-table td { font-family:"Cambria Math",serif; font-size:20px; }

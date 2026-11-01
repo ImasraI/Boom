@@ -1,0 +1,435 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:karzar:pedagogical-authoring:0.2",
+  "title": "Local pedagogical authoring candidate v0.2",
+  "$comment": "Shape only. Python additionally checks unique step/tag IDs, references, finite coordinates, distinct points and circle radius. No mathematical/human approval.",
+  "x-taxonomy-version": "0.1",
+  "type": "object",
+  "properties": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 12000,
+      "pattern": "\\S"
+    },
+    "options": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1500,
+        "pattern": "\\S"
+      }
+    },
+    "answer_index": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 3
+    },
+    "solution": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 10000,
+      "pattern": "\\S"
+    },
+    "design": {
+      "type": "object",
+      "properties": {
+        "givens": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000,
+          "pattern": "\\S"
+        },
+        "unknown": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000,
+          "pattern": "\\S"
+        },
+        "domains": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000,
+          "pattern": "\\S"
+        },
+        "essential_insight": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000,
+          "pattern": "\\S"
+        },
+        "structural_departure": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000,
+          "pattern": "\\S"
+        },
+        "tempting_wrong_route": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000,
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "givens",
+        "unknown",
+        "domains",
+        "essential_insight",
+        "structural_departure",
+        "tempting_wrong_route"
+      ],
+      "additionalProperties": false
+    },
+    "figure": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "points": {
+              "type": "object",
+              "minProperties": 2,
+              "maxProperties": 16,
+              "propertyNames": {
+                "type": "string",
+                "pattern": "^[A-Z][0-9]?$"
+              },
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "minimum": -1000000,
+                  "maximum": 1000000
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "segments": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Z][0-9]?$"
+                },
+                "minItems": 2,
+                "maxItems": 2,
+                "uniqueItems": true
+              },
+              "maxItems": 32
+            },
+            "circles": {
+              "type": "array",
+              "maxItems": 5,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "center": {
+                    "type": "string",
+                    "pattern": "^[A-Z][0-9]?$"
+                  },
+                  "through": {
+                    "type": "string",
+                    "pattern": "^[A-Z][0-9]?$"
+                  }
+                },
+                "required": [
+                  "center",
+                  "through"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "points",
+            "segments",
+            "circles"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "pedagogy": {
+      "type": "object",
+      "properties": {
+        "key_observation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12000,
+          "pattern": "\\S"
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 30,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^s[1-9][0-9]?$"
+              },
+              "explanation": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 12000,
+                "pattern": "\\S"
+              },
+              "math": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 12000,
+                "pattern": "\\S"
+              }
+            },
+            "required": [
+              "id",
+              "explanation",
+              "math"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "proposed_techniques": {
+          "type": "array",
+          "maxItems": 12,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "enum": [
+                  "tech.approximation",
+                  "tech.bounds",
+                  "tech.case_analysis",
+                  "tech.complement_counting",
+                  "tech.counterexample",
+                  "tech.dimensional_analysis",
+                  "tech.direct_substitution",
+                  "tech.domain_checks",
+                  "tech.equation_setup",
+                  "tech.graph_visual",
+                  "tech.invariants_conservation",
+                  "tech.limiting_cases",
+                  "tech.optimization",
+                  "tech.option_elimination",
+                  "tech.relevance_selection",
+                  "tech.repeated_unit_counting",
+                  "tech.representation_change",
+                  "tech.small_cases",
+                  "tech.substitution",
+                  "tech.symmetry",
+                  "tech.work_backward",
+                  "tech.worst_case"
+                ]
+              },
+              "role": {
+                "enum": [
+                  "primary",
+                  "supporting",
+                  "check"
+                ]
+              },
+              "step_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^s[1-9][0-9]?$"
+                },
+                "minItems": 1,
+                "maxItems": 30,
+                "uniqueItems": true
+              },
+              "evidence": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 12000,
+                "pattern": "\\S"
+              },
+              "symmetry_witness": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "transformation": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 12000,
+                        "pattern": "\\S"
+                      },
+                      "preserved": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 12000,
+                        "pattern": "\\S"
+                      },
+                      "conclusion": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 12000,
+                        "pattern": "\\S"
+                      }
+                    },
+                    "required": [
+                      "transformation",
+                      "preserved",
+                      "conclusion"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "role",
+              "step_ids",
+              "evidence",
+              "symmetry_witness"
+            ],
+            "additionalProperties": false,
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "id": {
+                      "const": "tech.symmetry"
+                    }
+                  }
+                },
+                "then": {
+                  "properties": {
+                    "symmetry_witness": {
+                      "type": "object",
+                      "properties": {
+                        "transformation": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 12000,
+                          "pattern": "\\S"
+                        },
+                        "preserved": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 12000,
+                          "pattern": "\\S"
+                        },
+                        "conclusion": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 12000,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "required": [
+                        "transformation",
+                        "preserved",
+                        "conclusion"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "symmetry_witness": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "boundary_checks": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000,
+            "pattern": "\\S"
+          }
+        },
+        "answer_justification": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12000,
+          "pattern": "\\S"
+        },
+        "alternative_route": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 12000,
+              "pattern": "\\S"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key_observation",
+        "steps",
+        "proposed_techniques",
+        "boundary_checks",
+        "answer_justification",
+        "alternative_route"
+      ],
+      "additionalProperties": false
+    },
+    "verification_record": {
+      "type": "object",
+      "properties": {
+        "method": {
+          "enum": [
+            "analytic",
+            "symbolic",
+            "finite_enumeration",
+            "mixed"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12000,
+          "pattern": "\\S"
+        },
+        "claimed_by": {
+          "const": "author_model"
+        }
+      },
+      "required": [
+        "method",
+        "summary",
+        "claimed_by"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "text",
+    "options",
+    "answer_index",
+    "solution",
+    "design",
+    "figure",
+    "pedagogy",
+    "verification_record"
+  ],
+  "additionalProperties": false
+}

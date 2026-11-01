@@ -34,7 +34,8 @@ if errorlevel 1 (
   echo The scanner is already running; reusing it.
 )
 :monitor
-powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort 8770 -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"
-if errorlevel 1 start "Exam OCR - live monitor" /D "%~dp0backend" cmd /k .venv\Scripts\python.exe -X utf8 scripts/exam_scan_status.py --serve --port 8770
-echo Scanner and monitor opened. Progress: http://127.0.0.1:8770/
+if not defined EXAM_MONITOR_PORT set "EXAM_MONITOR_PORT=8771"
+powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort %EXAM_MONITOR_PORT% -State Listen -ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }"
+if errorlevel 1 start "Exam OCR - live monitor" /D "%~dp0backend" cmd /k .venv\Scripts\python.exe -X utf8 scripts/exam_scan_status.py --serve --port %EXAM_MONITOR_PORT%
+echo Scanner and monitor opened. Progress: http://127.0.0.1:%EXAM_MONITOR_PORT%/
 echo Run this file again after waking the laptop to resume saved checkpoints.

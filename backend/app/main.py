@@ -193,3 +193,7 @@ def health_check():
         "status": "ok",
         "app": settings.APP_NAME
     }
+
+# Review APIs use the existing admin dependency; scanner control tokens are unchanged.
+from app.routers.authoring_review import router as authoring_review_router
+app.include_router(authoring_review_router)

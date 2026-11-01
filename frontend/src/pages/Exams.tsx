@@ -72,15 +72,8 @@ function ScoreBar({ score }: { score: number }) {
 export default function Exams({ nav }: { nav: NavFn }) {
   const { examResults } = useExamResults();
   const [selected, setSelected] = useState<number | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [uploadDone, setUploadDone] = useState(false);
 
   const exam = examResults.find(e => e.id === selected);
-
-  function handleUpload() {
-    setUploading(true);
-    setTimeout(() => { setUploading(false); setUploadDone(true); setTimeout(() => setUploadDone(false), 2000); }, 1500);
-  }
 
   return (
     <div className="min-h-screen bg-[var(--surface)] pb-10">
@@ -98,28 +91,6 @@ export default function Exams({ nav }: { nav: NavFn }) {
 
       {!selected ? (
         <div className="px-5 space-y-4">
-          {/* Upload */}
-          <button onClick={handleUpload}
-            className="w-full bg-[var(--card)] rounded-2xl border-2 border-dashed border-[var(--chip)] hover:border-[var(--accent)] p-5 flex items-center gap-4 transition-all active:scale-[0.98] group">
-            <div className="w-11 h-11 rounded-xl bg-[var(--accent-soft)] group-hover:bg-[var(--accent-soft)] flex items-center justify-center transition-colors flex-shrink-0">
-              {uploading ? (
-                <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
-              ) : uploadDone ? (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--success-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-              )}
-            </div>
-            <div className="text-right flex-1">
-              <p className="text-[14px] font-bold text-[var(--text)]">
-                {uploadDone ? "آپلود شد! در حال تحلیل..." : "آپلود نتایج آزمون"}
-              </p>
-              <p className="text-[12px] text-[var(--muted-2)] font-medium mt-0.5">PDF، عکس یا پاسخنامه</p>
-            </div>
-          </button>
-
           <p className="text-[12px] font-bold text-[var(--muted-2)]">نتایج قبلی</p>
 
           {examResults.map(e => (

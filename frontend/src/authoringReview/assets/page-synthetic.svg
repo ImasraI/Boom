@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 520" width="760" height="520" role="img" aria-label="صفحهٔ ساختگی آزمون، بدون محتوای واقعی">
+  <rect width="760" height="520" fill="#fbfaf7"/>
+  <rect x="20" y="20" width="720" height="480" fill="none" stroke="#d9d3c8"/>
+  <text x="48" y="50" font-family="Georgia, serif" font-size="11" fill="#8c8478" letter-spacing="1.5">SYNTHETIC SOURCE — NOT A REAL EXAM</text>
+  <text x="48" y="76" font-family="Georgia, serif" font-size="16" fill="#3a352e">Mathematics · Booklet A · Page 2</text>
+  <line x1="48" y1="90" x2="712" y2="90" stroke="#d9d3c8"/>
+
+  <rect x="44" y="104" width="672" height="132" fill="none" stroke="#ad332b" stroke-dasharray="7 5"/>
+  <text x="58" y="132" font-family="Georgia, serif" font-size="15" fill="#2f2b26">1)</text>
+  <rect x="82" y="120" width="360" height="7" fill="#ddd7cc"/>
+  <rect x="82" y="136" width="420" height="7" fill="#e6e0d6"/>
+  <text x="82" y="174" font-family="Cambria Math, Georgia, serif" font-size="24" fill="#1f1b17">f(x) = x² − 5x + 6</text>
+  <rect x="82" y="194" width="380" height="7" fill="#ddd7cc"/>
+  <g font-family="Georgia, serif" font-size="15" fill="#4a443c">
+    <text x="86" y="222">①</text><rect x="104" y="213" width="62" height="6" fill="#e2dbd0"/>
+    <text x="196" y="222">②</text><rect x="214" y="213" width="62" height="6" fill="#e2dbd0"/>
+    <text x="306" y="222">③</text><rect x="324" y="213" width="62" height="6" fill="#e2dbd0"/>
+    <text x="416" y="222">④</text><rect x="434" y="213" width="62" height="6" fill="#e2dbd0"/>
+  </g>
+
+  <text x="58" y="280" font-family="Georgia, serif" font-size="15" fill="#2f2b26">2)</text>
+  <rect x="82" y="268" width="470" height="7" fill="#e6e0d6"/>
+  <rect x="82" y="284" width="330" height="7" fill="#e6e0d6"/>
+  <rect x="82" y="306" width="300" height="64" fill="none" stroke="#c9c2b6"/>
+  <path d="M100 358 Q150 312 200 340 T300 322" fill="none" stroke="#8c8478" stroke-width="1.5"/>
+
+  <text x="58" y="414" font-family="Georgia, serif" font-size="15" fill="#2f2b26">3)</text>
+  <rect x="82" y="402" width="520" height="7" fill="#e6e0d6"/>
+  <rect x="82" y="418" width="380" height="7" fill="#e6e0d6"/>
+  <text x="58" y="470" font-family="Georgia, serif" font-size="10" fill="#a49c8f">Synthetic placeholder lines. No real question text.</text>
+</svg>

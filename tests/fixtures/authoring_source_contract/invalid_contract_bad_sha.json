@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.1",
+  "synthetic": true,
+  "document": {
+    "document_id": "synthetic:doc-bad-sha",
+    "source_sha256": "not-a-valid-sha256-hash-that-is-too-short",
+    "role": "questions",
+    "classification": "mock_exam",
+    "classification_state": "confirmed",
+    "exam_id": "synthetic:exam-b",
+    "session": "spring",
+    "booklet_code": "A",
+    "revision": 1,
+    "aliases": [],
+    "classification_evidence": "bad sha test"
+  },
+  "pairing": {
+    "pairing_id": "synthetic:pair-b",
+    "revision": 1,
+    "question_document_id": "synthetic:doc-bad-sha",
+    "answer_document_id": "synthetic:doc-ans-b",
+    "mapping": [
+      { "printed_question_number": 1, "answer_document_id": "synthetic:doc-ans-b" }
+    ],
+    "state": "unresolved"
+  },
+  "question": {
+    "question_id": "synthetic:q-bad",
+    "question_revision": 1,
+    "document_id": "synthetic:doc-bad-sha",
+    "printed_question_number": 1,
+    "section": "math",
+    "regions": [
+      { "pdf_page": 2, "printed_page": null, "bbox": [0.1, 0.2, 0.9, 0.4] }
+    ],
+    "literal_content_sha256": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9f07c44e7",
+    "source_image_sha256": ["bad-hash"],
+    "figure_sha256": ["bad-hash"],
+    "answer_provenance": {
+      "answer_document_id": "synthetic:doc-ans-b",
+      "regions": [
+        { "pdf_page": 2, "printed_question_number": 1, "section": "math", "booklet": "A",
+          "raw_key": "42", "normalized_answer_index": 0, "mapping_revision": 1 }
+      ],
+      "raw_key": "42",
+      "normalized_answer_index": 0,
+      "mapping_state": "verified",
+      "pairing_revision": 1
+    }
+  },
+  "receipts": [],
+  "design": {
+    "taxonomy_version": "0.1",
+    "catalogue_version": null,
+    "knowledge_ids": [],
+    "annotation_state": "candidate",
+    "routes": []
+  },
+  "eligibility": {
+    "purpose": "authoring_example",
+    "state": "held",
+    "reasons": ["synthetic", "bad_sha256"]
+  }
+}

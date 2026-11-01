@@ -7,6 +7,7 @@ back to text-only answering.
 """
 
 import sys
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -60,6 +61,7 @@ HIT = {
     "chunk_index": 107,
     "content": "1/شیمی 1 خیلی سبز.pdf/page_0108.png",
     "score": 0.9,
+    "image_sha256": hashlib.sha256(b"png-bytes").hexdigest(),
 }
 
 
@@ -75,7 +77,7 @@ def test_load_page_images_skips_missing(monkeypatch):
     monkeypatch.setattr("app.utils.storage.get_object", fake_get_object)
 
     hits = [
-        {"document_name": "a", "chunk_index": 0, "content": "exists/page_0001.png", "score": 1.0},
+        {"document_name": "a", "chunk_index": 0, "content": "exists/page_0001.png", "score": 1.0, "image_sha256": hashlib.sha256(b"png-bytes").hexdigest()},
         HIT,
     ]
     usable, blobs = pipeline._load_page_images(hits)
@@ -178,3 +180,9 @@ def test_answer_question_uses_vision_when_images_exist(monkeypatch):
     result = pipeline.answer_question(BOOK_Q, user_id=1)
     assert result["answer"] == "پاسخ تصویری"
     assert calls["images"] == [b"png-bytes"]
+
+
+def test_changed_or_unbound_image_bytes_are_never_sent_to_vision(monkeypatch):
+    monkeypatch.setattr("app.utils.storage.get_object",lambda key:b"changed")
+    assert pipeline._load_page_images([HIT])==([],[])
+    assert pipeline._load_page_images([{k:v for k,v in HIT.items() if k!="image_sha256"}])==([],[])

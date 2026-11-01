@@ -16,7 +16,7 @@ jobs:
               with:
                   python-version: "3.12"
             - run: python -m pip install --upgrade pip
-            - run: python -m pip install -r requirements.txt "pytest>=8,<10"
+            - run: python -m pip install -r requirements.txt -r requirements-authoring.txt "pytest>=8,<10"
             - run: python -m pytest -q ../tests --disable-warnings --tb=short
 
     frontend:

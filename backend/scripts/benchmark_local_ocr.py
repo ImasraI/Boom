@@ -103,11 +103,11 @@ def pull_model(model, report, checkpoint):
     raise RuntimeError('Model download stream ended without success; rerun --pull to resume')
 
 
-def ollama_ocr(image, *, model, prompt, max_tokens, deadline, report, checkpoint):
+def ollama_ocr(image, *, model, prompt, max_tokens, deadline, report, checkpoint, num_gpu=None):
     import httpx
     local_model(model)
     # This client deliberately ignores HTTP_PROXY, .env keys and cloud settings.
-    with httpx.Client(trust_env=False, timeout=httpx.Timeout(10, read=60)) as client:
+    with httpx.Client(trust_env=False, timeout=httpx.Timeout(10, read=max(60, deadline))) as client:
         report["model_installation"] = installed_model(client, model)
         details = client.post(OLLAMA + "/api/show", json={"model": model})
         details.raise_for_status()
@@ -124,6 +124,8 @@ def ollama_ocr(image, *, model, prompt, max_tokens, deadline, report, checkpoint
             "stream": True, "keep_alive": 0,
             "options": {"temperature": 0, "seed": 42, "num_ctx": 8192, "num_predict": max_tokens},
         }
+        if num_gpu is not None:
+            body["options"]["num_gpu"] = num_gpu
         report["prompt"] = body["prompt"]
         report["options"] = body["options"]
         chunks = []
@@ -206,6 +208,7 @@ def main():
     parser.add_argument("--model", type=local_model, default=MODEL)
     parser.add_argument("--pull", action="store_true", help="Resume/download the free local Ollama model before testing")
     parser.add_argument("--prompt", choices=tuple(PROMPTS), default="free")
+    parser.add_argument("--num-gpu", type=int, help="Optional Ollama GPU layers; 0 tests CPU-only when GPU discovery fails")
     parser.add_argument("--max-tokens", type=int, default=4096)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--psm", type=int, choices=(3, 6, 11), default=3)
@@ -247,7 +250,7 @@ def main():
         if args.engine == "deepseek":
             if args.pull:pull_model(args.model,report,output / "result.json")
             ollama_ocr(image, model=args.model, prompt=args.prompt, max_tokens=args.max_tokens,
-                       deadline=args.timeout, report=report, checkpoint=output / "result.json")
+                       deadline=args.timeout, report=report, checkpoint=output / "result.json", num_gpu=args.num_gpu)
         else:
             tesseract_ocr(image, psm=args.psm, deadline=args.timeout, executable=args.tesseract_exe, report=report, tessdata=args.tessdata, languages=args.languages)
     except (Exception, KeyboardInterrupt) as error:

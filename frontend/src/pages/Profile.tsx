@@ -24,21 +24,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Chips({ options, value, onChange }: { options: string[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="flex flex-wrap gap-1.5 justify-end">
-      {options.map(o => (
-        <button key={o} onClick={() => onChange(o)}
-          className={`py-1.5 px-3 rounded-xl text-[12px] font-semibold transition-all ${
-            value === o ? "bg-[var(--accent)] text-[var(--surface)]" : "bg-[var(--chip)] text-[var(--brown-text)] hover:bg-[var(--chip-hover)]"
-          }`}
-        >{o}</button>
-      ))}
-    </div>
-  );
-}
-
-const SECTIONS = ["اطلاعات عمومی", "سبک زندگی", "ارزیابی دروس", "هوش مصنوعی", "تنظیمات"];
+const SECTIONS = ["اطلاعات عمومی", "ارزیابی دروس", "تنظیمات"];
 
 export default function Profile({ nav, userData, dark, toggleDark, onSave, logout, settingsRequest = 0 }: {
   nav: NavFn; 
@@ -49,8 +35,8 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
   logout: () => void;
   settingsRequest?: number;
 }) {
-  const [activeSection, setActiveSection] = useState(settingsRequest ? 4 : 0);
-  useEffect(() => { if (settingsRequest) setActiveSection(4); }, [settingsRequest]);
+  const [activeSection, setActiveSection] = useState(settingsRequest ? 2 : 0);
+  useEffect(() => { if (settingsRequest) setActiveSection(2); }, [settingsRequest]);
   const subjects = SUBJECTS_BY_MAJOR[userData?.major ?? "ریاضی فیزیک"] ?? [];
 
   // General
@@ -61,22 +47,9 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
   const [city, setCity] = useState(userData?.city ?? "");
   const [school, setSchool] = useState(userData?.school ?? "");
 
-  // Lifestyle
-  const [wakeTime, setWakeTime] = useState(userData?.wakeTime ?? "");
-  const [breakStyle, setBreakStyle] = useState(userData?.breakStyle ?? "");
-  const [environment, setEnvironment] = useState(userData?.environment ?? "");
-  const [phoneUsage, setPhoneUsage] = useState(userData?.phoneUsage ?? "");
-
   // Subjects
   const [completion, setCompletion] = useState<Record<string, number>>(() => userData?.completion ?? Object.fromEntries(subjects.map(s => [s, 40])));
   const [confidence, setConfidence] = useState<Record<string, number>>(() => userData?.confidence ?? Object.fromEntries(subjects.map(s => [s, 50])));
-
-  // AI
-  const [strictness, setStrictness] = useState(userData?.strictness ?? "");
-  const [difficulty, setDifficulty] = useState(userData?.difficulty ?? "");
-  const [studyStyle, setStudyStyle] = useState(userData?.studyStyle ?? "");
-  const [reminderTime, setReminderTime] = useState(userData?.reminderTime ?? "07:30");
-  const [notifs, setNotifs] = useState(userData?.notifs ?? true);
 
   // Sound + appearance preferences live in the Experience storage; the
   // Settings tab is now the only surface exposing them.
@@ -102,31 +75,11 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
   const [saved, setSaved] = useState(false);
   const [conflictNotice, setConflictNotice] = useState("");
   const [analytics, setAnalytics] = useState<Array<{ subject: string; minutes: number; accuracy: number | null; confidence: number | null }>>([]);
-  const [reviewQueue, setReviewQueue] = useState<Array<{ subject: string; topic: string; due: boolean; due_date: string; repetitions: number }>>([]);
-
-  async function completeReview(subject: string, topic: string) {
-    try {
-      const response = await fetch(apiUrl("/api/tasks/review-queue/complete"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ subject, topic, rating: 4 }),
-      });
-      if (response.ok) setReviewQueue(items => items.filter(item => !(item.subject === subject && item.topic === topic)));
-    } catch {
-      // Offline review completion can be retried from the queue later.
-    }
-  }
-
   useEffect(() => {
-    if (!userData || (activeSection !== 2 && activeSection !== 3)) return;
-    const endpoint = activeSection === 2 ? "/api/profile/analytics" : "/api/tasks/review-queue";
-    fetch(apiUrl(endpoint), { headers: authHeaders() })
+    if (!userData || activeSection !== 1) return;
+    fetch(apiUrl("/api/profile/analytics"), { headers: authHeaders() })
       .then(response => response.ok ? response.json() : null)
-      .then(data => {
-        if (!data) return;
-        if (activeSection === 2) setAnalytics(data.subjects || []);
-        else setReviewQueue(data.items || []);
-      })
+      .then(data => { if (data) setAnalytics(data.subjects || []); })
       .catch(() => undefined);
   }, [activeSection, userData]);
   
@@ -138,17 +91,8 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
       birthday,
       city,
       school,
-      wakeTime,
-      breakStyle,
-      environment,
-      phoneUsage,
       completion,
       confidence,
-      strictness,
-      difficulty,
-      studyStyle,
-      reminderTime,
-      notifs,
     };
   }
 
@@ -215,35 +159,6 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
       </Field>
     </div>,
 
-    // سبک زندگی
-    <div className="space-y-3" key="lifestyle">
-      <Field label="معمولاً چه ساعتی بیدار میشی؟">
-        <input type="time" value={wakeTime} onChange={e => setWakeTime(e.target.value)} dir="ltr"
-          className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)]" />
-      </Field>
-
-      <Field label="سبک استراحت مورد علاقهات">
-        <div className="mt-1">
-          <Chips options={["پومودورو ۲۵ دقیقه", "تمرکز ۴۵ دقیقه", "بلوکهای ۶۰ دقیقه", "خودم تصمیم میگیرم"]}
-            value={breakStyle} onChange={setBreakStyle} />
-        </div>
-      </Field>
-
-      <Field label="محیط مطالعه">
-        <div className="mt-1">
-          <Chips options={["خانه", "کتابخانه", "کافه", "مدرسه", "متنوع"]}
-            value={environment} onChange={setEnvironment} />
-        </div>
-      </Field>
-
-      <Field label="استفاده از گوشی حین مطالعه">
-        <div className="mt-1">
-          <Chips options={["هیچوقت", "بهندرت", "گاهی", "زیاد"]}
-            value={phoneUsage} onChange={setPhoneUsage} />
-        </div>
-      </Field>
-    </div>,
-
     // ارزیابی دروس
     <div className="space-y-3" key="subjects">
       <p className="text-[12px] text-[var(--muted)] leading-relaxed text-right">
@@ -287,61 +202,6 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
           ))}
         </div>
       )}
-    </div>,
-
-    // هوش مصنوعی و برنامهریزی
-    <div className="space-y-3" key="ai">
-      {reviewQueue.length > 0 && (
-        <div className="study-section space-y-3 py-4">
-          <p className="text-right text-[12px] font-bold text-[var(--text)]">صف مرور فاصله‌دار</p>
-          {reviewQueue.slice(0, 5).map(item => (
-            <div key={`${item.subject}-${item.topic}`} className="flex items-center justify-between gap-3 text-[11px]">
-              <button type="button" onClick={() => completeReview(item.subject, item.topic)} className="rounded-lg bg-[var(--accent-soft)] px-2 py-1 font-bold text-[var(--accent)]">مرور شد</button>
-              <span className="text-right font-semibold text-[var(--text)]">{item.subject} · {item.topic}</span>
-              <span className={item.due ? "font-bold text-red-500" : "text-[var(--muted-2)]"}>{item.due ? "امروز" : item.due_date}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      <Field label="سختگیری برنامه">
-        <div className="mt-1">
-          <Chips options={["انعطافپذیر", "متعادل", "سختگیر"]}
-            value={strictness} onChange={setStrictness} />
-        </div>
-      </Field>
-
-      <Field label="سرعت افزایش سختی">
-        <div className="mt-1">
-          <Chips options={["تدریجی", "متنوع", "از ابتدا سنگین"]}
-            value={difficulty} onChange={setDifficulty} />
-        </div>
-      </Field>
-
-      <Field label="سبک یادگیری مورد علاقه">
-        <div className="mt-1">
-          <Chips options={["بیشتر تمرین", "متعادل", "بیشتر مطالعه نظری"]}
-            value={studyStyle} onChange={setStudyStyle} />
-        </div>
-      </Field>
-
-      <Field label="ساعت یادآوری روزانه">
-        <input type="time" value={reminderTime} onChange={e => setReminderTime(e.target.value)} dir="ltr"
-          className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)]" />
-      </Field>
-
-      <div className="study-field px-1 py-4 flex items-center justify-between">
-        <button
-          onClick={() => setNotifs(n => !n)}
-          className={`w-11 h-6 rounded-full transition-all relative flex-shrink-0 ${notifs ? "bg-[var(--accent)]" : "bg-[var(--toggle-off)]"}`}
-        >
-          <div className="bg-[var(--card)] rounded-full absolute top-0.5 transition-all"
-            style={{ width: "18px", height: "18px", right: notifs ? "4px" : "20px" }} />
-        </button>
-        <div className="text-right">
-          <p className="text-[13px] font-semibold text-[var(--text)]">اعلانهای هوشمند</p>
-          <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">یادآوریها و آپدیت برنامه</p>
-        </div>
-      </div>
     </div>,
 
     // تنظیمات — theme and sound first so they're the top controls.
@@ -428,7 +288,7 @@ export default function Profile({ nav, userData, dark, toggleDark, onSave, logou
         <BackButton onClick={() => nav("home")} />
         <div className="text-right">
           <h1 className="font-display text-xl text-[var(--text)]">تکمیل پروفایل</h1>
-          <p className="text-[12px] text-[var(--muted-2)] font-medium">وقت مطالعه، هدف کنکور و وضعیت درس‌هایت را تنظیم کن.</p>
+          <p className="text-[12px] text-[var(--muted-2)] font-medium">اطلاعات حساب، وضعیت درس‌ها و ظاهر برنامه را تنظیم کن.</p>
         </div>
       </div>
 

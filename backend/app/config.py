@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     APP_NAME: str = "Boom"
     APP_ENV: str = "development"
     DEMO_USER_ID: int = 1
+    # Local reviewed-source evaluation; production explicitly disables until
+    # a validated policy and its corpus are deployed together.
+    SOURCE_POLICY_ENABLED: bool = True
 
     # Allowed frontend origins for CORS
     # Default allows all ("*") for development; override via CORS_ORIGINS env var for production

@@ -1,0 +1,92 @@
+{
+  "annotation_schema_version": "0.1",
+  "taxonomy_version": "0.1",
+  "question_ref": "synthetic:constant-speed:v1",
+  "source": {
+    "document_id": null,
+    "document_revision": 1,
+    "content_sha256": null,
+    "figure_sha256": []
+  },
+  "catalogue_version": "synthetic-catalogue-v1",
+  "knowledge_ids": [],
+  "objective": "obj.determine",
+  "representations": [
+    {
+      "id": "rep.symbolic",
+      "stage": "given"
+    },
+    {
+      "id": "rep.graph",
+      "stage": "constructed"
+    }
+  ],
+  "routes": [
+    {
+      "id": "r1",
+      "role": "primary",
+      "annotations": [
+        {
+          "id": "tech.equation_setup",
+          "role": "primary",
+          "evidence": "For constant v=3 m/s over 2 s, displacement=v*t."
+        },
+        {
+          "id": "tech.direct_substitution",
+          "role": "supporting",
+          "evidence": "3*2=6 m."
+        }
+      ]
+    },
+    {
+      "id": "r2",
+      "role": "alternative",
+      "annotations": [
+        {
+          "id": "tech.graph_visual",
+          "role": "primary",
+          "evidence": "Construct horizontal v=3 on [0,2]; signed area=6 m."
+        }
+      ]
+    }
+  ],
+  "checks_shortcuts": [
+    {
+      "id": "check.units",
+      "route_id": "r1",
+      "evidence": "(m/s)*s=m."
+    }
+  ],
+  "misconceptions": [],
+  "intended_difficulty": {
+    "level": null,
+    "rationale": null
+  },
+  "empirical_difficulty": null,
+  "annotator": {
+    "kind": "model",
+    "model": "record actual identifier",
+    "prompt_version": "0.1",
+    "identifier": "synthetic-annotator"
+  },
+  "review": {
+    "annotation_state": "candidate",
+    "source_state": "synthetic",
+    "scientific_state": "not_checked",
+    "human_reviewed": false,
+    "eligibility": "held",
+    "issues": [
+      "synthetic_example",
+      "curriculum_unmapped"
+    ]
+  },
+  "annotation_revision": 1,
+  "question_revision": 1,
+  "knowledge_evidence": [],
+  "unresolved_labels": [
+    {
+      "axis": "knowledge",
+      "reason": "No reviewed catalogue mapping assigned."
+    }
+  ]
+}

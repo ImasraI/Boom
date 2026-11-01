@@ -248,6 +248,8 @@ class HybridSearch:
         user_id: int,
         top_k: int = 4,
         label: str = "",
+        purpose: Optional[str] = None,
+        purpose_context: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Perform hybrid search scoped to a single user's documents.
@@ -260,6 +262,23 @@ class HybridSearch:
         viewer can tell the question-bank search apart from the book search.
         Results are identical either way.
         """
+
+        from app.config import get_settings
+        if purpose is not None and getattr(get_settings(), 'SOURCE_POLICY_ENABLED', True):
+            from app.rag.source_routing import load_policy, search_store
+            from app.config import get_settings
+            policy = load_policy()
+            context = purpose_context or {}
+            results, audit = search_store(self.vector_store, query_text=query_text,
+                query_embedding=query_embedding, user_id=user_id,
+                shared_user_id=int(get_settings().DEMO_USER_ID), purpose=purpose,
+                major=context.get("major", policy.get("major")),
+                curriculum_version=context.get("curriculum_version", policy.get("curriculum_version")),
+                scope_id=context.get("scope_id", policy.get("active_scope_id")),
+                top_k=top_k, policy=policy)
+            with trace_stage("source_policy", "فیلتر منبع و جداسازی ارزیابی") as st:
+                st["meta"] = audit
+            return results
 
         prefix = f"{label} · " if label else ""
 

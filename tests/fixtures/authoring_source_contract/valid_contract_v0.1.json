@@ -1,0 +1,83 @@
+{
+  "schema_version": "0.1",
+  "synthetic": true,
+  "document": {
+    "document_id": "synthetic:doc-001",
+    "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "role": "questions",
+    "classification": "mock_exam",
+    "classification_state": "confirmed",
+    "exam_id": "synthetic:exam-a",
+    "session": "spring",
+    "booklet_code": "A",
+    "revision": 1,
+    "aliases": [],
+    "classification_evidence": "synthetic pilot; printed numbering verified against source"
+  },
+  "pairing": {
+    "pairing_id": "synthetic:pair-a",
+    "revision": 1,
+    "question_document_id": "synthetic:doc-001",
+    "answer_document_id": "synthetic:doc-ans-001",
+    "mapping": [
+      { "printed_question_number": 1, "answer_document_id": "synthetic:doc-ans-001" },
+      { "printed_question_number": 2, "answer_document_id": "synthetic:doc-ans-001" }
+    ],
+    "state": "unresolved"
+  },
+  "question": {
+    "question_id": "synthetic:q1",
+    "question_revision": 1,
+    "document_id": "synthetic:doc-001",
+    "printed_question_number": 1,
+    "section": "math",
+    "regions": [
+      { "pdf_page": 2, "printed_page": null, "bbox": [0.1, 0.2, 0.9, 0.4] }
+    ],
+    "literal_content_sha256": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9f07c44e7",
+    "source_image_sha256": ["5de53e2e5e5b4dd20e7ee3dfb64ab0e7957bce6c5537ef3e6a08f8d6b4c24579"],
+    "figure_sha256": ["5de53e2e5e5b4dd20e7ee3dfb64ab0e7957bce6c5537ef3e6a08f8d6b4c24579"],
+    "answer_provenance": {
+      "answer_document_id": "synthetic:doc-ans-001",
+      "regions": [
+        { "pdf_page": 2, "printed_question_number": 1, "section": "math", "booklet": "A",
+          "raw_key": "42", "normalized_answer_index": 0, "mapping_revision": 1 }
+      ],
+      "raw_key": "42",
+      "normalized_answer_index": 0,
+      "mapping_state": "verified",
+      "pairing_revision": 1
+    }
+  },
+  "receipts": [
+    {
+      "receipt_id": "synthetic:receipt-001",
+      "schema_version": "0.1",
+      "question_id_revision": "synthetic:q1:1",
+      "content_hash": "a591a6d40bf420404a011733cfb7b190d62c65bf0bcda32b57b277d9f07c44e7",
+      "exact_image_figure_hashes": ["5de53e2e5e5b4dd20e7ee3dfb64ab0e7957bce6c5537ef3e6a08f8d6b4c24579"],
+      "curriculum_version": "12th-math-v1",
+      "reviewer_kind": "human",
+      "reviewer_identifier": "teacher-1",
+      "model_prompt_version": "0.1",
+      "timestamp": "2026-10-22T12:00:00Z",
+      "dimension": "extraction",
+      "outcome": "passed",
+      "evidence_refs": [],
+      "issues": [],
+      "supersedes": null
+    }
+  ],
+  "design": {
+    "taxonomy_version": "0.1",
+    "catalogue_version": null,
+    "knowledge_ids": [],
+    "annotation_state": "candidate",
+    "routes": []
+  },
+  "eligibility": {
+    "purpose": "authoring_example",
+    "state": "held",
+    "reasons": ["synthetic", "unresolved_pairing", "missing_reviews"]
+  }
+}

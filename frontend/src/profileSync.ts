@@ -8,7 +8,7 @@ import { accountStorage, accountStorageFor } from "./accountStorage";
  * locally, explicitly - never a blind clobber in either direction).
  */
 import { apiUrl, authHeaders } from "./api";
-import type { SignupData } from "./types";
+import { normalizeSignupData, type SignupData } from "./types";
 
 const VERSION_KEY = "boom-profile-version";
 
@@ -48,8 +48,8 @@ export function storedVersion(): number | null {
 
 /** Server profile -> SignupData patch (server fields win when non-null). */
 export function toSignupData(p: ServerProfile | null, base: SignupData): SignupData {
-  if (!p) return base;
-  return {
+  if (!p) return normalizeSignupData(base);
+  return normalizeSignupData({
     ...base,
     ...p.availability?.preferences,
     name: p.name ?? base.name,
@@ -59,10 +59,8 @@ export function toSignupData(p: ServerProfile | null, base: SignupData): SignupD
     targetRank: p.target_rank ?? base.targetRank,
     studyHours: p.study_hours ?? base.studyHours,
     testExams: Array.isArray(p.test_exams) && (p.version > 0 || p.test_exams.length > 0) ? p.test_exams : base.testExams,
-    wakeTime: p.availability?.wake ?? base.wakeTime,
-    sleepHours: p.availability?.sleep_hours ?? base.sleepHours,
     dailyHours: p.availability?.daily_hours ?? base.dailyHours,
-  };
+  });
 }
 
 function toPayload(d: SignupData) {
@@ -75,10 +73,7 @@ function toPayload(d: SignupData) {
     study_hours: d.studyHours || null,
     test_exams: d.testExams,
     availability: {
-      preferences: { completion: d.completion, confidence: d.confidence, maxConsec: d.maxConsec,
-        breakStyle: d.breakStyle, studyStyle: d.studyStyle, strictness: d.strictness },
-      wake: d.wakeTime || undefined,
-      sleep_hours: d.sleepHours ?? undefined,
+      preferences: { completion: d.completion, confidence: d.confidence, maxConsec: d.maxConsec },
       daily_hours: d.dailyHours && Object.keys(d.dailyHours).length ? d.dailyHours : undefined,
     },
   };

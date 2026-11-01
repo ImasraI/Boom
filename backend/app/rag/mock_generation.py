@@ -159,9 +159,10 @@ _GENERATE_PROMPT = """تو طراح آزمون آزمایشی کنکور هست�
 - خروجی فقط JSON، بدون markdown و توضیح اضافه، در این قالب:
 {{"questions":[{{"subject":"ریاضی","topic":"حد و پیوستگی","text":"...","options":["...","...","...","..."],"answer":2,"explanation":"...","figure":{{"type":"none","data":{{}}}}}}, ...]}}"""
 
-_GROUNDED_RULE = ("- هر سوال باید مستقیماً بر اساس مفاهیم، اصطلاحات، اعداد و مثال‌های موجود در "
+_GROUNDED_RULE = ("- هر سوال باید مستقیماً بر اساس مفاهیم و اصطلاحات موجود در "
                   "«نمونه صفحات واقعی کتاب‌های دانش‌آموز» طراحی شود؛ دانش عمومی مدل فقط برای "
-                  "تکمیل قالب و نگارش سوال استفاده شود، نه برای انتخاب محتوا.")
+                  "تکمیل قالب و نگارش سوال استفاده شود، نه برای انتخاب محتوا. اعداد و موقعیت تازه مجازند "
+                  "به شرط حل دقیق و سازگاری با مفاهیم کتاب؛ ساختار و داده‌های مثال را کپی نکن.")
 _UNGROUNDED_RULE = ("- هیچ متن کتابی در دسترس نیست؛ سوالات را از دانش استاندارد کنکور و "
                     "کتاب‌های درسی رسمی بساز.")
 
@@ -312,7 +313,7 @@ def retrieve_book_context(user_id: int, subjects: List[str], topics: List[str],
             try:
                 emb = embedder.embed_query(q)
                 chunks = search.search(query_text=q, query_embedding=emb,
-                                       user_id=user_id, top_k=per_subject)
+                                       user_id=user_id, top_k=per_subject, purpose="factual_grounding")
             except Exception as exc:
                 logger.warning("Mock retrieval failed for %s/%s: %s", subject, topic, exc)
                 continue
@@ -349,7 +350,8 @@ def build_booklet_prompt(plan: List[dict], topics: List[str], difficulty: str,
     )
     # Style examples remain separate from book evidence and cannot widen scope.
     from app.rag.exam_style import context as exam_style_context
-    return prompt + (exam_style_context(plan, topics) if grounded else "")
+    from app.rag.question_design import authoring_contract
+    return prompt + (exam_style_context(plan, topics) if grounded else "") + authoring_contract(difficulty)
 
 
 def weak_areas(user_id: int, recent_n: int = 40, limit: int = 10) -> List[dict]:
@@ -706,6 +708,10 @@ def _verify_batch(client, batch: List[dict],
         review = {"valid": False, "reason": problem} if problem else question_quality.audit(client, question, timeout)
         detail = {"version": 1, "solver_answer": answer, "audit_valid": review["valid"],
                   "reason": review["reason"], "reasoning_effort": "high"}
+        if review.get('difficulty_review') is not None:
+            detail['difficulty_review'] = review['difficulty_review']
+            detail['difficulty_state'] = 'model_estimate_not_calibrated'
+            detail['content_valid'] = review.get('content_valid')
         if review["valid"] is None or (review["valid"] and answer != question["answer"]):
             verdicts.deferred.add(i)
             detail["status"] = "pending"
@@ -773,10 +779,10 @@ def _batch_verdicts(client, questions: List[dict], timeout: float, report):
             _report(report, "provider_error", message=client.last_error)
             return
         for pos, question in enumerate(batch, start=1):
-            if pos in getattr(verdicts, "deferred", set()):
-                continue
             if pos in getattr(verdicts, "details", {}):
                 question["validation"] = verdicts.details[pos]
+            if pos in getattr(verdicts, "deferred", set()):
+                continue
             yield question, verdicts.get(pos)
 
 
@@ -794,6 +800,8 @@ def _generate_replacement(client, user_id: int, question: dict,
     with pool_usage.stage('repair'):
         raw = _draft_generate(client, prompt, max_tokens, timeout)
     rows = parse_booklet(raw)
+    if rows and question.get('_requested_difficulty'):
+        rows[0]['_requested_difficulty'] = difficulty
     return rows[0] if rows else None
 
 
@@ -1101,6 +1109,8 @@ def _draft_subject_batch(client, row, count, row_topics, difficulty, context,
                 seen.add(identity)
                 unique.append(q)
         parsed = unique
+        for q in parsed:
+            q['_requested_difficulty'] = difficulty
         if row.get('source_slots'):
             grounded = []
             counts = {}

@@ -830,6 +830,21 @@ def _extract_week_mock(user_id: int, week_start: date, weeks: int = 1) -> Option
     [week_start, week_start + weeks*7 days) and, for weeks > 1, tells the
     planner to split each exam across a study week and a test week.
     """
+    from app.rag.source_routing import load_policy, reviewed_week_scope
+    from app.config import get_settings
+    if not get_settings().SOURCE_POLICY_ENABLED:
+        return _extract_week_mock_legacy_candidates(user_id, week_start, weeks)
+    policy=load_policy()
+    scope=reviewed_week_scope(policy,week_start,major=policy.get("major"))
+    if not scope:
+        logger.info("Weekly scope held: no unique reviewed scope for the requested date")
+        return None
+    return {"document":scope["source_document_id"],"summary":scope.get("summary", ""),
+            "scope_id":scope["scope_id"],"pages":scope.get("pages",[])}
+
+
+def _extract_week_mock_legacy_candidates(user_id: int, week_start: date, weeks: int = 1):
+    """Offline legacy extractor retained for review; never a trusted-scope fallback."""
     try:
         from app.config import get_settings
         from app.rag.ingest_raw import list_raw_pdfs, category_for_pdf
@@ -1470,7 +1485,7 @@ def _retrieve_topic_chunks(subject: str, topic: str, user_id: int, k: int = 8) -
         embedder = get_embedding_model()
         search = get_hybrid_search()
         e = embedder.embed_query(query)
-        chunks = search.search(query_text=query, query_embedding=e, user_id=user_id, top_k=k)
+        chunks = search.search(query_text=query, query_embedding=e, user_id=user_id, top_k=k, purpose="weekly_tests")
     except Exception as exc:
         logger.warning("Topic chunk retrieval failed for %s/%s: %s", subject, topic, exc)
         return []
@@ -1481,7 +1496,7 @@ def _retrieve_topic_chunks(subject: str, topic: str, user_id: int, k: int = 8) -
         if has_page and (topic.lower().replace(" ", "") in content.replace(" ", "").lower()
                          or any(w in content for w in topic.split() if len(w) > 2)):
             hits.append(c)
-    return hits or chunks  # best effort even when the topic word is missing
+    return hits  # A missing scoped topic must not fall back to unrelated content.
 
 
 def recommend_today_tests(

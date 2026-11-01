@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 360" width="520" height="360" role="img" aria-label="نمودار ساختگی سهمی">
+  <rect width="520" height="360" fill="#fbfaf7"/>
+  <rect x="12" y="12" width="496" height="336" fill="none" stroke="#d9d3c8"/>
+  <text x="30" y="36" font-family="Georgia, serif" font-size="10" fill="#a49c8f" letter-spacing="1.2">SYNTHETIC FIGURE · NOT A REAL EXAM</text>
+  <g stroke="#e2dbd0" stroke-width="1">
+    <line x1="70" y1="80" x2="70" y2="300"/>
+    <line x1="130" y1="80" x2="130" y2="300"/>
+    <line x1="190" y1="80" x2="190" y2="300"/>
+    <line x1="250" y1="80" x2="250" y2="300"/>
+    <line x1="310" y1="80" x2="310" y2="300"/>
+    <line x1="370" y1="80" x2="370" y2="300"/>
+    <line x1="430" y1="80" x2="430" y2="300"/>
+    <line x1="60" y1="300" x2="450" y2="300"/>
+    <line x1="60" y1="260" x2="450" y2="260"/>
+    <line x1="60" y1="220" x2="450" y2="220"/>
+    <line x1="60" y1="180" x2="450" y2="180"/>
+    <line x1="60" y1="140" x2="450" y2="140"/>
+    <line x1="60" y1="100" x2="450" y2="100"/>
+  </g>
+  <g stroke="#8c8478" stroke-width="1.5">
+    <line x1="60" y1="300" x2="460" y2="300"/>
+    <line x1="70" y1="70" x2="70" y2="310"/>
+  </g>
+  <path d="M90 100 Q250 360 410 100" fill="none" stroke="#ad332b" stroke-width="2.5"/>
+  <circle cx="250" cy="230" r="4" fill="#ad332b"/>
+  <text x="258" y="224" font-family="Vazirmatn, Tahoma, sans-serif" font-size="12" fill="#3a352e" direction="rtl">کمینه</text>
+  <text x="404" y="318" font-family="Georgia, serif" font-size="12" fill="#4a443c">x</text>
+  <text x="44" y="78" font-family="Georgia, serif" font-size="12" fill="#4a443c">y</text>
+  <text x="30" y="338" font-family="Georgia, serif" font-size="10" fill="#a49c8f">Synthetic plot for layout testing only.</text>
+</svg>

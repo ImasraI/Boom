@@ -130,3 +130,24 @@ def test_download_checkpoint_is_numeric_and_error_omits_signed_url(tmp_path,monk
 def test_download_checkpoint_or_integrity_failure_is_not_mislabelled_network():
     assert 'checkpoints' in ocr.download_error_reason('remove C:/cache/model-partial-0: The system cannot find the file specified')
     assert 'checksum verification failed' in ocr.download_error_reason('sha256 digest mismatch')
+
+
+def test_cpu_pilot_records_gpu_override_and_allows_configured_first_token_wait(tmp_path, monkeypatch):
+    real_client=httpx.Client;timeouts=[]
+    def factory(**kwargs):
+        timeouts.append(kwargs['timeout'].read)
+        def handler(request):
+            if request.url.path=='/api/tags':return httpx.Response(200,json={'models':[{'name':ocr.MODEL}]})
+            if request.url.path=='/api/show':return httpx.Response(200,json={'capabilities':['vision']})
+            if request.url.path=='/api/version':return httpx.Response(200,json={'version':'test'})
+            body=json.loads(request.content)
+            assert body['options']['num_gpu']==0
+            return httpx.Response(200,content=json.dumps({'response':'text','done':True,'done_reason':'stop'}))
+        return real_client(**kwargs,transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(httpx,'Client',factory)
+    image=tmp_path/'input.png';image.write_bytes(b'image')
+    report={'state':'running'}
+    ocr.ollama_ocr(image,model=ocr.MODEL,prompt='free',max_tokens=128,deadline=240,
+                  report=report,checkpoint=tmp_path/'result.json',num_gpu=0)
+    assert timeouts==[240] and report['options']['num_gpu']==0
+    assert report['state']=='finished' and report['text']=='text'
