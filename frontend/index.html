@@ -8,8 +8,6 @@
     <link rel="icon" type="image/png" href="/karzar-shield-detailed.png" />
     <link rel="apple-touch-icon" href="/karzar-shield-detailed.png" />
     <link rel="canonical" href="https://boomedu.ir/" />
-    <link rel="preload" href="/fonts/boom-persian-1.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="/fonts/boom-persian-5.woff2" as="font" type="font/woff2" crossorigin />
     <meta name="theme-color" content="#191413" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#fff8f3" media="(prefers-color-scheme: light)" />
     <!-- figma:head-end -->
@@ -30,7 +28,9 @@
       }
     </script>
     <!-- figma:body-start -->
-    <div id="root"></div>
+    <div id="root">
+      <p role="status" style="text-align:center;margin:20vh 1rem 0;font-family:system-ui,sans-serif">در حال بارگذاری بوم…</p>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
     <!-- figma:body-end -->
   </body>
