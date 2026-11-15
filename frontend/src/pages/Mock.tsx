@@ -3,6 +3,7 @@ import { NavFn, SignupData } from "../types"
 import { apiUrl, apiJson, authHeaders, readApiError, ApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
+import StudentPilot from "../components/StudentPilot"
 import QuestionFigure from "../components/QuestionFigure"
 import type { QuestionFigureData } from "../questionFigures"
 import { requestMockGeneration } from "../mockGeneration"
@@ -589,6 +590,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
   return (
     <>
       <div hidden={phase !== "config"}>
+        <StudentPilot />
         <section aria-label="آزمون‌های قبلی" className="max-w-[560px] mx-auto px-4 pt-6 text-[var(--text)]">
           <h2 className="font-bold">آزمون‌های قبلی و پاسخنامه‌ها</h2>
           {historyLoading && <p role="status" className="text-sm py-3">در حال دریافت تاریخچه…</p>}
