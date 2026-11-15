@@ -162,7 +162,12 @@ def test_old_checkbox_filters_do_not_override_weekly_maze_topics(weekly):
     assert [r['name'] for r in result['plan']] == ['ریاضی','فیزیک','شیمی']
     assert arena._wanted_of(SimpleNamespace(wanted='["زیست‌شناسی"]')) == []
     assert not arena._pair_plan('ریاضی فیزیک','علوم تجربی',grade='دوازدهم')['ok']
-    assert not arena._pair_plan('ریاضی فیزیک','ریاضی فیزیک',grade='یازدهم')['ok']
+    younger = arena._pair_plan('ریاضی فیزیک', 'ریاضی فیزیک', grade='یازدهم')
+    assert younger['ok'] and not younger.get('weekly')
+    assert sum(row['questions'] for row in younger['plan']) == 10
+    experimental = arena._pair_plan('علوم تجربی', 'علوم تجربی', grade='دهم')
+    assert experimental['ok'] and 'زمین‌شناسی' not in experimental['booklet_subjects']
+    assert sum(row['questions'] for row in experimental['plan']) == 10
 
 
 def test_drafting_uses_bounds_and_persists_server_scope_not_model_scope(weekly, monkeypatch):

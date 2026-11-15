@@ -360,7 +360,7 @@ def _build_from_stock(db, major_key, difficulty, plan, grade, topics, allow_gene
             continue
         fresh.append({**q, '_id':len(fresh) + 1})
     from app.rag.exam_blueprint import matches_plan
-    if any(row.get('full_mock') for row in plan) and not matches_plan(fresh, plan, grade, topics or []):
+    if (not allow_generation or any(row.get('full_mock') for row in plan)) and not matches_plan(fresh, plan, grade, topics or []):
         return [], built_plan, duration
     short = mock_generation._shortfall(fresh, plan)
     if len(fresh) < sum(s['questions'] for s in plan) * mock_generation.POOL_MIN_FILL or any(
@@ -372,14 +372,14 @@ def _build_from_stock(db, major_key, difficulty, plan, grade, topics, allow_gene
 
 
 def generate_one(db, major_key: str, difficulty: str, *, grade="", total_questions=0,
-                 subjects=None, topics=None, allow_generation=True) -> bool:
+                 subjects=None, topics=None, allow_generation=True, plan=None) -> bool:
     """Generate one standard booklet and insert it as a pending_use pool row.
 
     Returns True when a row was added. Generation failures are logged and
     swallowed: one broken booklet must never kill a sweep.
     """
     try:
-        plan = generation_plan(major_key, subjects=subjects, total_questions=total_questions)
+        plan = plan or generation_plan(major_key, subjects=subjects, total_questions=total_questions)
         questions, _plan, duration = _build_from_stock(
             db, major_key, difficulty, plan, grade, topics, allow_generation)
     except Exception:
@@ -681,6 +681,17 @@ def reused_duel(db, user_id, major_key, *, grade="", plan=None, topics=None, use
         return None
     return question_bank.create_reused_mock(db, user_id, questions, label, grade,
         DUEL_DIFFICULTY, max(10, sum(s["minutes"] for s in plan) // 3), ranked=True)
+
+
+STARTER_GRADES = ("دهم", "یازدهم", "دوازدهم")
+STARTER_MAJORS = ("riazi", "tajrobi")
+
+
+def starter_plan(major_key, grade):
+    """The ten-question starter has the same quotas as a standard grade duel."""
+    from app.rag.knowledge_base import grade_adjusted_pair
+    label = CANONICAL_MAJOR[major_key]
+    return grade_adjusted_pair(label, label, grade)["plan"]
 
 
 def generation_plan(major_key, *, ranked=False, subjects=None, total_questions=0):

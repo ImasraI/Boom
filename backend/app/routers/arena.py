@@ -217,11 +217,12 @@ def _wanted_of(entry: ArenaQueueEntry) -> list:
 
 def _pair_plan(major_a,major_b,wanted_a=None,wanted_b=None,grade='',as_of=None,db=None,user_id=0):
     if not get_settings().ARENA_WEEKLY_MAZE_ENABLED:
-        return kb.pair_plan(major_a,major_b,wanted_a,wanted_b)
-    if 'riazi' not in (_major_key_of(major_a),_major_key_of(major_b)):
-        return kb.pair_plan(major_a,major_b)
-    if _major_key_of(major_a)!='riazi' or _major_key_of(major_b)!='riazi' or (grade and kb.grade_scope(grade,'دوازدهم')!='دوازدهم'):
-        return {'ok':False,'plan':[],'reason':'رنکینگ هفتگی فعلاً مخصوص دوازدهم ریاضی‌فیزیک است.'}
+        return kb.grade_adjusted_pair(major_a, major_b, grade, wanted_a, wanted_b)
+    tracks = (_major_key_of(major_a), _major_key_of(major_b))
+    if 'riazi' in tracks and tracks[0] != tracks[1]:
+        return {'ok': False, 'plan': [], 'reason': 'این مسابقه برای دانش‌آموزان هم‌رشته است.'}
+    if tracks[0] != 'riazi' or grade in ('دهم', 'یازدهم'):
+        return kb.grade_adjusted_pair(major_a, major_b, grade)
     from app.rag.weekly_ranked import preview, available_preview
     weekly=available_preview(db,user_id,grade,as_of) if db is not None else preview(as_of)
     if not weekly['available']:
@@ -1282,7 +1283,8 @@ def duel_filters(
     empty - the authoritative major and grade live in the profile.
     """
     resolved, grade = _knowledge_base(db, current_user.id, {"major": major})
-    if get_settings().ARENA_WEEKLY_MAZE_ENABLED:
+    if (get_settings().ARENA_WEEKLY_MAZE_ENABLED and _major_key_of(resolved) == 'riazi'
+            and grade not in ('دهم', 'یازدهم')):
         from app.rag.weekly_ranked import available_preview
         weekly=available_preview(db,current_user.id,grade)
         return {'all':[],'mine':[],'addressable':[],'booklet_of':{},'majors_with':{},

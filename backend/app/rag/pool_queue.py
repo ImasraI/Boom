@@ -128,6 +128,21 @@ def create_job(config, major, difficulty):
             return None
         if config.get('weekly_scope'):
             plan = _weekly_draft_plan(db, config, major, plan)
+        if config.get("starter_track"):
+            open_track = db.scalar(select(PoolDraftJob.id).where(
+                PoolDraftJob.status.in_(_OPEN), PoolDraftJob.major == major,
+                PoolDraftJob.grade == config["grade"], PoolDraftJob.difficulty == difficulty,
+            ).limit(1))
+            if open_track is not None:
+                return None
+            plan = pool_core.starter_plan(major, config["grade"])
+            seeds = pool_core._stock_seeds(db, major, difficulty, plan, config["grade"], None)
+            remaining = {name: expected - actual
+                         for name, expected, actual in mock_generation._shortfall(seeds, plan)}
+            plan = [{**row, "questions": remaining[row["name"]]}
+                    for row in plan if row["name"] in remaining]
+            if not plan:
+                return None
         job = PoolDraftJob(config=json.dumps(config, ensure_ascii=False), major=major,
             difficulty=difficulty, grade=config.get("grade", ""), plan=json.dumps(plan, ensure_ascii=False),
             status="drafting", lease_owner=_OWNER, lease_until=_lease())
@@ -404,6 +419,18 @@ def _active():
     return not service._shutdown.is_set() and state.get("enabled", False)
 
 
+def _stock_targets(service, config, state):
+    if not config.get("balanced_starters"):
+        return [(major, difficulty, config) for major, difficulty in service._shelves(config)]
+    tracks = [(major, grade) for grade in pool_core.STARTER_GRADES
+              for major in pool_core.STARTER_MAJORS]
+    counts = state.get("starter_produced", {})
+    lowest = min(counts.get(f"{major}:{grade}", 0) for major, grade in tracks)
+    return [(major, "konkur", {**config, "grade": grade, "topics": [],
+                               "starter_track": f"{major}:{grade}"})
+            for major, grade in tracks if counts.get(f"{major}:{grade}", 0) == lowest]
+
+
 def _assemble():
     from app.rag import pool_service as service
     with _ASSEMBLE_LOCK:
@@ -415,23 +442,29 @@ def _assemble():
             if state.get('weekly_scope') != config['weekly_scope']:
                 state = service._update(weekly_scope=config['weekly_scope'], produced=0)
         if config["count"] and state["produced"] >= config["count"]: return False
-        shelves = service._shelves(config)
+        shelves = _stock_targets(service, config, state)
         cursor = state.get("assemble_cursor", 0)
         for offset in range(len(shelves)):
             index = (cursor + offset) % len(shelves)
-            major, difficulty = shelves[index]
+            major, difficulty, target = shelves[index]
             with SessionLocal() as db:
-                kwargs = dict(grade=config["grade"], subjects=config.get("subjects"), topics=config.get("topics"))
+                kwargs = dict(grade=target["grade"], subjects=target.get("subjects"), topics=target.get("topics"))
                 if difficulty != pool_core.DUEL_DIFFICULTY:
-                    kwargs["total_questions"] = config.get("total_questions", 0)
-                if config.get('weekly_plan'):
-                    kwargs['plan'] = config['weekly_plan']
+                    kwargs["total_questions"] = target.get("total_questions", 0)
+                if target.get("starter_track"):
+                    kwargs["plan"] = pool_core.starter_plan(major, target["grade"])
+                elif target.get('weekly_plan'):
+                    kwargs['plan'] = target['weekly_plan']
                 success = pool_core.assemble_stock(db, major, difficulty, **kwargs)
             if success:
                 with service._LOCK:
                     current = service.snapshot()
                     current["produced"] += 1
                     current["assemble_cursor"] = index + 1
+                    if target.get("starter_track"):
+                        counts = current.setdefault("starter_produced", {})
+                        track = target["starter_track"]
+                        counts[track] = counts.get(track, 0) + 1
                     service._save(current)
                 pool_core.bump_produced()
                 return True
@@ -570,16 +603,22 @@ def run():
                 service._update(status='waiting_for_quota', last_error=health['message'],
                                 retry_at=health.get('retry_at'))
                 service._wake.wait(60); service._wake.clear(); continue
-            shelves = service._shelves(config)
+            shelves = _stock_targets(service, config, service.snapshot())
             cursor = state.get("draft_cursor", state.get("cursor", 0))
-            major, difficulty = shelves[cursor % len(shelves)]
+            job_id = None
             try:
-                job_id = create_job(config, major, difficulty)
+                for offset in range(len(shelves)):
+                    major, difficulty, target = shelves[(cursor + offset) % len(shelves)]
+                    job_id = create_job(target, major, difficulty)
+                    if job_id is not None:
+                        break
+                    if not config.get("balanced_starters"):
+                        break
             except HTTPException:
                 continue  # Schedule changed between reservation and drafting.
             if job_id is None:
                 service._wake.wait(5); service._wake.clear(); continue
-            service._update(draft_cursor=cursor + 1)
+            service._update(draft_cursor=cursor + offset + 1)
             _worker_state("drafting", "generating", health)
             pool_core.set_current(major, difficulty)
             pool_core.add_planned(1)
@@ -596,9 +635,9 @@ def run():
                     draft_error = data.get('message', '')
                 progress_report(event, data)
             try:
-                mock_generation.generate_booklet(0, plan, topics=config.get("topics") or [],
+                mock_generation.generate_booklet(0, plan, topics=target.get("topics") or [],
                     difficulty="konkur" if difficulty == pool_core.DUEL_DIFFICULTY else difficulty,
-                    grade=config["grade"], timeout=60, on_drafted=save_batch,
+                    grade=target["grade"], timeout=60, on_drafted=save_batch,
                     report=report)
             except _Interrupted:
                 pass

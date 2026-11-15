@@ -92,7 +92,7 @@ class MockConfig(BaseModel):
     duration_minutes: Optional[int] = Field(default=None, ge=1)  # default: sum of subject minutes
     topics: List[str] = []  # restrict to these topics (e.g. from the week's mock)
     difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard|extreme)$")
-    mode: str = Field(default="general", pattern="^(general|practice|practice_weak_areas)$")
+    mode: str = Field(default="general", pattern="^(general|practice|practice_weak_areas|ready_10)$")
     student: Optional[dict] = None
 
 
@@ -318,6 +318,30 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
     config = config.model_copy(update={"student": student})
     poolable, plan, major = _resolve_plan(config)
     grade = (config.student or {}).get("grade") or ""
+    if config.mode == "ready_10":
+        from app.rag import pool_core
+        key = _major_key(major)
+        if key not in pool_core.STARTER_MAJORS or grade not in pool_core.STARTER_GRADES:
+            raise HTTPException(409, detail={"code": "starter_scope", "message":
+                "برای آزمون کوتاه، رشتهٔ ریاضی یا تجربی و پایهٔ دهم تا دوازدهم را در پروفایل انتخاب کن."})
+        plan = pool_core.starter_plan(key, grade)
+        claimed = _claim_pool_mock(db, current_user.id, key, "konkur", grade, plan)
+        if claimed is not None:
+            return {"mock_id": claimed.id, "title": claimed.title,
+                    "duration_minutes": claimed.duration_minutes, "total_questions": 10,
+                    "subjects": plan, "source": "pool"}
+        questions = question_bank.assemble(db, current_user.id, plan, [pool_core.CANONICAL_MAJOR[key]],
+            "konkur", grade, shared_only=True)
+        if not questions:
+            raise HTTPException(409, detail={"code": "pool_empty", "message":
+                "دفترچهٔ ۱۰ سؤالی این رشته و پایه در حال آماده‌سازی است."})
+        duration = max(10, sum(row["minutes"] for row in plan) // 3)
+        mock = question_bank.create_reused_mock(db, current_user.id, questions,
+            pool_core.CANONICAL_MAJOR[key], grade, "konkur", duration)
+        mock.title = "آزمون کوتاه پایه — ۱۰ سؤال"
+        db.commit()
+        return {"mock_id": mock.id, "title": mock.title, "duration_minutes": duration,
+                "total_questions": len(questions), "subjects": plan, "source": "question_bank"}
     if config.mode != 'general':
         plan = [{**row, 'branches': {}, 'full_mock': False} for row in plan]
     weak = []

@@ -178,6 +178,20 @@ def clean_wanted(major: str, wanted: Optional[Iterable[str]]) -> List[str]:
     return out
 
 
+def grade_adjusted_pair(major_a, major_b, grade, wanted_a=None, wanted_b=None):
+    """Grade 10 has no geology course. Allocate its slot to biology."""
+    pair = pair_plan(major_a, major_b, wanted_a, wanted_b)
+    if grade != "دهم" or not any(row["name"] == "زمین‌شناسی" for row in pair["plan"]):
+        return pair
+    plan = [dict(row) for row in pair["plan"] if row["name"] != "زمین‌شناسی"]
+    if not plan:
+        return {**pair, "ok": False, "plan": [], "booklet_subjects": [],
+                "reason": "زمین‌شناسی در برنامهٔ پایهٔ دهم نیست."}
+    extra = next(row["questions"] for row in pair["plan"] if row["name"] == "زمین‌شناسی")
+    plan[0]["questions"] += extra
+    return {**pair, "plan": plan, "booklet_subjects": [row["name"] for row in plan]}
+
+
 def pair_plan(major_a: str, major_b: str,
               wanted_a: Optional[Sequence[str]] = None,
               wanted_b: Optional[Sequence[str]] = None

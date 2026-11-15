@@ -463,3 +463,34 @@ def test_refused_queue_batch_keeps_its_drafts_and_records_the_refusal(setup):
         assert [q['_queue_status'] for q in rows] == ['pending'] * 3
         assert rows[0]['validation']['status'] == 'pending'
         assert not db.scalar(select(BankQuestion.id).where(BankQuestion.content.contains(tag)))
+
+
+
+def test_balanced_starters_wait_for_all_six_tracks_before_next_round():
+    run = {**config(), "balanced_starters": True}
+    state = {"starter_produced": {}}
+    first = queue._stock_targets(pool_service, run, state)
+    assert len(first) == 6
+    assert len({target["starter_track"] for _, _, target in first}) == 6
+    for index, (major, difficulty, target) in enumerate(first):
+        assert difficulty == "konkur"
+        assert sum(row["questions"] for row in pool_core.starter_plan(major, target["grade"])) == 10
+        state["starter_produced"][target["starter_track"]] = 1
+        ready = queue._stock_targets(pool_service, run, state)
+        assert ready == (first[index + 1:] if index < 5 else first)
+
+
+def test_balanced_starter_draft_preserves_track_and_defers_duplicate_work(setup):
+    _, tag = setup
+    run = {**config(), "balanced_starters": True}
+    _, _, target = queue._stock_targets(pool_service, run, {})[1]
+    assert target["starter_track"] == "tajrobi:دهم"
+    job_id = queue.create_job(target, "tajrobi", "konkur")
+    assert job_id is not None
+    with SessionLocal() as db:
+        job = db.get(PoolDraftJob, job_id)
+        assert job.grade == "دهم"
+        plan = json.loads(job.plan)
+        assert sum(row["questions"] for row in plan) == 10
+        assert "زمین‌شناسی" not in {row["name"] for row in plan}
+    assert queue.create_job(target, "tajrobi", "konkur") is None

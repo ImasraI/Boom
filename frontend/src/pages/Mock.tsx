@@ -132,6 +132,7 @@ export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE }: {
         <div className="border-b border-[var(--border)] pb-4">
           <label className="text-[12px] font-bold text-[var(--muted)]">نوع دفترچه
             <select value={mode} onChange={e => { setMode(e.target.value); setCount(e.target.value === "general" ? 0 : 10) }} className="block mt-2 w-full bg-[var(--surface)] border-b border-[var(--border-strong)] p-2 text-sm text-[var(--text)]">
+              <option value="ready_10">آزمون کوتاه پایه · ۱۰ سؤال</option>
               <option value="practice">تمرین از سوال‌های قبلی</option>
               <option value="practice_weak_areas">تمرین نقاط ضعف</option>
               <option value="general">آزمون کامل کنکور</option>
@@ -140,7 +141,7 @@ export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE }: {
           </label>
           <p className="text-[11px] text-[var(--muted-2)] mt-2">آزمون کامل، همه درس‌های دفترچه رشته‌ات را پوشش می‌دهد. برای ریاضی‌فیزیک: ۴۰ ریاضی، ۳۵ فیزیک و ۳۰ شیمی. تمرین، سوال‌های قبلی را در اولویت می‌گذارد.</p>
         </div>
-        <div className="study-section p-4">
+        {mode !== "ready_10" && <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">سطح دشواری</p>
           <div className="grid grid-cols-2 gap-2">
             {DIFFICULTIES.map(d => (
@@ -154,7 +155,7 @@ export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE }: {
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
         {practice && <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">تعداد کل سوال‌ها</p>

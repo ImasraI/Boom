@@ -93,7 +93,7 @@ export default function StudentPilot({ primary = false }: { primary?: boolean })
     <div className="mx-auto max-w-[560px] px-4 pt-5">
       <section aria-labelledby="student-pilot-title" className="rounded-2xl border border-[var(--accent)] bg-[var(--accent-soft)] p-5 text-[var(--text)]" dir="rtl">
         <h1 id="student-pilot-title" className="text-xl font-bold">{title}</h1>
-        {!session && <p className="mt-2 text-sm text-[var(--muted)]">۹ سؤال با پاسخ‌نامهٔ تشریحی · بدون کد دعوت</p>}
+        {!session && <p className="mt-2 text-sm text-[var(--muted)]">با پاسخ‌نامهٔ تشریحی · بدون کد دعوت</p>}
         {content}
       </section>
     </div>
