@@ -590,7 +590,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
   return (
     <>
       <div hidden={phase !== "config"}>
-        <StudentPilot />
+        <StudentPilot primary />
         <section aria-label="آزمون‌های قبلی" className="max-w-[560px] mx-auto px-4 pt-6 text-[var(--text)]">
           <h2 className="font-bold">آزمون‌های قبلی و پاسخنامه‌ها</h2>
           {historyLoading && <p role="status" className="text-sm py-3">در حال دریافت تاریخچه…</p>}

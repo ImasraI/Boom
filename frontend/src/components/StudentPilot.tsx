@@ -10,7 +10,7 @@ type Session = {
   feedback: Record<string, string>
 }
 
-export default function StudentPilot() {
+export default function StudentPilot({ primary = false }: { primary?: boolean }) {
   const [session, setSession] = useState<Session>()
   const [answers, setAnswers] = useState<Answers>({})
   const [confidence, setConfidence] = useState<Record<string, number>>({})
@@ -37,11 +37,10 @@ export default function StudentPilot() {
     }
   }
 
-  return <details className="mx-4 my-4 rounded-xl border border-[var(--border)] p-4" dir="rtl">
-    <summary className="cursor-pointer font-bold">آزمون آزمایشی دانش‌آموزان</summary>
+  const content = <>
     {!session ? <div className="mt-3">
-      <button type="button" disabled={busy} onClick={() => void request()}>
-        {busy ? "در حال باز کردن…" : "شروع آزمون"}
+      <button type="button" className="w-full rounded-xl bg-[var(--accent)] px-5 py-3 font-bold text-white disabled:opacity-50 sm:w-auto" disabled={busy} onClick={() => void request()}>
+        {busy ? "در حال باز کردن…" : "شروع آزمون آزمایشی"}
       </button>
     </div> : <>
       {session.questions.map(q => <fieldset key={q.id} className="my-5 border-t border-[var(--border)] pt-3">
@@ -86,5 +85,22 @@ export default function StudentPilot() {
       </button>
     </>}
     {message && <p role="status">{message}</p>}
-  </details>
+  </>
+
+  const cardClass = "mx-4 my-4 rounded-xl border border-[var(--border)] p-4"
+  const title = "آزمون آزمایشی دانش‌آموزان"
+  return primary ? (
+    <div className="mx-auto max-w-[560px] px-4 pt-5">
+      <section aria-labelledby="student-pilot-title" className="rounded-2xl border border-[var(--accent)] bg-[var(--accent-soft)] p-5 text-[var(--text)]" dir="rtl">
+        <h1 id="student-pilot-title" className="text-xl font-bold">{title}</h1>
+        {!session && <p className="mt-2 text-sm text-[var(--muted)]">۹ سؤال با پاسخ‌نامهٔ تشریحی · بدون کد دعوت</p>}
+        {content}
+      </section>
+    </div>
+  ) : (
+    <details className={cardClass} dir="rtl">
+      <summary className="cursor-pointer font-bold">{title}</summary>
+      {content}
+    </details>
+  )
 }
