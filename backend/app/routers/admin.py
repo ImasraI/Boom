@@ -246,7 +246,7 @@ def pool_levels(db: Session = Depends(get_db)):
 
 
 class PoolRunIn(BaseModel):
-    kind: str = Field(default="mock", pattern="^(mock|ranked|both|weekly_ranked)$")
+    kind: str = Field(default="mock", pattern="^(mock|ranked|both|weekly_ranked|balanced_starters)$")
     major: str = "riazi"
     difficulty: str = Field(default="konkur", pattern="^(easy|konkur|hard|extreme)$")
     count: int = Field(default=0, ge=0)  # 0: until canceled/provider stops
@@ -266,6 +266,16 @@ def pool_restock(db: Session = Depends(get_db), payload: PoolRunIn | None = None
     poll GET /api/admin/pool to watch the shelves fill.
     """
     payload = payload or PoolRunIn()
+    if payload.kind == "balanced_starters":
+        from app.config import get_settings
+        if not get_settings().POOL_DRAFT_QUEUE_ENABLED:
+            raise HTTPException(409, "برای تولید متوازن، صف تولید و بررسی را فعال کنید.")
+        tracks = len(pool_core.STARTER_GRADES) * len(pool_core.STARTER_MAJORS)
+        if payload.count % tracks:
+            raise HTTPException(422, "تعداد دفترچه‌ها باید مضرب ۶ باشد تا هر دور کامل بماند.")
+        return pool_service.start({"kind": "mock", "balanced_starters": True,
+            "majors": list(pool_core.STARTER_MAJORS), "difficulties": ["konkur"],
+            "count": payload.count, "grade": "", "total_questions": 10, "topics": []})
     if payload.kind=='weekly_ranked':
         from app.rag.weekly_ranked import require_plan
         require_plan()

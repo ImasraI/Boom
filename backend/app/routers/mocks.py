@@ -320,7 +320,7 @@ def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session)
     grade = (config.student or {}).get("grade") or ""
     if config.mode == "ready_10":
         from app.rag import pool_core
-        key = _major_key(major)
+        key = _MAJOR_ALIASES.get(major.strip(), major.strip())
         if key not in pool_core.STARTER_MAJORS or grade not in pool_core.STARTER_GRADES:
             raise HTTPException(409, detail={"code": "starter_scope", "message":
                 "برای آزمون کوتاه، رشتهٔ ریاضی یا تجربی و پایهٔ دهم تا دوازدهم را در پروفایل انتخاب کن."})
