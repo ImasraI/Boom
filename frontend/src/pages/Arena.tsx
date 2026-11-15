@@ -1,3 +1,4 @@
+import StudentPilot from "../components/StudentPilot"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
 import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
@@ -956,7 +957,7 @@ export default function Arena({ nav, userData, initialPhase }: {
     onCancel={cancelInvite} onEnterMatch={enterScheduledMatch} onBack={closeScheduled}
     defaultWhen={localInputValue(dayAt(1, 10))} />
 
-  return <><Lobby me={me} onJoin={join} onBoard={openBoard} busy={loadingLobby || !!lobbyError}
+  return <><StudentPilot /><Lobby me={me} onJoin={join} onBoard={openBoard} busy={loadingLobby || !!lobbyError}
     filters={filters}
     error={lobbyError || error} onScheduled={openScheduled} />
     {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت کولوسئوم</button></div>}</>
