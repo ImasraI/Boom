@@ -16,7 +16,7 @@ def test_signup_login_answer_feedback_journey(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, 'send_verification_code', lambda phone, code: sent.append((phone, code)))
     monkeypatch.setattr(auth, 'rate_limit', lambda *args, **kwargs: None)
     path = tmp_path / 'packet.json'
-    path.write_text(json.dumps({'invite': 'synthetic-code', 'revision': 'synthetic-v1',
+    path.write_text(json.dumps({'revision': 'synthetic-v1',
         'questions': [{'id': 'Q1', 'text': '2+2?', 'options': ['1','2','3','4'],
                        'answer': 3, 'explanation': '2+2=4'}]}), encoding='utf8')
     monkeypatch.setenv('BOOM_STUDENT_PILOT_PACKET', str(path))
@@ -24,7 +24,7 @@ def test_signup_login_answer_feedback_journey(monkeypatch, tmp_path):
     app.include_router(auth.router)
     app.include_router(student_pilot.router)
     client = TestClient(app)
-    headers = {'X-Pilot-Code': 'synthetic-code'}
+    headers = {}
     assert client.get('/api/student-pilot', headers=headers).status_code == 401
     phone = '9125550198'
     result = client.post('/api/auth/request-code', json={'phone': phone})
@@ -36,7 +36,6 @@ def test_signup_login_answer_feedback_journey(monkeypatch, tmp_path):
     login = client.post('/api/auth/login', data={'username': phone, 'password': body['password']})
     assert login.status_code == 200
     headers['Authorization'] = 'Bearer ' + login.json()['access_token']
-    assert client.get('/api/student-pilot', headers={**headers, 'X-Pilot-Code':'wrong'}).status_code == 404
     opened = client.get('/api/student-pilot', headers=headers)
     assert opened.status_code == 200 and opened.headers['cache-control'] == 'private, no-store'
     assert 'answer' not in opened.json()['questions'][0]

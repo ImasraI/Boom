@@ -11,7 +11,6 @@ type Session = {
 }
 
 export default function StudentPilot() {
-  const [code, setCode] = useState("")
   const [session, setSession] = useState<Session>()
   const [answers, setAnswers] = useState<Answers>({})
   const [confidence, setConfidence] = useState<Record<string, number>>({})
@@ -25,7 +24,7 @@ export default function StudentPilot() {
     try {
       const next = await apiJson<Session>("/api/student-pilot" + action, {
         method: body ? "POST" : "GET",
-        headers: { "X-Pilot-Code": code.trim(), "Content-Type": "application/json" },
+        headers: body ? { "Content-Type": "application/json" } : undefined,
         body: body ? JSON.stringify({ ...body, revision: session?.revision }) : undefined,
       })
       setSession(next)
@@ -39,11 +38,12 @@ export default function StudentPilot() {
   }
 
   return <details className="mx-4 my-4 rounded-xl border border-[var(--border)] p-4" dir="rtl">
-    <summary className="cursor-pointer font-bold">آزمون آزمایشی با کد دعوت</summary>
-    {!session ? <form className="mt-3 flex flex-wrap gap-3" onSubmit={e => { e.preventDefault(); void request() }}>
-      <label>کد دعوت <input dir="ltr" value={code} onChange={e => setCode(e.target.value)} required /></label>
-      <button disabled={busy || !code.trim()}>باز کردن آزمون</button>
-    </form> : <>
+    <summary className="cursor-pointer font-bold">آزمون آزمایشی دانش‌آموزان</summary>
+    {!session ? <div className="mt-3">
+      <button type="button" disabled={busy} onClick={() => void request()}>
+        {busy ? "در حال باز کردن…" : "شروع آزمون"}
+      </button>
+    </div> : <>
       {session.questions.map(q => <fieldset key={q.id} className="my-5 border-t border-[var(--border)] pt-3">
         <legend>{q.id}</legend>
         <RichText text={q.text} />

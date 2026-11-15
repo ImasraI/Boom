@@ -1,12 +1,11 @@
-"""Private Colosseum pilot, enabled by a server-side packet file."""
-import hmac
+"""Colosseum pilot, enabled by a server-side packet file."""
 import json
 import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, StrictInt
 
 from app.auth.deps import get_current_user
@@ -25,20 +24,18 @@ class Feedback(BaseModel):
     comments: dict[str, str]
 
 
-def packet(code):
+def packet():
     path = os.getenv("BOOM_STUDENT_PILOT_PACKET")
     if not path:
         raise HTTPException(404, "آزمون آزمایشی در دسترس نیست")
     source = Path(path)
     data = json.loads(source.read_text(encoding="utf8"))
-    if not hmac.compare_digest(code.encode(), data["invite"].encode()):
-        raise HTTPException(404, "کد آزمون معتبر نیست")
     return data, source.with_suffix(".sqlite3")
 
 
-def session(code, user, response, attempt=None, feedback=None):
+def session(user, response, attempt=None, feedback=None):
     response.headers["Cache-Control"] = "private, no-store"
-    data, path = packet(code)
+    data, path = packet()
     submission = attempt if attempt is not None else feedback
     if submission is not None and submission.revision != data["revision"]:
         raise HTTPException(409, "نسخهٔ آزمون تغییر کرده است. آزمون را دوباره باز کنید.")
@@ -76,15 +73,15 @@ def session(code, user, response, attempt=None, feedback=None):
 
 
 @router.get("")
-def open_pilot(response: Response, x_pilot_code: str = Header(), user=Depends(get_current_user)):
-    return session(x_pilot_code, user, response)
+def open_pilot(response: Response, user=Depends(get_current_user)):
+    return session(user, response)
 
 
 @router.post("/submit")
-def submit_pilot(body: Attempt, response: Response, x_pilot_code: str = Header(), user=Depends(get_current_user)):
-    return session(x_pilot_code, user, response, attempt=body)
+def submit_pilot(body: Attempt, response: Response, user=Depends(get_current_user)):
+    return session(user, response, attempt=body)
 
 
 @router.post("/feedback")
-def review_pilot(body: Feedback, response: Response, x_pilot_code: str = Header(), user=Depends(get_current_user)):
-    return session(x_pilot_code, user, response, feedback=body)
+def review_pilot(body: Feedback, response: Response, user=Depends(get_current_user)):
+    return session(user, response, feedback=body)
