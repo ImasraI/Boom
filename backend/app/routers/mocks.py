@@ -96,6 +96,17 @@ class MockConfig(BaseModel):
     student: Optional[dict] = None
 
 
+class MockScope(BaseModel):
+    major: str = ""
+    grade: str = ""
+
+
+class MockAvailabilityRequest(BaseModel):
+    student: MockScope = Field(default_factory=MockScope)
+    practice_count: Optional[int] = Field(default=10, ge=1, le=200)
+    topics: List[str] = Field(default_factory=list, max_length=20)
+
+
 class _MockQuestion(BaseModel):
     id: int
     subject: str
@@ -113,7 +124,7 @@ class PreviousMazeRequest(BaseModel):
     student: Optional[dict] = None
 
 
-def _previous_maze_student(db, user_id, supplied=None):
+def _mock_student(db, user_id, supplied=None):
     student = dict(supplied or {})
     profile = db.execute(select(StudentProfile).where(StudentProfile.user_id == user_id)).scalar_one_or_none()
     if profile:
@@ -127,7 +138,7 @@ def _previous_maze_student(db, user_id, supplied=None):
 def previous_maze_list(major: str = '', grade: str = '',
                        current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.rag import previous_maze
-    student = _previous_maze_student(db, current_user.id, {'major':major, 'grade':grade})
+    student = _mock_student(db, current_user.id, {'major':major, 'grade':grade})
     items = previous_maze.available(db, current_user.id, student)
     db.commit()
     return {'items':items}
@@ -139,7 +150,7 @@ def start_previous_maze(request: PreviousMazeRequest,
     from app.rag import previous_maze
     consume_ai_use(current_user.id, 'mock_generate')
     try:
-        student = _previous_maze_student(db, current_user.id, request.student)
+        student = _mock_student(db, current_user.id, request.student)
         return previous_maze.create(db, current_user.id, student, request.exam_date)
     except Exception:
         db.rollback()
@@ -177,6 +188,39 @@ def _resolve_plan(config: "MockConfig") -> Tuple[bool, List[dict], str]:
     return poolable, plan, major
 
 
+def _matching_pool_mock_rows(db, user_id, major_key_str, difficulty, grade, plan=None,
+                             *, quarantine=False):
+    """Yield the same usable stock for a readiness check and a real claim."""
+    from app.rag.pool_core import verified_booklet
+    from app.rag.exam_blueprint import matches_plan
+    labels = _MAJOR_LABELS.get(major_key_str) or []
+    if not labels:
+        return
+    seen = select(MockAttempt.mock_id).where(MockAttempt.student_id == user_id)
+    rows = db.scalars(select(GeneratedMock).where(
+        GeneratedMock.status == "pending_use", GeneratedMock.difficulty == difficulty,
+        GeneratedMock.major.in_(labels), GeneratedMock.id.not_in(seen),
+    ).order_by(GeneratedMock.created_at.asc()))
+    for row in rows:
+        if grade and question_bank.grade_number(row.grade) > question_bank.grade_number(grade):
+            continue
+        if not verified_booklet(row.questions):
+            if quarantine:
+                db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
+                    GeneratedMock.status == "pending_use").values(status="quarantined"))
+            continue
+        saved = json.loads(row.questions)
+        if not quarantine and plan and not matches_plan(saved, plan, grade):
+            continue
+        questions = question_bank.active_questions(db, row)
+        if len(questions) != len(saved):
+            if quarantine:
+                row.status = "quarantined"
+            continue
+        if not plan or matches_plan(questions, plan, grade):
+            yield row, questions
+
+
 def _claim_pool_mock(db: Session, user_id: int, major_key_str: str,
                      difficulty: str, grade: str, plan=None) -> Optional[GeneratedMock]:
     """Atomically claim the oldest pending_use pool row matching
@@ -188,35 +232,9 @@ def _claim_pool_mock(db: Session, user_id: int, major_key_str: str,
     is already seen, returns None and the caller falls back to live
     generation for a genuinely new booklet.
     """
-    labels = _MAJOR_LABELS.get(major_key_str) or []
-    if not labels:
-        return None
     with _POOL_CLAIM_LOCK:
-        seen = select(MockAttempt.mock_id).where(
-            MockAttempt.student_id == user_id)
-        rows = db.execute(
-            select(GeneratedMock)
-            .where(GeneratedMock.status == "pending_use")
-            .where(GeneratedMock.difficulty == difficulty)
-            .where(GeneratedMock.major.in_(labels))
-            .where(GeneratedMock.id.not_in(seen))
-            .order_by(GeneratedMock.created_at.asc())
-        ).scalars().all()
-        from app.rag.pool_core import verified_booklet
-        for row in rows:
-            if grade and question_bank.grade_number(row.grade) > question_bank.grade_number(grade):
-                continue
-            if not verified_booklet(row.questions):
-                db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
-                    GeneratedMock.status == "pending_use").values(status="quarantined"))
-                continue
-            questions = question_bank.active_questions(db, row)
-            if len(questions) != len(json.loads(row.questions)):
-                row.status = "quarantined"
-                continue
-            from app.rag.exam_blueprint import matches_plan
-            if plan and not matches_plan(questions, plan, grade):
-                continue  # A five-question template cannot satisfy a full booklet.
+        for row, questions in _matching_pool_mock_rows(
+                db, user_id, major_key_str, difficulty, grade, plan, quarantine=True):
             claimed = db.execute(update(GeneratedMock).where(GeneratedMock.id == row.id,
                 GeneratedMock.status == "pending_use").values(
                     status="claimed", student_id=user_id, grade=grade or row.grade))
@@ -308,55 +326,103 @@ def generation_status(job_id: str, current_user: User = Depends(get_current_user
     return mock_jobs.get(job_id, current_user.id)
 
 
-def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session):
-    profile = db.execute(select(StudentProfile).where(StudentProfile.user_id == current_user.id)).scalar_one_or_none()
-    student = dict(config.student or {})
-    if profile:
-        for field in ("major", "grade"):
-            if getattr(profile, field, None):
-                student[field] = getattr(profile, field)
-    config = config.model_copy(update={"student": student})
-    poolable, plan, major = _resolve_plan(config)
-    grade = (config.student or {}).get("grade") or ""
-    if config.mode == "ready_10":
-        from app.rag import pool_core
-        key = _MAJOR_ALIASES.get(major.strip(), major.strip())
-        if key not in pool_core.STARTER_MAJORS or grade not in pool_core.STARTER_GRADES:
-            raise HTTPException(409, detail={"code": "starter_scope", "message":
-                "برای آزمون کوتاه، رشتهٔ ریاضی یا تجربی و پایهٔ دهم تا دوازدهم را در پروفایل انتخاب کن."})
-        plan = pool_core.starter_plan(key, grade)
-        claimed = _claim_pool_mock(db, current_user.id, key, "konkur", grade, plan)
-        if claimed is not None:
-            return {"mock_id": claimed.id, "title": claimed.title,
-                    "duration_minutes": claimed.duration_minutes, "total_questions": 10,
-                    "subjects": plan, "source": "pool"}
-        questions = question_bank.assemble(db, current_user.id, plan, [pool_core.CANONICAL_MAJOR[key]],
-            "konkur", grade, shared_only=True)
-        if not questions:
-            raise HTTPException(409, detail={"code": "pool_empty", "message":
-                "دفترچهٔ ۱۰ سؤالی این رشته و پایه در حال آماده‌سازی است."})
-        duration = max(10, sum(row["minutes"] for row in plan) // 3)
-        mock = question_bank.create_reused_mock(db, current_user.id, questions,
-            pool_core.CANONICAL_MAJOR[key], grade, "konkur", duration)
-        mock.title = "آزمون کوتاه پایه — ۱۰ سؤال"
-        db.commit()
-        return {"mock_id": mock.id, "title": mock.title, "duration_minutes": duration,
-                "total_questions": len(questions), "subjects": plan, "source": "question_bank"}
-    if config.mode != 'general':
-        plan = [{**row, 'branches': {}, 'full_mock': False} for row in plan]
-    weak = []
+def _ranked_mock_stock(db, user_id, major, grade):
+    from app.rag import pool_core
+    from app.routers.arena import _pair_plan
+
+    key = _MAJOR_ALIASES.get(major.strip(), major.strip())
+    if key not in pool_core.STARTER_MAJORS or grade not in pool_core.STARTER_GRADES:
+        return None, []
+    label = pool_core.CANONICAL_MAJOR[key]
+    pair = _pair_plan(label, label, grade=grade, db=db, user_id=user_id)
+    questions = question_bank.assemble(db, user_id, pair["plan"], [label], "konkur",
+        grade, pair.get("topics"), shared_only=True) if pair["ok"] else []
+    return pair, questions
+
+
+def _bank_mock_stock(db, user_id, config, plan, major, grade, weak=None):
+    practice = config.mode != "general"
+    if practice:
+        plan = [{**row, "branches": {}, "full_mock": False} for row in plan]
     if config.mode == "practice_weak_areas":
-        weak = mock_generation.weak_areas(current_user.id)
+        if weak is None:
+            weak = mock_generation.weak_areas(user_id)
         plan = mock_generation.bias_plan(plan, weak,
             extra_cap=0 if config.total_questions or config.questions_per_subject else 5)
     labels = _MAJOR_LABELS.get(_major_key(major)) or [major]
-    topics = config.topics or [w.get("topic", "") for w in weak]
-    practice = config.mode != "general"
-    questions = question_bank.assemble(db, current_user.id, plan, labels, config.difficulty,
+    topics = config.topics or [w.get("topic", "") for w in weak or []]
+    questions = question_bank.assemble(db, user_id, plan, labels, config.difficulty,
         grade, topics, prefer_used=practice, used_only=practice, allow_partial=practice)
     if practice and not questions:
-        questions = question_bank.assemble(db, current_user.id, plan, labels, config.difficulty,
+        questions = question_bank.assemble(db, user_id, plan, labels, config.difficulty,
             grade, topics, prefer_used=True, allow_partial=True)
+    return plan, questions
+
+
+@router.post("/availability")
+def mock_availability(request: MockAvailabilityRequest,
+                      current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Report playable categories without claiming a booklet or spending quota."""
+    from app.rag.pool_core import STARTER_GRADES, STARTER_MAJORS, CANONICAL_MAJOR
+
+    student = _mock_student(db, current_user.id, request.student.model_dump())
+    majors = [student["major"]] if student.get("major") else [CANONICAL_MAJOR[key] for key in STARTER_MAJORS]
+    grades = [student["grade"]] if student.get("grade") else STARTER_GRADES
+    weak = mock_generation.weak_areas(current_user.id)
+    scopes = []
+    for major in majors:
+        for grade in grades:
+            pair, ranked = _ranked_mock_stock(db, current_user.id, major, grade)
+            modes = {"ready_10": {"konkur": len(ranked)}}
+            for mode in ("general", "practice", "practice_weak_areas"):
+                modes[mode] = {}
+                for difficulty in ("easy", "konkur", "hard", "extreme"):
+                    config = MockConfig(mode=mode, difficulty=difficulty, stock_only=True,
+                        student={"major": major, "grade": grade},
+                        total_questions=request.practice_count if mode != "general" else None,
+                        topics=request.topics if mode != "general" else [])
+                    poolable, plan, _ = _resolve_plan(config)
+                    plan, questions = _bank_mock_stock(db, current_user.id, config, plan,
+                                                       major, grade, weak if mode == "practice_weak_areas" else [])
+                    count = len(questions)
+                    if not count and poolable and next(_matching_pool_mock_rows(
+                            db, current_user.id, _major_key(major), difficulty, grade, plan), None):
+                        count = sum(row["questions"] for row in plan)
+                    modes[mode][difficulty] = count
+            scopes.append({"major": major, "grade": grade, "modes": modes,
+                "weekly": bool(ranked and pair.get("weekly")),
+                "date": pair.get("date") if ranked else None,
+                "fallback": bool(ranked and pair.get("fallback"))})
+    db.rollback()  # Do not persist any lazy indexing from a read-only stock check.
+    return {"student": student, "scopes": scopes}
+
+
+def _generate_reserved_mock(config: MockConfig, current_user: User, db: Session):
+    student = _mock_student(db, current_user.id, config.student)
+    config = config.model_copy(update={"student": student})
+    poolable, plan, major = _resolve_plan(config)
+    grade = student.get("grade") or ""
+    if config.mode == "ready_10":
+        pair, questions = _ranked_mock_stock(db, current_user.id, major, grade)
+        if pair is None:
+            raise HTTPException(409, detail={"code": "starter_scope", "message":
+                "برای آزمون کوتاه، رشتهٔ ریاضی یا تجربی و پایهٔ دهم تا دوازدهم را انتخاب کن."})
+        if not questions:
+            raise HTTPException(409, detail={"code": "pool_empty", "message":
+                "دفترچهٔ استاندارد رنکینگ برای این رشته و پایه فعلاً آماده نیست."})
+        plan = pair["plan"]
+        key = _major_key(major)
+        from app.rag.knowledge_base import duel_duration_minutes
+        duration = duel_duration_minutes(plan)
+        mock = question_bank.create_reused_mock(db, current_user.id, questions,
+            _CANONICAL_MAJOR[key], grade, "konkur", duration)
+        mock.title = "آزمون استاندارد رنکینگ — ۱۰ سؤال"
+        db.commit()
+        return {"mock_id": mock.id, "title": mock.title, "duration_minutes": duration,
+                "total_questions": len(questions), "subjects": plan, "source": "question_bank"}
+
+    practice = config.mode != "general"
+    plan, questions = _bank_mock_stock(db, current_user.id, config, plan, major, grade)
     if questions:
         actual_plan = [{**s, "questions": sum(q["subject"] == s["name"] for q in questions)} for s in plan]
         actual_plan = [s for s in actual_plan if s["questions"]]

@@ -22,10 +22,13 @@ test('Mock page and its shared math/report modules load with an empty profile', 
   const {default:Mock} = await vite.ssrLoadModule('/src/pages/Mock.tsx');
   const html = renderToStaticMarkup(React.createElement(Mock, {nav(){},userData:null}));
   assert.match(html, /تمرین از سوال‌های قبلی/);
-  assert.match(html, /ساخت دفترچه آزمون/);
+  assert.match(html, /شروع دفترچهٔ آماده/);
+  assert.match(html, /در حال بررسی دفترچه‌های آماده/);
   assert.match(html, /آزمون کامل کنکور/);
-  assert.match(html, /سخت‌ترین سطح/);
-  assert.doesNotMatch(html, /تعداد کل سوال‌ها|مباحث هدف/);
+  assert.match(html, /<option value="ready_10" disabled="" selected="">استاندارد رنکینگ · ۱۰ سؤال<\/option>/);
+  assert.match(html, /<option value="general" disabled="">آزمون کامل کنکور<\/option>/);
+  assert.match(html, /<button type="button" disabled=""[^>]*>شروع دفترچهٔ آماده<\/button>/);
+  assert.doesNotMatch(html, /سطح دشواری|تعداد کل سوال‌ها|مباحث هدف/);
   assert.doesNotMatch(html, /صفحه آماده نشد/);
 });
 
@@ -54,8 +57,8 @@ test('Mock config exposes a distinct ten-question option when debug mode is enab
   const html=renderToStaticMarkup(React.createElement(ConfigView, {
     onStart(){},onBack(){},error:'',debugMode:true,
   }));
-  assert.match(html,/<option value="debug_10">تمرین ۱۰ سوالی \(دیباگ\)<\/option>/);
-  assert.match(html,/<option value="general" selected="">آزمون کامل کنکور<\/option>/);
+  assert.match(html,/<option value="debug_10" disabled="">تمرین ۱۰ سوالی \(دیباگ\)<\/option>/);
+  assert.match(html,/<option value="ready_10" disabled="" selected="">استاندارد رنکینگ · ۱۰ سؤال<\/option>/);
 });
 
 test('empty mock stock shows previous Maze practices as dated selectable alternatives', async () => {

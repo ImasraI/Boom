@@ -84,6 +84,30 @@ const DIFFICULTIES = [
   { id: "extreme", label: "سخت‌ترین سطح" },
 ]
 
+const MOCK_MODES = [
+  { id: "ready_10", label: "استاندارد رنکینگ · ۱۰ سؤال" },
+  { id: "practice", label: "تمرین از سوال‌های قبلی" },
+  { id: "practice_weak_areas", label: "تمرین نقاط ضعف" },
+  { id: "general", label: "آزمون کامل کنکور" },
+]
+type MockScope = {
+  major: string
+  grade: string
+  modes: Record<string, Record<string, number>>
+  weekly: boolean
+  date: string | null
+  fallback: boolean
+}
+
+function modeStock(scope: MockScope, mode: string) {
+  return scope.modes[mode === "debug_10" ? "practice" : mode] ?? {}
+}
+
+function hasStock(scope: MockScope, mode?: string) {
+  const byMode = mode ? [modeStock(scope, mode)] : Object.values(scope.modes)
+  return byMode.some(counts => Object.values(counts).some(count => count > 0))
+}
+
 function fmt(seconds: number) {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
@@ -102,23 +126,62 @@ function BackButton({ onClick }: { onClick: () => void }) {
 
 /* ---------------- Config screen ---------------- */
 
-export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE, major, grade }: {
+export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE, major, grade, active = true }: {
   onStart: (cfg: Record<string, unknown>) => void
   onBack: () => void
   error: string
   debugMode?: boolean
   major?: string
   grade?: string
+  active?: boolean
 }) {
   const [difficulty, setDifficulty] = useState("konkur")
-  const [count, setCount] = useState(0) // Full mock by default; short counts remain for practice.
+  const [count, setCount] = useState(10)
   const [topics, setTopics] = useState("")
-  const [mode, setMode] = useState("general")
+  const [mode, setMode] = useState("ready_10")
   const [starterMajor, setStarterMajor] = useState("")
   const [starterGrade, setStarterGrade] = useState("")
   const short = mode === "ready_10"
-  const scope = { major: major || starterMajor, grade: grade || starterGrade }
   const practice = mode === "practice" || mode === "practice_weak_areas"
+
+  const topicRows = practice ? topics.split("\n").map(t => t.trim()).filter(Boolean).slice(0, 20) : []
+  const request = JSON.stringify({
+    student: { major: major ?? "", grade: grade ?? "" },
+    practice_count: mode === "debug_10" ? 10 : count || null,
+    topics: topicRows,
+  })
+  const [revision, setRevision] = useState(0)
+  type Availability = { student: { major: string; grade: string }; scopes: MockScope[] }
+  const [availability, setAvailability] = useState<{ request: string; data?: Availability; error?: string } | null>(null)
+  const current = availability?.request === request ? availability : null
+  const profileMajor = current?.data?.student.major ?? major
+  const profileGrade = current?.data?.student.grade ?? grade
+  const scope = { major: profileMajor || starterMajor, grade: profileGrade || starterGrade }
+  const choices = current?.data?.scopes ?? []
+  const selected = choices.find(row => row.major === scope.major && row.grade === scope.grade)
+  const selectedDifficulty = short ? "konkur" : difficulty
+  const available = selected ? modeStock(selected, mode)[selectedDifficulty] ?? 0 : 0
+  const relevant = choices.filter(item => (!scope.major || item.major === scope.major) &&
+                                          (!scope.grade || item.grade === scope.grade))
+  const majorChoices = Array.from(new Set(choices.map(item => item.major)))
+  const gradeChoices = Array.from(new Set(choices.map(item => item.grade)))
+
+  useEffect(() => {
+    if (!active) return
+    const controller = new AbortController()
+    setAvailability(null)
+    const timer = setTimeout(() => {
+      apiJson<Availability>("/api/mocks/availability", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: request, signal: controller.signal,
+      }).then(data => {
+        if (!controller.signal.aborted) setAvailability({ request, data })
+      }).catch(error => {
+        if (!controller.signal.aborted) setAvailability({ request,
+          error: error instanceof Error ? error.message : "موجودی آزمون‌ها دریافت نشد." })
+      })
+    }, 250)
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [request, active, revision])
 
   return (
     <div className="min-h-screen bg-[var(--surface)] pb-16">
@@ -136,45 +199,61 @@ export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE, maj
             <p>{error}</p>
           </div>
         )}
-        <div className="border-b border-[var(--border)] pb-4">
-          <label className="text-[12px] font-bold text-[var(--muted)]">نوع دفترچه
-            <select value={mode} onChange={e => { setMode(e.target.value); setCount(e.target.value === "general" ? 0 : 10) }} className="block mt-2 w-full bg-[var(--surface)] border-b border-[var(--border-strong)] p-2 text-sm text-[var(--text)]">
-              <option value="ready_10">آزمون کوتاه پایه · ۱۰ سؤال</option>
-              <option value="practice">تمرین از سوال‌های قبلی</option>
-              <option value="practice_weak_areas">تمرین نقاط ضعف</option>
-              <option value="general">آزمون کامل کنکور</option>
-              {debugMode && <option value="debug_10">تمرین ۱۰ سوالی (دیباگ)</option>}
-            </select>
-          </label>
-          <p className="text-[11px] text-[var(--muted-2)] mt-2">آزمون کامل، همه درس‌های دفترچه رشته‌ات را پوشش می‌دهد. برای ریاضی‌فیزیک: ۴۰ ریاضی، ۳۵ فیزیک و ۳۰ شیمی. تمرین، سوال‌های قبلی را در اولویت می‌گذارد.</p>
-        </div>
-        {short && (!major || !grade) && <div className="study-section p-4 flex flex-wrap gap-3">
-          {!major && <label className="text-sm">رشته
-            <select value={starterMajor} onChange={e => setStarterMajor(e.target.value)}
+        {(!profileMajor || !profileGrade) && <div className="study-section p-4 flex flex-wrap gap-3">
+          {!profileMajor && <label className="text-sm">رشته
+            <select value={starterMajor} disabled={!choices.length}
+              onChange={e => { setStarterMajor(e.target.value); if (!profileGrade) setStarterGrade("") }}
               className="block mt-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2">
               <option value="">انتخاب رشته</option>
-              {["ریاضی فیزیک", "علوم تجربی"].map(item => <option key={item}>{item}</option>)}
+              {majorChoices.map(item => {
+                const ready = choices.some(row => row.major === item && hasStock(row))
+                return <option key={item} value={item} disabled={!ready}>{item}{!ready && " · آماده نیست"}</option>
+              })}
             </select>
           </label>}
-          {!grade && <label className="text-sm">پایه
-            <select value={starterGrade} onChange={e => setStarterGrade(e.target.value)}
+          {!profileGrade && <label className="text-sm">پایه
+            <select value={starterGrade} disabled={!scope.major || !choices.length} onChange={e => setStarterGrade(e.target.value)}
               className="block mt-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2">
               <option value="">انتخاب پایه</option>
-              {["دهم", "یازدهم", "دوازدهم"].map(item => <option key={item}>{item}</option>)}
+              {gradeChoices.map(item => {
+                const ready = choices.some(row => row.grade === item && row.major === scope.major && hasStock(row))
+                return <option key={item} value={item} disabled={!ready}>{item}{scope.major && !ready && " · آماده نیست"}</option>
+              })}
             </select>
           </label>}
         </div>}
+        {profileMajor && profileGrade && <p className="text-sm text-[var(--muted)]">{profileMajor} · {profileGrade}</p>}
+        <div className="border-b border-[var(--border)] pb-4">
+          <label className="text-[12px] font-bold text-[var(--muted)]">نوع دفترچه
+            <select value={mode} onChange={e => { setMode(e.target.value); setDifficulty("konkur"); setCount(10); setTopics("") }}
+              className="block mt-2 w-full bg-[var(--surface)] border-b border-[var(--border-strong)] p-2 text-sm text-[var(--text)]">
+              {MOCK_MODES.map(item => {
+                const ready = relevant.some(row => hasStock(row, item.id))
+                return <option key={item.id} value={item.id} disabled={!ready}>{item.label}{current && !current.error && !ready && " · آماده نیست"}</option>
+              })}
+              {debugMode && <option value="debug_10" disabled={!relevant.some(row => hasStock(row, "practice"))}>تمرین ۱۰ سوالی (دیباگ)</option>}
+            </select>
+          </label>
+          {short && <p className="text-[11px] text-[var(--muted-2)] mt-2">همان ترکیب درس‌ها و زمان رنکینگ، برای تمرین انفرادی.</p>}
+          {short && selected?.weekly && selected.date && <p className="text-[11px] text-[var(--muted)] mt-2">
+            {selected.fallback ? "دفترچهٔ آماده از آزمون قبلی ماز" : "محدودهٔ آزمون ماز"} · {new Date(selected.date + "T12:00:00+03:30").toLocaleDateString("fa-IR")}
+          </p>}
+        </div>
         {!short && <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">سطح دشواری</p>
           <div className="grid grid-cols-2 gap-2">
             {DIFFICULTIES.map(d => (
-              <button key={d.id} onClick={() => setDifficulty(d.id)}
-                className={`py-2.5 rounded-xl text-[12px] font-bold border transition-colors ${
+              <button key={d.id} type="button" onClick={() => setDifficulty(d.id)}
+                aria-pressed={difficulty === d.id}
+                disabled={!relevant.some(row => (modeStock(row, mode)[d.id] ?? 0) > 0)}
+                className={`py-2.5 rounded-xl text-[12px] font-bold border transition-colors disabled:opacity-45 ${
                   difficulty === d.id
                     ? "bg-[var(--accent)] text-white border-[var(--accent)]"
                     : "border-[var(--border-strong)] text-[var(--muted)]"
                 }`}>
                 {d.label}
+                {current && !current.error && !relevant.some(row => (modeStock(row, mode)[d.id] ?? 0) > 0) &&
+                  <span className="block text-[10px]">آماده نیست</span>}
               </button>
             ))}
           </div>
@@ -199,22 +278,32 @@ export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE, maj
         {practice && <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2">مباحث هدف (اختیاری)</p>
           <textarea rows={2} value={topics} onChange={e => setTopics(e.target.value)}
-            placeholder="مثلاً: حرکت‌شناسی، اثر داپلر، استوکیومتری — هر مبحث در یک خط"
+            placeholder="مثلاً: حرکت‌شناسی، اثر داپلر، استوکیومتری — هر مبحث در یک خط (تا ۲۰ مبحث)"
             className="w-full border rounded-xl px-3 py-2.5 text-[13px] text-right bg-[var(--card)] text-[var(--text)] resize-none leading-relaxed" />
           <p className="text-[10px] text-[var(--muted-2)] mt-1.5">خالی بگذاری، سوالات از کل مباحث کنکوری می‌آید. برای تمرکز بر آزمون پیش رو، مباحث آن را وارد کن.</p>
         </div>}
 
-        <button disabled={short && (!scope.major || !scope.grade)}
+        <div aria-live="polite" className="text-sm text-[var(--muted)]">
+          {!current && <p>در حال بررسی دفترچه‌های آماده…</p>}
+          {current?.error && <div role="alert"><p>{current.error}</p>
+            <button type="button" onClick={() => setRevision(n => n + 1)} className="underline">تلاش دوباره</button>
+          </div>}
+          {current && !current.error && !selected && <p>رشته و پایه را انتخاب کن.</p>}
+          {selected && (available > 0
+            ? <p>{available.toLocaleString("fa-IR")} سؤال تأییدشده آماده است.</p>
+            : <p>برای این انتخاب دفترچه‌ای آماده نیست. گزینه‌های فعال را بررسی کن.</p>)}
+        </div>
+        <button type="button" disabled={available === 0}
           onClick={() => onStart({
             mode: mode === "debug_10" ? "practice" : mode,
-            difficulty,
+            difficulty: selectedDifficulty,
             stock_only: true,
-            student: short ? scope : undefined,
+            student: scope,
             total_questions: mode === "debug_10" ? 10 : practice ? count || undefined : undefined,
-            topics: practice && topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [],
+            topics: topicRows,
           })}
           className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50">
-          ساخت دفترچه آزمون
+          شروع دفترچهٔ آماده
         </button>
         <p className="text-[11px] text-[var(--muted-2)] text-center leading-relaxed">
           تصحیح با نمره منفی کنکور (هر ۳ غلط، ۱ درست را حذف می‌کند) — بعد از آزمون، تحلیل کامل هر سوال را می‌بینی و غلط‌ها در برنامه هفتگی‌ات لحاظ می‌شود.
@@ -655,7 +744,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
         {previousMaze !== null && <PreviousMazeOptions items={previousMaze} loading={previousLoading}
           error={previousError} onSelect={item => start({}, item)} onRetry={() => { void loadPreviousMaze() }} />}
         <ConfigView onStart={cfg => { setPreviousMaze(null); void start(cfg) }} onBack={() => nav("home")} error={error}
-          major={userData?.major} grade={userData?.grade} />
+          major={userData?.major} grade={userData?.grade} active={phase === "config"} />
       </div>
       {phase === "loading" && (
       <div className="min-h-screen bg-[var(--surface)] flex flex-col items-center justify-center gap-4">

@@ -268,6 +268,48 @@ def test_previous_valid_scope_is_available_while_next_curriculum_is_unmapped(wee
         assert result['available'] and result['fallback'] and result['scope']==previous['scope']
 
 
+def test_mock_availability_and_ready_ten_use_the_ranked_scope(weekly, sessions, monkeypatch):
+    from fastapi import HTTPException
+    from app.auth.database import StudentProfile
+    from app.rag.knowledge_base import duel_duration_minutes
+    from app.routers import mocks
+
+    _, previous = _previous_scope(weekly, monkeypatch)
+    monkeypatch.setattr(mg, "generate_booklet", lambda *a, **k: pytest.fail("Verified stock needs no provider"))
+    monkeypatch.setattr(mocks, "consume_ai_use", lambda *a, **k: pytest.fail("Availability must be free"))
+    with sessions() as db:
+        db.add(User(id=1, username="ready-ten", hashed_password="unused"))
+        profile = {field: STUDENT[field] for field in ('major', 'grade')}
+        db.add(StudentProfile(user_id=1, **profile))
+        source = _paper(db, _questions(previous["plan"]))
+        user = db.get(User, 1)
+        request = mocks.MockAvailabilityRequest(student=mocks.MockScope(grade="دهم", major="علوم تجربی"))
+        available = mocks.mock_availability(request, user, db)
+        assert available["student"] == profile
+        (scope,) = available["scopes"]
+        assert scope["modes"]["ready_10"] == {"konkur": 10}
+        assert scope["modes"]["general"]["konkur"] == 0
+        assert scope["modes"]["practice"]["hard"] == 0
+        assert scope["fallback"] and scope["date"] == previous["date"]
+        assert source.status == "pending_use" and source.student_id == 0
+        assert all(q.uses == 0 for q in db.scalars(select(BankQuestion)))
+
+        response = mocks._generate_reserved_mock(mocks.MockConfig(mode="ready_10"), user, db)
+        mock = db.get(GeneratedMock, response["mock_id"])
+        assert response["total_questions"] == 10
+        assert mock.duration_minutes == duel_duration_minutes(previous["plan"])
+        assert {q["weekly_ranked_scope"] for q in json.loads(mock.questions)} == {previous["scope"]}
+        assert source.status == "pending_use" and source.student_id == 0
+
+        row = db.scalar(select(BankQuestion))
+        row.status = "reported"
+        db.commit()
+        assert mocks.mock_availability(request, user, db)["scopes"][0]["modes"]["ready_10"] == {"konkur": 0}
+        with pytest.raises(HTTPException) as rejected:
+            mocks._generate_reserved_mock(mocks.MockConfig(mode="ready_10"), user, db)
+        assert rejected.value.status_code == 409 and rejected.value.detail["code"] == "pool_empty"
+
+
 def test_mock_archive_lists_and_opens_previous_maze_without_reassigning_the_source(weekly,sessions,monkeypatch):
     from app.rag import previous_maze
     from app.routers import mocks
