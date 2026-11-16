@@ -1353,19 +1353,26 @@ def get_pool_llm_client() -> BaseLLMClient:
     pool_key = (settings.POOL_LLM_API_KEY or "").strip()
     pool_provider = (settings.POOL_LLM_PROVIDER or "").strip().lower()
     pool_model = (settings.POOL_LLM_MODEL_NAME or "").strip() or None
-    if pool_key or pool_provider:
-        logger.info("Using the dedicated pool LLM provider/key/model for mock generation.")
-        primary = get_llm_client(provider=pool_provider or None,
-                                 api_key=pool_key or None, model=pool_model)
+    primary_label = pool_provider or (settings.LLM_PROVIDER or "").strip().lower()
+    reserved_groq = getattr(settings, "POOL_RESERVE_GROQ_CHAT_KEYS", False)
+    if primary_label == "groq" and reserved_groq:
+        keys = groq_keys(settings, pool=True)
+        clients = [get_llm_client(provider="groq", api_key=key, model=pool_model) for key in keys]
+        labels = (["groq"] + [f"groq backup {i}" for i in range(1, len(clients))]) if clients else []
+        primary = clients[0] if clients else None
     else:
-        primary = get_llm_client()
+        if pool_key or pool_provider:
+            logger.info("Using the dedicated pool LLM provider/key/model for mock generation.")
+            primary = get_llm_client(provider=pool_provider or None,
+                                     api_key=pool_key or None, model=pool_model)
+        else:
+            primary = get_llm_client()
+        clients: List[BaseLLMClient] = [primary]
+        labels: List[str] = [primary_label or "default"]
 
     wanted = [name.strip().lower()
               for name in (settings.POOL_LLM_FALLBACK_PROVIDERS or "").split(",")]
     wanted = [name for name in wanted if name]
-    primary_label = pool_provider or (settings.LLM_PROVIDER or "").strip().lower()
-    clients: List[BaseLLMClient] = [primary]
-    labels: List[str] = [primary_label or "default"]
     if primary_label == "gemini":
         primary_key = (pool_key or settings.GEMINI_API_KEY or "").strip()
         keys = pool_gemini_keys(settings)
@@ -1379,7 +1386,7 @@ def get_pool_llm_client() -> BaseLLMClient:
             client = get_llm_client(provider="gemini", api_key=key, model=pool_model)
             clients.append(client)
             labels.append(f"gemini backup {len(clients) - 1}")
-    if primary_label == "groq":
+    if primary_label == "groq" and not reserved_groq:
         keys = groq_keys(settings, pool=True)
         # Rebuild explicitly so the pool never inherits the chat backup fleet.
         if keys:
@@ -1397,6 +1404,12 @@ def get_pool_llm_client() -> BaseLLMClient:
             if not keys:
                 logger.warning('Gemini generation fallback has no explicit pool credentials; skipped.')
             continue
+        if name == "groq" and getattr(settings, "POOL_RESERVE_GROQ_CHAT_KEYS", False):
+            # This provider's default factory belongs to chat.
+            for key in groq_keys(settings, pool=True):
+                clients.append(get_llm_client(provider="groq", api_key=key))
+                labels.append("groq" if "groq" not in labels else f"groq backup {len(labels)}")
+            continue
         client = get_llm_client(provider=name)
         if isinstance(client, MockLLMClient):
             # No key for this provider: skip it rather than silently
@@ -1409,8 +1422,10 @@ def get_pool_llm_client() -> BaseLLMClient:
         client.reasoning_effort = "high"
         client.json_mode = True
         client.minimum_completion_tokens = max(8192, getattr(settings, "POOL_GENERATION_MAX_TOKENS", 0))
+    if not clients:
+        return MockLLMClient()
     if len(clients) == 1:
-        return primary
+        return clients[0]
     logger.info("Pool LLM failover chain: %s", " -> ".join(labels))
     return FallbackLLMClient(clients, labels, switch_on_rate_limit=bool(
         getattr(settings, "POOL_GROQ_API_KEYS", "") or getattr(settings, "POOL_GEMINI_API_KEYS", "")))

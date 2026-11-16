@@ -9,6 +9,7 @@ from app.rag.embeddings import get_embedding_model
 from app.rag.vector_store import get_vector_store, get_image_vector_store
 from app.rag.llm import get_llm_client, get_vision_llm_client, MockLLMClient
 from app.auth import limits as _limits
+from app.rag.provider_quota import chat_quota_status
 
 
 def _record_call_tokens(user_id: int, client) -> None:
@@ -349,6 +350,11 @@ _GROUNDED_HINTS = re.compile(
 )
 
 
+_STUDY_SOURCE_REQUEST = re.compile(
+    r"از[\s‌]+(?:کجا|کدوم|کدام).{0,40}(?:بخوان|بخون|مطالعه|شروع|یاد[\s‌]*بگیر)"
+)
+
+
 def _is_simple_message(question: str) -> bool:
     """True when the question needs no book retrieval (short chit-chat or a
     simple self-contained question). Conservative by design."""
@@ -361,7 +367,7 @@ def _is_simple_message(question: str) -> bool:
     # A greeting can prefix a real study request (for example, "سلام،
     # برنامه امروز چیه؟"). Grounded questions must take precedence over the
     # greeting shortcut so they still use the user's sources and schedule.
-    if _GROUNDED_HINTS.search(q):
+    if _GROUNDED_HINTS.search(q) or _STUDY_SOURCE_REQUEST.search(q):
         return False
     # Greetings/thanks - exact token match on any whitespace-separated word
     tokens = re.split(r"[\s،,!?.؟]+", lowered)
@@ -995,6 +1001,14 @@ def answer_question(
         return _answer_question(question, user_id, history, top_k, student, schedule)
 
 
+def _chat_result(answer_text, sources, confidence, client):
+    _finish_stage(sources, confidence, answer_text)
+    if not (answer_text or "").strip():
+        return {"answer": "", "sources": [],
+                "provider_error_code": getattr(client, "last_error_code", "")}
+    return {"answer": answer_text, "sources": sources, "answer_confidence": confidence}
+
+
 def _answer_question(
     question: str,
     user_id: int,
@@ -1052,6 +1066,11 @@ def _answer_question(
         except Exception:
             pass
 
+    health = chat_quota_status(settings)
+    if health["blocked"]:
+        note(provider_error_code=health["code"], empty_answer=True)
+        return {"answer": "", "sources": [], "provider_error_code": health["code"]}
+
     # Simple messages (greetings, short self-contained questions) skip the
     # whole retrieval machinery: no query-rewrite LLM call, no embeddings,
     # no book/image search. They burn quota without helping the answer.
@@ -1067,13 +1086,12 @@ def _answer_question(
             }
             note(gate="پیام ساده · بدون بازیابی", sources=0)
         messages = _build_messages(question, [], history, student, schedule)
+        client = get_llm_client()
         answer_text = _generate_traced(
             messages, user_id=user_id, stage_name="llm_generate",
-            stage_label="فراخوانی مدل زبانی (بدون منبع)", client=get_llm_client(),
+            stage_label="فراخوانی مدل زبانی (بدون منبع)", client=client,
         )
-        confidence = _answer_confidence([])
-        _finish_stage([], confidence, answer_text)
-        return {"answer": answer_text, "sources": [], "answer_confidence": confidence}
+        return _chat_result(answer_text, [], _answer_confidence([]), client)
 
     embedding_model = get_embedding_model()
 
@@ -1135,9 +1153,7 @@ def _answer_question(
             for c in retrieved_chunks
         ]
         confidence = _answer_confidence(retrieved_chunks, image_hits)
-        _finish_stage(sources, confidence, answer_text)
-        return {"answer": answer_text, "sources": sources,
-            "answer_confidence": confidence}
+        return _chat_result(answer_text, sources, confidence, vision_llm)
 
 
     llm_client = get_llm_client()
@@ -1165,12 +1181,7 @@ def _answer_question(
     ]
 
     confidence = _answer_confidence(retrieved_chunks, image_hits)
-    _finish_stage(sources, confidence, answer_text)
-    return {
-        "answer": answer_text,
-        "sources": sources,
-        "answer_confidence": confidence,
-    }
+    return _chat_result(answer_text, sources, confidence, llm_client)
 
 
 class RetrievalRunError(RuntimeError):

@@ -56,6 +56,8 @@ def test_short_selfcontained_questions_are_simple(q):
     "فیزیک ۱ خیلی سبز صفحه ۱۵۴ تست‌های ۴۱ تا ۵۶ رو بگو",
     "برای آزمون ماز آماده‌م کن",
     "امروز چی کار کنم؟",
+    "زاویه را از کجا بخوانم",
+    "زاویه رو از کجا بخونم؟",
 ])
 def test_plan_book_questions_are_not_simple(q):
     assert pipeline._is_simple_message(q) is False
@@ -176,3 +178,28 @@ def test_streaming_simple_message_preserves_schedule_context(monkeypatch):
 
 
 import json  # noqa: E402  (used by the streaming test above)
+
+
+
+def test_chat_cooldown_short_circuits_source_retrieval(monkeypatch):
+    _patch_offline(monkeypatch)
+    monkeypatch.setattr(pipeline, "chat_quota_status",
+                        lambda settings: {"blocked": True, "code": "provider_daily_quota"})
+    monkeypatch.setattr(pipeline, "get_embedding_model", lambda: pytest.fail("No embedding needed"))
+    monkeypatch.setattr(pipeline, "get_llm_client", lambda: pytest.fail("No provider call needed"))
+    result = pipeline.answer_question("زاویه را از کجا بخوانم", user_id=1)
+    assert result == {"answer": "", "sources": [], "provider_error_code": "provider_daily_quota"}
+
+
+def test_chat_api_reports_quota_without_answer_confidence(monkeypatch):
+    from app.routers import boom_ai
+    from fastapi import HTTPException
+    monkeypatch.setattr(boom_ai, "check_ai_quota", lambda *args: None)
+    monkeypatch.setattr(boom_ai, "check_token_budget", lambda *args: None)
+    monkeypatch.setattr(boom_ai, "record_ai_use", lambda *args: pytest.fail("Failed chat should not count"))
+    monkeypatch.setattr(boom_ai, "answer_question", lambda **kw: {
+        "answer": "", "sources": [], "provider_error_code": "provider_daily_quota"})
+    with pytest.raises(HTTPException) as failed:
+        boom_ai.boom_chat(boom_ai.BoomChatRequest(question="زاویه را از کجا بخوانم"),
+                          SimpleNamespace(id=1), None)
+    assert failed.value.status_code == 503 and "ظرفیت" in failed.value.detail

@@ -288,3 +288,24 @@ def test_unconfigured_verifier_keeps_legacy_factory(isolated_settings):
     client=llm.get_pool_verifier_client()
     assert isinstance(client,llm.GroqLLMClient)
     client.client.close()
+
+
+
+def test_explicit_chat_keys_are_reserved_from_both_pool_stages(isolated_settings):
+    s = isolated_settings
+    s.LLM_GROQ_API_KEYS = "chat-backup"
+    s.POOL_LLM_API_KEY = "chat-secret"
+    s.POOL_GROQ_API_KEYS = "chat-backup,pool-only"
+    s.POOL_VERIFY_GROQ_API_KEYS = "chat-backup,verify-only"
+    s.POOL_VERIFY_GROQ_USE_POOL_KEYS = True
+    s.POOL_VERIFY_FALLBACK_PROVIDERS = "groq"
+    s.POOL_RESERVE_GROQ_CHAT_KEYS = True
+    assert quota.groq_keys(s) == ["chat-secret", "chat-backup"]
+    assert quota.groq_keys(s, pool=True) == ["pool-only"]
+    assert quota.verifier_groq_keys(s) == ["verify-only", "pool-only"]
+    draft = llm.get_pool_llm_client()
+    assert draft.client.headers["Authorization"] == "Bearer pool-only"
+    draft.client.close()
+    s.POOL_GROQ_API_KEYS = "chat-backup"
+    assert quota.pool_generation_status(s)["code"] == "provider_not_configured"
+    assert isinstance(llm.get_pool_llm_client(), llm.MockLLMClient)

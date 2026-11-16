@@ -55,7 +55,8 @@ class Settings(BaseSettings):
     # Ordered Gemini backup credentials for mock generation only. Comma-separated;
     # keys from one Google project share its quota. Never expose this in the UI.
     POOL_GEMINI_API_KEYS: str = ""
-    POOL_GROQ_API_KEYS: str = ""  # Explicit drafting backups, never implicitly chat keys.
+    POOL_GROQ_API_KEYS: str = ""  # Explicit drafting backups.
+    POOL_RESERVE_GROQ_CHAT_KEYS: bool = False
     # Independent answer solver; empty provider keeps legacy same-provider checks.
     POOL_VERIFY_LLM_PROVIDER: str = ""
     POOL_VERIFY_LLM_API_KEY: str = ""

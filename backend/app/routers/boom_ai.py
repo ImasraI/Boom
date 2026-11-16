@@ -614,9 +614,12 @@ def boom_chat(
         schedule=request.schedule,
     )
     if not result.get("answer"):
-        result["answer"] = ("پاسخی از مدل زبانی دریافت نشد؛ احتمالاً مدل در این لحظه پاسخ مناسبی نداشت. "
-                            "لطفاً چند لحظه بعد دوباره تلاش کنید.")
-        return result
+        code = result.get("provider_error_code")
+        if code in {"provider_daily_quota", "provider_rate_limit"}:
+            message = "ظرفیت سرویس گفت‌وگو موقتاً پر شده است. لطفاً پس از مدتی دوباره تلاش کنید."
+        else:
+            message = "سرویس گفت‌وگو نتوانست پاسخ بدهد. لطفاً بعداً دوباره تلاش کنید."
+        raise HTTPException(503, detail=message)
 
     # If the LLM decided to change the weekly plan, it embeds an
     # ###UPDATE_PLAN### JSON section.  Split it off the visible answer and

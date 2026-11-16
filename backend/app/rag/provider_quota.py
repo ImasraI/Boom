@@ -171,12 +171,21 @@ def pool_gemini_generation_keys(settings) -> list[str]:
     return list(dict.fromkeys(k.strip() for k in (getattr(settings, 'POOL_GEMINI_API_KEYS', '') or '').split(',') if k.strip()))
 
 
+def _reserve_groq_chat_keys(settings, keys: list[str]) -> list[str]:
+    if (getattr(settings, "POOL_RESERVE_GROQ_CHAT_KEYS", False)
+            and (getattr(settings, "LLM_PROVIDER", "") or "").strip().lower() == "groq"):
+        reserved = set(groq_keys(settings))
+        return [key for key in keys if key not in reserved]
+    return keys
+
+
 def groq_keys(settings, *, pool: bool = False) -> list[str]:
     primary = ((getattr(settings, "POOL_LLM_API_KEY", "") if pool else "")
                or settings.LLM_API_KEY or "")
     extras = getattr(settings, "POOL_GROQ_API_KEYS" if pool else "LLM_GROQ_API_KEYS", "")
-    return list(dict.fromkeys(key.strip() for key in [primary, *(extras or "").split(",")]
-                             if key.strip()))
+    keys = list(dict.fromkeys(key.strip() for key in [primary, *(extras or "").split(",")]
+                              if key.strip()))
+    return _reserve_groq_chat_keys(settings, keys) if pool else keys
 
 
 def verifier_groq_keys(settings) -> list[str]:
@@ -184,7 +193,8 @@ def verifier_groq_keys(settings) -> list[str]:
         getattr(settings, "POOL_VERIFY_LLM_PROVIDER", "").strip().lower() == "groq") else ""
     extras = (getattr(settings, "POOL_VERIFY_GROQ_API_KEYS", "") or "").split(",")
     shared = groq_keys(settings, pool=True) if getattr(settings, "POOL_VERIFY_GROQ_USE_POOL_KEYS", False) else []
-    return list(dict.fromkeys(k.strip() for k in [primary, *extras, *shared] if k.strip()))
+    keys = list(dict.fromkeys(k.strip() for k in [primary, *extras, *shared] if k.strip()))
+    return _reserve_groq_chat_keys(settings, keys)
 
 
 def verifier_providers(settings) -> list[str]:
@@ -231,7 +241,10 @@ def _has_pool_fallback(settings) -> bool:
     names = {name.strip().lower() for name in
              (settings.POOL_LLM_FALLBACK_PROVIDERS or "").split(",")}
     for name in names - {"gemini"}:
-        if name in {"groq", "openai", "omniroute"} and (settings.LLM_API_KEY or "").strip():
+        if name == "groq" and getattr(settings, "POOL_RESERVE_GROQ_CHAT_KEYS", False):
+            if groq_keys(settings, pool=True):
+                return True
+        elif name in {"groq", "openai", "omniroute"} and (settings.LLM_API_KEY or "").strip():
             return True
         if name == "cerebras" and (settings.CEREBRAS_API_KEY or "").strip():
             return True
@@ -255,8 +268,16 @@ def pool_quota_status(settings=None) -> dict:
     return generation if generation.get('fallback') else {'blocked':False}
 
 
-def _stage_quota_status(settings, *, verification: bool = False, provider_override=None) -> dict:
-    if verification:
+def chat_quota_status(settings) -> dict:
+    if (getattr(settings, "LLM_PROVIDER", "") or "").strip().lower() != "groq":
+        return {"blocked": False}
+    return _stage_quota_status(settings, chat=True)
+
+
+def _stage_quota_status(settings, *, verification: bool = False, provider_override=None, chat=False) -> dict:
+    if chat:
+        provider, override_model = "groq", settings.LLM_MODEL_NAME
+    elif verification:
         provider = provider_override or settings.POOL_VERIFY_LLM_PROVIDER.strip().lower()
         override_model = getattr(settings, "POOL_VERIFY_LLM_MODEL_NAME", "")
         if provider == "groq" and settings.POOL_VERIFY_LLM_PROVIDER.strip().lower() != "groq":
@@ -272,13 +293,13 @@ def _stage_quota_status(settings, *, verification: bool = False, provider_overri
              (settings.GEMINI_MODEL_NAME if provider == "gemini" else settings.LLM_MODEL_NAME).strip())
     base = settings.GEMINI_BASE_URL if provider == "gemini" else "https://api.groq.com/openai/v1"
     keys = ((pool_gemini_keys(settings, verification=True) if verification else pool_gemini_generation_keys(settings)) if provider == "gemini"
-            else verifier_groq_keys(settings) if verification else groq_keys(settings, pool=True))
+            else verifier_groq_keys(settings) if verification else groq_keys(settings, pool=not chat))
     identities = [quota_identity(base, model, key) for key in keys]
     entries = [(blocked_quota(identity), blocked_access(identity)) for identity in identities]
     cooldowns = [rate_limited(identity) for identity in identities]
     # Explicitly configured alternatives may still answer. Never enable the
     # chat provider implicitly: stocking shelves must not drain chat's quota.
-    fallback = not verification and not provider_override and _has_pool_fallback(settings)
+    fallback = not chat and not verification and not provider_override and _has_pool_fallback(settings)
     if entries and not fallback and all(daily or access or seconds > 0
             for (daily, access), seconds in zip(entries, cooldowns)):
         waits = [seconds for (daily, access), seconds in zip(entries, cooldowns)
@@ -292,6 +313,10 @@ def _stage_quota_status(settings, *, verification: bool = False, provider_overri
     if not entries and verification:
         return {"blocked":True, "code":"provider_not_configured", "stage":"verification",
                 "message":"کلید سرویس بررسی پاسخ آزمون تنظیم نشده است؛ مدیر سایت تنظیمات را بررسی کند."}
+    if (not entries and not chat and provider == "groq"
+            and getattr(settings, "POOL_RESERVE_GROQ_CHAT_KEYS", False) and not fallback):
+        return {"blocked": True, "code": "provider_not_configured",
+                "message": "کلید جداگانه‌ای برای ساخت آزمون تنظیم نشده است."}
     if not entries or any(not daily and not access for daily, access in entries) or fallback:
         return {"blocked": False}
     retryable = [daily[0] for daily, access in entries if daily and not access]
