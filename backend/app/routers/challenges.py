@@ -187,6 +187,7 @@ def lookup_invite(
         "invite_code": invite.invite_code,
         "status": invite.status,
         "accepted_by_me": accepted_by_me,
+        "created_by_me": invite.sender_id == current_user.id,
         "sender_name": public_name(sender, profile) if sender else "دانش‌آموز بوم",
         "sender_score": sender_attempt.score if sender_attempt else None,
         "mock_title": mock.title if mock else "",
@@ -235,6 +236,35 @@ def accept_invite(
         "questions": questions,
         "invite_code": invite.invite_code,
     }
+
+
+@router.get("/{invite_code}/result")
+def challenge_result(
+    invite_code: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Both participants may read the completed comparison."""
+    invite = _fresh_invite(db, invite_code)
+    if current_user.id not in (invite.sender_id, invite.recipient_id):
+        raise HTTPException(status_code=403, detail="این چالش مال تو نیست")
+    if invite.status != "completed":
+        raise HTTPException(status_code=409, detail="دوستت هنوز پاسخ‌هایش را ثبت نکرده است")
+    other_id = invite.recipient_id if current_user.id == invite.sender_id else invite.sender_id
+    scores = {}
+    for attempt in db.scalars(select(MockAttempt).where(
+        MockAttempt.mock_id == invite.mock_id,
+        MockAttempt.student_id.in_((current_user.id, other_id)),
+    ).order_by(MockAttempt.id)):
+        scores.setdefault(attempt.student_id, attempt.score)
+    if current_user.id not in scores or other_id not in scores:
+        raise HTTPException(status_code=409, detail="هر دو نتیجه هنوز در دسترس نیستند")
+    other = db.get(User, other_id)
+    profile = db.scalar(select(StudentProfile).where(StudentProfile.user_id == other_id))
+    mine, theirs = scores[current_user.id], scores[other_id]
+    return {"your_score": mine, "opponent_score": theirs,
+            "opponent_name": public_name(other, profile) if other else "دانش‌آموز بوم",
+            "won": mine > theirs, "tied": mine == theirs}
 
 
 @router.post("/{invite_code}/complete")

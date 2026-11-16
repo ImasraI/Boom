@@ -193,6 +193,14 @@ def test_complete_requires_recipient_attempt_and_compares_scores(db):
     assert res["your_score"] == 85.0
     assert res["won"] is True and res["tied"] is False
     assert db.get(ChallengeInvite, inv["invite_id"]).status == "completed"
+    sender_view = ch.challenge_result(inv["invite_code"], _Ctx(sender), db)
+    recipient_view = ch.challenge_result(inv["invite_code"], _Ctx(recipient), db)
+    assert (sender_view["your_score"], sender_view["opponent_score"], sender_view["won"]) == (60.0, 85.0, False)
+    assert (recipient_view["your_score"], recipient_view["opponent_score"], recipient_view["won"]) == (85.0, 60.0, True)
+    stranger = _mk_user(db, "09120000099")
+    with pytest.raises(ch.HTTPException) as locked:
+        ch.challenge_result(inv["invite_code"], _Ctx(stranger), db)
+    assert locked.value.status_code == 403
 
     # Idempotent: calling complete again returns the same comparison.
     res2 = ch.complete_invite(inv["invite_code"], _Ctx(recipient), db=db)

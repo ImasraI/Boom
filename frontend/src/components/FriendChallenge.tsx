@@ -3,13 +3,13 @@ import { apiJson } from "../api"
 import type { MockQuestion } from "../pages/Mock"
 
 type Preview = {
-  status: string; accepted_by_me: boolean; sender_name: string; mock_title: string;
+  status: string; accepted_by_me: boolean; created_by_me: boolean; sender_name: string; mock_title: string;
   question_count: number; duration_minutes: number;
 }
 export type ChallengeBooklet = {
   mock_id: number; title: string; duration_minutes: number; questions: MockQuestion[]; invite_code: string;
 }
-type Comparison = { sender_name: string; sender_score: number; your_score: number; won: boolean; tied: boolean }
+type Comparison = { opponent_name: string; opponent_score: number; your_score: number; won: boolean; tied: boolean }
 
 const action = "px-4 py-2 rounded-xl border border-[var(--border-strong)] font-bold text-sm disabled:opacity-50"
 const route = (code: string) => "/api/challenges/" + encodeURIComponent(code)
@@ -31,8 +31,8 @@ export function FriendChallengeEntry({ onOpen }: { onOpen: (booklet: ChallengeBo
     try {
       const data = await apiJson<Preview>(route(code))
       setPreview(data)
-      if (data.status === "completed" && data.accepted_by_me) {
-        setFinished(await apiJson<Comparison>(route(code) + "/complete", { method: "POST" }))
+      if (data.status === "completed" && (data.accepted_by_me || data.created_by_me)) {
+        setFinished(await apiJson<Comparison>(route(code) + "/result"))
       }
     } catch (e) { setError(errorMessage(e)) }
     finally { setBusy(false) }
@@ -65,9 +65,11 @@ export function FriendChallengeEntry({ onOpen }: { onOpen: (booklet: ChallengeBo
         <p className="font-bold text-sm">{preview.mock_title} · {preview.question_count} سؤال · {preview.duration_minutes} دقیقه</p>
         <p className="text-sm text-[var(--muted)]">دعوت از {preview.sender_name}</p>
         {finished && <ScoreComparison result={finished} />}
-        {preview.status === "pending" || (preview.status === "accepted" && preview.accepted_by_me)
+        {!preview.created_by_me && (preview.status === "pending" || (preview.status === "accepted" && preview.accepted_by_me))
           ? <button type="button" className={action} onClick={accept} disabled={busy || preview.question_count === 0}>باز کردن دفترچهٔ چالش</button>
-          : !preview.accepted_by_me && <p className="text-sm">این کد قبلاً استفاده شده است.</p>}
+          : preview.created_by_me && preview.status !== "completed"
+            ? <p className="text-sm">این کد برای چالش توست. هنوز نتیجهٔ دوستت ثبت نشده است.</p>
+            : !preview.created_by_me && !preview.accepted_by_me && <p className="text-sm">این کد قبلاً استفاده شده است.</p>}
       </div>}
     </details>
   </section>
@@ -75,7 +77,7 @@ export function FriendChallengeEntry({ onOpen }: { onOpen: (booklet: ChallengeBo
 
 function ScoreComparison({ result }: { result: Comparison }) {
   return <div className="space-y-1 text-sm">
-    <p>امتیاز تو {result.your_score.toLocaleString("fa-IR")}٪ · امتیاز {result.sender_name} {result.sender_score.toLocaleString("fa-IR")}٪</p>
+    <p>امتیاز تو {result.your_score.toLocaleString("fa-IR")}٪ · امتیاز {result.opponent_name} {result.opponent_score.toLocaleString("fa-IR")}٪</p>
     <p className="font-bold">{result.tied ? "نتیجه مساوی شد." : result.won ? "امتیاز بالاتر برای توست." : "امتیاز بالاتر برای دوستت است."}</p>
   </div>
 }
@@ -92,7 +94,7 @@ export function FriendChallengeResult({ mockId, code }: { mockId: number; code: 
     if (!code) return
     const controller = new AbortController()
     setBusy(true); setError("")
-    apiJson<Comparison>(route(code) + "/complete", { method: "POST", signal: controller.signal })
+    apiJson<Comparison>(route(code) + "/result", { signal: controller.signal })
       .then(value => { if (!controller.signal.aborted) setResult(value) })
       .catch(e => { if (!controller.signal.aborted) setError(errorMessage(e)) })
       .finally(() => { if (!controller.signal.aborted) setBusy(false) })
@@ -111,6 +113,13 @@ export function FriendChallengeResult({ mockId, code }: { mockId: number; code: 
     finally { setBusy(false) }
   }
 
+  async function checkResult() {
+    setBusy(true); setError("")
+    try { setResult(await apiJson<Comparison>(route(invite) + "/result")) }
+    catch (e) { setError(errorMessage(e)) }
+    finally { setBusy(false) }
+  }
+
   async function copy() {
     try { await navigator.clipboard.writeText(invite); setCopied(true) }
     catch { setError("کپی خودکار در دسترس نیست؛ کد را انتخاب و کپی کن.") }
@@ -125,6 +134,7 @@ export function FriendChallengeResult({ mockId, code }: { mockId: number; code: 
       <div className="flex flex-wrap items-center gap-3">
         <output dir="ltr" className="select-all font-mono font-bold">{invite}</output>
         <button type="button" className={action} onClick={copy}>{copied ? "کپی شد" : "کپی کد"}</button>
+        <button type="button" className={action} onClick={checkResult} disabled={busy}>بررسی نتیجهٔ دوست</button>
       </div>
     </>}
     {busy && <p className="text-sm" role="status">در حال دریافت…</p>}
