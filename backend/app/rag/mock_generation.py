@@ -658,16 +658,8 @@ def _parse_batch_answers(raw: str, count: int) -> Dict[int, Optional[int]]:
     return out
 
 
-def _verify_batch(client, batch: List[dict],
-                  timeout: float) -> Optional[Dict[int, Optional[int]]]:
-    """One independent solve of a batch of questions.
-
-    The solver sees ONLY each question's text and options - never a stored
-    answer or explanation. Returns {1-based position: index|None}, or None
-    when the provider refused the call outright (no reply at all), which is a
-    different failure from "the solver could not solve it": this codebase must
-    not spend one call per question discovering that a per-day quota is gone.
-    """
+def _blind_solve(client, batch: List[dict], timeout: float) -> Optional[Dict[int, Optional[int]]]:
+    """Solve visible questions without the author's key or explanation."""
     prompt = _verify_batch_prompt(batch)
     try:
         with pool_usage.stage('verification'):
@@ -701,9 +693,28 @@ def _verify_batch(client, batch: List[dict],
             answers[str(i)] is not None and (type(answers[str(i)]) is not int
             or answers[str(i)] not in range(4))) for i in range(1, len(batch) + 1)):
         return None  # Missing/malformed decisions are infrastructure failures.
+    return {i: answers[str(i)] for i in range(1, len(batch) + 1)}
+
+
+def _verify_batch(client, batch: List[dict], timeout: float, *,
+                  saved_answers: Optional[Dict[int, int]] = None) -> Optional[Dict[int, Optional[int]]]:
+    """Solve new rows and run the quality audit, including any resumed rows.
+
+    Only the durable queue supplies saved answers after checking their question
+    binding. They save a repeated provider call but cannot pass the audit gate.
+    """
+    answers = dict(saved_answers or {})
+    missing = [(i, question) for i, question in enumerate(batch, 1) if i not in answers]
+    if missing:
+        solved = _blind_solve(client, [question for _, question in missing], timeout)
+        if solved is None:
+            return None
+        answers.update((index, solved[pos]) for pos, (index, _) in enumerate(missing, 1))
+    if saved_answers:
+        trace.note(reused_blind_solves=len(saved_answers))
     verdicts = question_quality.Verdicts()
     for i, question in enumerate(batch, 1):
-        answer = answers[str(i)]
+        answer = answers[i]
         problem = ("missing_visible_reference" if _missing_visible_reference(question)
                    else question_quality.deterministic_problem(question))
         review = {"valid": False, "reason": problem} if problem else question_quality.audit(client, question, timeout)

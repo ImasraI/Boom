@@ -1,4 +1,5 @@
 """Durable draft booklets with independent drafting and blind-solving workers."""
+import hashlib
 import json
 import os
 import socket
@@ -167,7 +168,9 @@ def append_batch(job_id, batch):
             if identity in seen:
                 continue
             seen.add(identity)
-            clean = {k: v for k, v in q.items() if k not in ("bank_id", "id", "_queue_status")}
+            clean = {k: v for k, v in q.items()
+                     if k not in ("bank_id", "id", "_queue_status", "validation")
+                     and not k.startswith("_review")}
             scoped_rows = [r for r in json.loads(job.plan) if r.get('weekly_ranked_scope')]
             scoped = next((r for r in scoped_rows if r['name'] == q.get('subject') and
                 q.get('curriculum_id') in r['curriculum_ids'] and
@@ -258,6 +261,26 @@ DECISION_COLUMNS = [
 ]
 
 
+def _solve_binding(question):
+    # Bind a saved solver option to the same stem, order, figure, source,
+    # and key. The key stays out of the actual blind solve request.
+    binding = json.dumps({"prompt": mock_generation._verify_batch_prompt([question]),
+                          "key": question["answer"], "version": 1},
+                         ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(binding.encode("utf-8")).hexdigest()
+
+
+def _saved_solves(batch):
+    saved = {}
+    for index, question in enumerate(batch, 1):
+        record = question.get("_review_solve")
+        if (isinstance(record, dict) and type(record.get("option")) is int
+                and record["option"] == question["answer"]
+                and record.get("binding") == _solve_binding(question)):
+            saved[index] = record["option"]
+    return saved
+
+
 def verify_step(job_id, client=None):
     """Commit each batch's decisions and bank inserts together; refusals keep drafts.
 
@@ -294,7 +317,9 @@ def verify_step(job_id, client=None):
         meta={"queue_job": job_id, "batch": len(positions),
               "source": "صف پیش‌نویس (verify_step)"},
     ):
-        verdicts = mock_generation._verify_batch(client, [rows[i] for i in positions], 60)
+        batch = [rows[i] for i in positions]
+        saved = _saved_solves(batch)
+        verdicts = mock_generation._verify_batch(client, batch, 60, saved_answers=saved)
         with SessionLocal() as db:
             job = db.get(PoolDraftJob, job_id)
             if not job or job.status != "verifying" or job.lease_owner != _OWNER:
@@ -340,7 +365,13 @@ def verify_step(job_id, client=None):
                     q = rows[position]
                     if index in getattr(verdicts, "details", {}):
                         q["validation"] = verdicts.details[index]
+                    q.pop("_review_solve", None)
                     if index in getattr(verdicts, "deferred", set()):
+                        decision = getattr(verdicts, "details", {}).get(index, {})
+                        option = decision.get("solver_answer")
+                        if (decision.get("reason") in {"audit_provider_error", "audit_protocol_error"}
+                                and type(option) is int and option == q["answer"]):
+                            q["_review_solve"] = {"binding": _solve_binding(q), "option": option}
                         q["_review_retries"] = q.get("_review_retries", 0) + 1
                         q["_review_after"] = (_now() + timedelta(seconds=min(
                             21600, 60 * 2 ** min(q["_review_retries"], 8)))).isoformat()
@@ -620,6 +651,7 @@ def run():
             except HTTPException:
                 continue  # Schedule changed between reservation and drafting.
             if job_id is None:
+                _worker_state("drafting", "waiting_for_queue", health)
                 service._wake.wait(5); service._wake.clear(); continue
             service._update(draft_cursor=cursor + offset + 1)
             _worker_state("drafting", "generating", health)

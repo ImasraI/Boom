@@ -497,3 +497,54 @@ def test_balanced_starter_draft_preserves_track_and_defers_duplicate_work(setup)
         prompt = queue.mock_generation.build_booklet_prompt([plan[0]], [], "konkur", "source", grade="دهم")
         assert "STARTER_DESIGN_V1" in prompt
     assert queue.create_job(target, "tajrobi", "konkur") is None
+
+
+
+def test_audit_retry_resumes_matching_blind_solve_without_admitting_pending_item(setup):
+    _, tag = setup
+    job_id = draft(tag)
+
+    class InterruptedAudit(Solver):
+        def generate(self, messages, **kwargs):
+            if messages[0]["content"].startswith("QUALITY_AUDIT_V1"):
+                self.prompts.append(messages[0]["content"])
+                return ""
+            return super().generate(messages, **kwargs)
+
+    first = InterruptedAudit()
+    assert queue.claim_job() == job_id
+    queue.verify_step(job_id, first)
+    with SessionLocal() as db:
+        job = db.get(PoolDraftJob, job_id)
+        rows = json.loads(job.questions)
+        assert job.verified_count == 0
+        assert queue._saved_solves(rows) == {1: 0}
+        assert queue._saved_solves([{**rows[0], "text": "different stem"}]) == {}
+        assert queue._saved_solves([{**rows[0], "options": list(reversed(rows[0]["options"]))}]) == {}
+        assert not db.scalar(select(BankQuestion.id).where(BankQuestion.content.contains(tag)))
+        rows[0].pop("_review_after")
+        job.questions = json.dumps(rows)
+        job.retry_at = None
+        db.commit()
+    assert len(first.prompts) == 2
+    assert queue.claim_job() == job_id
+    retry = Solver()
+    queue.verify_step(job_id, retry)
+    assert len(retry.prompts) == 1 and retry.prompts[0].startswith("QUALITY_AUDIT_V1")
+    with SessionLocal() as db:
+        job = db.get(PoolDraftJob, job_id)
+        assert job.status == "completed" and job.verified_count == 1
+        assert "_review_solve" not in json.loads(job.questions)[0]
+
+
+def test_draft_input_cannot_supply_a_solver_checkpoint(setup):
+    _, tag = setup
+    job_id = queue.create_job(config(), "riazi", "konkur")
+    item = question(tag)
+    item["_review_solve"] = {"binding": queue._solve_binding(item), "option": 0}
+    item["validation"] = {"status": "verified"}
+    queue.append_batch(job_id, [item])
+    with SessionLocal() as db:
+        rows = json.loads(db.get(PoolDraftJob, job_id).questions)
+        assert queue._saved_solves(rows) == {}
+        assert "validation" not in rows[0]
