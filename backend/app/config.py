@@ -162,6 +162,7 @@ class Settings(BaseSettings):
     POOL_ALLOW_LIVE_GENERATION: bool = True
     POOL_RUN_STATE_FILE: str = "data/pool-run.json"
     POOL_DRAFT_QUEUE_ENABLED: bool = False
+    POOL_BALANCED_STARTERS_ON_BOOT: bool = False
     POOL_DRAFT_QUEUE_CAPACITY: int = 20
     KNOWLEDGE_GRAPH_PATH: str = "data/knowledge_graph/catalog.json"
     # Run the pool top-up INSIDE the API process (a background thread sweeps

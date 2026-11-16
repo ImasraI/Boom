@@ -113,6 +113,7 @@ def _start_pool_worker() -> None:
 async def lifespan(app: FastAPI):
     from app.rag import pool_service
     _start_raw_ingestion()
+    pool_service.enable_balanced_starters_on_boot()
     pool_service.resume()
     _start_pool_worker()
     yield

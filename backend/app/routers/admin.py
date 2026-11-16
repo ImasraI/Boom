@@ -273,9 +273,7 @@ def pool_restock(db: Session = Depends(get_db), payload: PoolRunIn | None = None
         tracks = len(pool_core.STARTER_GRADES) * len(pool_core.STARTER_MAJORS)
         if payload.count % tracks:
             raise HTTPException(422, "تعداد دفترچه‌ها باید مضرب ۶ باشد تا هر دور کامل بماند.")
-        return pool_service.start({"kind": "mock", "balanced_starters": True,
-            "majors": list(pool_core.STARTER_MAJORS), "difficulties": ["konkur"],
-            "count": payload.count, "grade": "", "total_questions": 10, "topics": []})
+        return pool_service.start(pool_service.balanced_config(payload.count))
     if payload.kind=='weekly_ranked':
         from app.rag.weekly_ranked import require_plan
         require_plan()

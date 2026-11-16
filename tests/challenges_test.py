@@ -174,6 +174,9 @@ def test_complete_requires_recipient_attempt_and_compares_scores(db):
     mock = _mk_played_mock(db, sender.id, score=60.0)
     inv = ch.create_invite(ch.CreatePayload(mock_id=mock.id),
                            current_user=_Ctx(sender), db=db)
+    preview = ch.lookup_invite(inv["invite_code"], _Ctx(recipient), db=db)
+    assert preview["sender_name"] == f"بازیکن {sender.id}"
+    assert sender.username not in preview["sender_name"]
     ch.accept_invite(inv["invite_code"], _Ctx(recipient), db=db)
 
     # No recipient attempt yet -> 400.
@@ -185,6 +188,7 @@ def test_complete_requires_recipient_attempt_and_compares_scores(db):
                        answers="{}", score=85.0, correct=9, wrong=0, blank=1))
     db.commit()
     res = ch.complete_invite(inv["invite_code"], _Ctx(recipient), db=db)
+    assert res["sender_name"] == f"بازیکن {sender.id}"
     assert res["sender_score"] == 60.0
     assert res["your_score"] == 85.0
     assert res["won"] is True and res["tied"] is False

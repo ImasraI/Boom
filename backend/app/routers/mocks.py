@@ -665,8 +665,7 @@ def submit_mock(
     if challenge_invite is not None:
         challenge_invite.status = "completed"
         db.commit()
-        logger.info("Challenge invite %s auto-completed by submit",
-                    challenge_invite.invite_code)
+        logger.info("Challenge %d auto-completed by submit", challenge_invite.id)
 
     return response
 

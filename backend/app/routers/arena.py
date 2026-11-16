@@ -49,6 +49,7 @@ from app.rag.provider_quota import DAILY_QUOTA_MESSAGE, pool_quota_status, requi
 from app.rag.weekly_ranked import exam_day
 from app.config import get_settings
 from app.routers.mocks import _score
+from app.auth.display_name import public_name as _public_name
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/api/arena", tags=["arena"])
@@ -168,17 +169,6 @@ def _profile_of(db: Session, user_id: int) -> Optional[StudentProfile]:
     return db.execute(
         select(StudentProfile).where(StudentProfile.user_id == user_id)
     ).scalar_one_or_none()
-
-
-def _public_name(user, profile=None):
-    """A login phone number is private, not an arena display name."""
-    name = (getattr(profile, "name", None) or "").strip()
-    username = (getattr(user, "username", None) or "").strip()
-    for value in (name, username):
-        digits = "".join(c for c in value if c.isdecimal())
-        if value and not (len(digits) >= 10 and all(c.isdecimal() or c in "+- ()" for c in value)):
-            return value
-    return f"بازیکن {user.id}"
 
 
 def _arena_name(db, user):

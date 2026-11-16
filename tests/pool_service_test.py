@@ -107,3 +107,26 @@ def test_failed_launch_restores_previous_state(monkeypatch):
     monkeypatch.setattr(service, 'resume', fail)
     with pytest.raises(RuntimeError): service.start(config())
     assert not service.snapshot()['enabled']
+
+
+
+def test_balanced_boot_persists_once_and_preserves_wait(monkeypatch):
+    from app.rag import question_bank
+    settings = SimpleNamespace(POOL_BALANCED_STARTERS_ON_BOOT=True, POOL_DRAFT_QUEUE_ENABLED=True)
+    monkeypatch.setattr(service, "get_settings", lambda: settings)
+    # The pool-run path is already isolated by conftest.
+    monkeypatch.setattr(service, "SessionLocal", lambda: nullcontext(SimpleNamespace(rollback=lambda: None)))
+    monkeypatch.setattr(question_bank, "assemble", lambda *args, **kw: [1])
+    old = {"enabled": True, "config": config(), "produced": 0,
+           "drafting_paused": True, "drafting_retry_at": "2026-11-16T10:00:00Z"}
+    service._save(old)
+    service.enable_balanced_starters_on_boot()
+    state = service.snapshot()
+    assert state["config"]["balanced_starters"] and state["enabled"]
+    assert state["starter_existing"] == {"riazi:دوازدهم": 1, "tajrobi:دوازدهم": 1}
+    assert state["drafting_retry_at"] == old["drafting_retry_at"]
+    backups = list(service._path().parent.glob("pool-run.json.before-balanced-*"))
+    assert len(backups) == 1 and json.loads(backups[0].read_text(encoding="utf8")) == old
+    service._update(enabled=False)
+    service.enable_balanced_starters_on_boot()
+    assert not service.snapshot()["enabled"]

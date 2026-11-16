@@ -139,7 +139,10 @@ def create_job(config, major, difficulty):
             seeds = pool_core._stock_seeds(db, major, difficulty, plan, config["grade"], None)
             remaining = {name: expected - actual
                          for name, expected, actual in mock_generation._shortfall(seeds, plan)}
-            plan = [{**row, "questions": remaining[row["name"]]}
+            # Plan only the missing slots. The grounding path matches this
+            # grade and major to the promoted textbook catalogue and OCR.
+            plan = [{**row, "questions": remaining[row["name"]], "major": major,
+                     "book_grounded": True, "starter_design": True}
                     for row in plan if row["name"] in remaining]
             if not plan:
                 return None

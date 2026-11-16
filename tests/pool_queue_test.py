@@ -493,4 +493,7 @@ def test_balanced_starter_draft_preserves_track_and_defers_duplicate_work(setup)
         plan = json.loads(job.plan)
         assert sum(row["questions"] for row in plan) == 10
         assert "زمین‌شناسی" not in {row["name"] for row in plan}
+        assert all(row["major"] == "tajrobi" and row["book_grounded"] and row["starter_design"] for row in plan)
+        prompt = queue.mock_generation.build_booklet_prompt([plan[0]], [], "konkur", "source", grade="دهم")
+        assert "STARTER_DESIGN_V1" in prompt
     assert queue.create_job(target, "tajrobi", "konkur") is None

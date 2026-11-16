@@ -1,11 +1,12 @@
 """One persistent, selected pool run inside the single API process.
 
-Quota pauses make no provider calls. Only an explicit admin start enables a
-run; the saved selection resumes after a restart. Inventory is never capped.
+Quota pauses make no provider calls. An admin or a deployment opt-in enables
+a run; the saved selection resumes after a restart. Inventory is never capped.
 """
 import json
 import os
 import threading
+import time
 from pathlib import Path
 from fastapi import HTTPException
 from app.config import get_settings
@@ -67,6 +68,47 @@ def start(config):
             _save(previous)
             raise
     return {'ok':True, 'started':True}
+
+
+def balanced_config(count=0):
+    return {"kind": "mock", "balanced_starters": True,
+            "majors": list(pool_core.STARTER_MAJORS), "difficulties": ["konkur"],
+            "count": count, "grade": "", "total_questions": 10, "topics": []}
+
+
+def enable_balanced_starters_on_boot():
+    settings = get_settings()
+    if not settings.POOL_BALANCED_STARTERS_ON_BOOT or not settings.POOL_DRAFT_QUEUE_ENABLED:
+        return
+    from app.rag import question_bank
+    with _LOCK:
+        previous = snapshot()
+        if previous.get("config", {}).get("balanced_starters"):
+            return  # Keep progress and an admin's later cancellation.
+        path = _path()
+        if path.is_file():
+            copy = path.with_name(f"{path.name}.before-balanced-{time.time_ns()}")
+            with copy.open("x", encoding="utf-8") as backup:
+                backup.write(path.read_text(encoding="utf-8"))
+            copy.chmod(0o600)
+        baseline = {}
+        # The live grade-12 library can supply the first starter. Spend the first
+        # round's free requests on grades that still lack a selectable booklet.
+        with SessionLocal() as db:
+            grade = pool_core.STARTER_GRADES[-1]
+            for major in pool_core.STARTER_MAJORS:
+                plan = pool_core.starter_plan(major, grade)
+                ready = question_bank.assemble(db, 0, plan, [pool_core.CANONICAL_MAJOR[major]],
+                                                grade=grade, shared_only=True)
+                if ready:
+                    baseline[f"{major}:{grade}"] = 1
+            db.rollback()
+        waits = {key: previous[key] for key in ("drafting_paused", "drafting_retry_at", "retry_at")
+                 if key in previous}
+        _save({**waits, "enabled": True, "status": "starting", "config": balanced_config(),
+               "produced": 0, "cursor": 0, "starter_produced": baseline,
+               "starter_existing": baseline})
+        logger.info("Activated the balanced grade-track worker; %d existing grade-12 starters counted.", len(baseline))
 
 
 def resume():

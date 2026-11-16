@@ -34,3 +34,13 @@ test('mock entry exposes saved-answer history and an honest empty state',async()
   assert.match(html,/آزمون‌های قبلی و پاسخنامه‌ها/);
   assert.match(html,/هنوز آزمونی ثبت نکرده‌ای/);
 });
+
+
+test('friend challenges expose entry and sharing without using the pilot code',async()=>{
+  const {FriendChallengeEntry,FriendChallengeResult}=await vite.ssrLoadModule('/src/components/FriendChallenge.tsx');
+  const entry=renderToStaticMarkup(React.createElement(FriendChallengeEntry,{onOpen(){}}));
+  assert.match(entry,/چالش دوستانه · ورود با کد/);
+  assert.match(entry,/کد شش‌کاراکتری/);
+  const result=renderToStaticMarkup(React.createElement(FriendChallengeResult,{mockId:42,code:''}));
+  assert.match(result,/دوستم همین دفترچه را حل کند/);
+});

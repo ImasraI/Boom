@@ -957,7 +957,11 @@ export default function Arena({ nav, userData, initialPhase }: {
     onCancel={cancelInvite} onEnterMatch={enterScheduledMatch} onBack={closeScheduled}
     defaultWhen={localInputValue(dayAt(1, 10))} />
 
-  return <><StudentPilot /><Lobby me={me} onJoin={join} onBoard={openBoard} busy={loadingLobby || !!lobbyError}
+  return <><StudentPilot /><div className="mx-auto max-w-[560px] px-4 pt-3">
+    <button type="button" onClick={() => nav("mock")} className="text-sm font-bold text-[var(--accent)] underline underline-offset-4">
+      چالش دوستانه در آزمون هوشمند
+    </button>
+  </div><Lobby me={me} onJoin={join} onBoard={openBoard} busy={loadingLobby || !!lobbyError}
     filters={filters}
     error={lobbyError || error} onScheduled={openScheduled} />
     {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت کولوسئوم</button></div>}</>

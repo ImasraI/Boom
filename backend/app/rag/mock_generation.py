@@ -350,8 +350,9 @@ def build_booklet_prompt(plan: List[dict], topics: List[str], difficulty: str,
     )
     # Style examples remain separate from book evidence and cannot widen scope.
     from app.rag.exam_style import context as exam_style_context
-    from app.rag.question_design import authoring_contract
-    return prompt + (exam_style_context(plan, topics) if grounded else "") + authoring_contract(difficulty)
+    from app.rag.question_design import authoring_contract, starter_design_contract
+    design = starter_design_contract() if any(row.get("starter_design") for row in plan) else ""
+    return prompt + (exam_style_context(plan, topics) if grounded else "") + authoring_contract(difficulty) + design
 
 
 def weak_areas(user_id: int, recent_n: int = 40, limit: int = 10) -> List[dict]:

@@ -4,6 +4,7 @@ import { apiUrl, apiJson, authHeaders, readApiError, ApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
 import StudentPilot from "../components/StudentPilot"
+import { FriendChallengeEntry, FriendChallengeResult, type ChallengeBooklet } from "../components/FriendChallenge"
 import QuestionFigure from "../components/QuestionFigure"
 import type { QuestionFigureData } from "../questionFigures"
 import { requestMockGeneration } from "../mockGeneration"
@@ -13,7 +14,7 @@ import { fetchPreviousMaze, openPreviousMaze, type PreviousMazeMock } from "../p
 
 type Phase = "config" | "loading" | "ready" | "test" | "result"
 
-interface MockQuestion {
+export interface MockQuestion {
   id: number
   subject: string
   topic?: string
@@ -347,7 +348,10 @@ function TestRunner({ info, questions, onFinish, onExit, error }: {
 
 /* ---------------- Result / analysis ---------------- */
 
-function ResultView({ result, mockId, onBack, onRetry }: { result: MockResult; mockId: number; onBack: () => void; onRetry: () => void }) {
+function ResultView({ result, mockId, challengeCode, onBack, onRetry }: {
+  result: MockResult; mockId: number; challengeCode: string;
+  onBack: () => void; onRetry: () => void
+}) {
   const [tab, setTab] = useState<"summary" | "review">("summary")
   const pctColor = result.score >= 70 ? "text-green-500" : result.score >= 40 ? "text-[var(--accent)]" : "text-red-500"
 
@@ -382,6 +386,7 @@ function ResultView({ result, mockId, onBack, onRetry }: { result: MockResult; m
       </div>
 
       <div className="px-4 py-4 max-w-[560px] mx-auto space-y-3">
+        <FriendChallengeResult key={mockId} mockId={mockId} code={challengeCode} />
         {result.historical_review_incomplete && (
           <p role="status" className="border-s-2 border-[var(--accent)] ps-3 text-[12px] leading-7 text-[var(--muted)]">
             نمرهٔ ثبت‌شدهٔ این آزمون قدیمی حفظ شده است؛ جزئیات کامل سؤال‌های تصحیح‌شده در دسترس نیست.
@@ -469,6 +474,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
   const [questions, setQuestions] = useState<MockQuestion[]>([])
   const [result, setResult] = useState<MockResult | null>(null)
   const [error, setError] = useState("")
+  const [challengeCode, setChallengeCode] = useState("")
   const [previousMaze, setPreviousMaze] = useState<PreviousMazeMock[] | null>(null)
   const [previousLoading, setPreviousLoading] = useState(false)
   const [previousError, setPreviousError] = useState("")
@@ -517,6 +523,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
       const saved = await apiJson<{ mock_id: number; title: string; result: MockResult }>(`/api/mocks/attempts/${attemptId}`, { signal: controller.signal })
       if (controller.signal.aborted) return
       setInfo({ mock_id: saved.mock_id, title: saved.title, duration_minutes: 0, total_questions: saved.result.review.length, subjects: [] })
+      setChallengeCode("")
       setResult(saved.result); setPhase("result")
     } catch (e) {
       if (!controller.signal.aborted) setHistoryError(e instanceof Error ? e.message : "دریافت پاسخنامه ناموفق بود")
@@ -534,7 +541,18 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
     } finally { if (!signal?.aborted) setPreviousLoading(false) }
   }
 
+  function openFriendChallenge(accepted: ChallengeBooklet) {
+    historyRequest.current?.abort()
+    setOpeningAttempt(null)
+    setChallengeCode(accepted.invite_code)
+    setInfo({ ...accepted, total_questions: accepted.questions.length, subjects: [] })
+    setQuestions(accepted.questions)
+    setError("")
+    setPhase("ready")
+  }
+
   async function start(cfg: Record<string, unknown>, previous?: PreviousMazeMock) {
+    setChallengeCode("")
     historyRequest.current?.abort()
     setOpeningAttempt(null)
     const controller = new AbortController()
@@ -553,7 +571,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
       setPhase("ready")
     } catch (e) {
       if (controller.signal.aborted) return
-      if (e instanceof ApiError && e.code === "pool_empty") {
+      if (e instanceof ApiError && e.code === "pool_empty" && cfg.mode !== "ready_10") {
         setError(""); setPhase("config")
         await loadPreviousMaze(controller.signal)
         return
@@ -592,6 +610,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
     <>
       <div hidden={phase !== "config"}>
         <StudentPilot primary />
+        <FriendChallengeEntry onOpen={openFriendChallenge} />
         <section aria-label="آزمون‌های قبلی" className="max-w-[560px] mx-auto px-4 pt-6 text-[var(--text)]">
           <h2 className="font-bold">آزمون‌های قبلی و پاسخنامه‌ها</h2>
           {historyLoading && <p role="status" className="text-sm py-3">در حال دریافت تاریخچه…</p>}
@@ -640,6 +659,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
       <ResultView
         result={result}
         mockId={info!.mock_id}
+        challengeCode={challengeCode}
         onBack={() => { setResult(null); setPhase("config") }}
         onRetry={() => { setResult(null); setPhase("config") }}
       />

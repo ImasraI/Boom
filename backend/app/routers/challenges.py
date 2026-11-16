@@ -30,11 +30,12 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from app.auth.database import ChallengeInvite, GeneratedMock, MockAttempt, User
+from app.auth.database import ChallengeInvite, GeneratedMock, MockAttempt, StudentProfile, User
 from app.auth.deps import get_current_user, get_db
+from app.auth.display_name import public_name
 from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/api/challenges", tags=["challenges"])
@@ -87,6 +88,7 @@ def _visible_questions(db: Session, mock: GeneratedMock) -> list:
             "topic": q.get("topic"),
             "text": q.get("text"),
             "options": q.get("options"),
+            "figure": q.get("figure") or {"type": "none", "data": {}},
         }
         for q in active_questions(db, mock)
         if (q.get("text") or "").strip()
@@ -145,8 +147,7 @@ def create_invite(
         db.add(invite)
         db.commit()
         db.refresh(invite)
-        logger.info("Challenge invite %s created by user %d on mock %d",
-                    invite.invite_code, current_user.id, mock.id)
+        logger.info("Challenge created by user %d on mock %d", current_user.id, mock.id)
 
     return {
         "invite_id": invite.id,
@@ -167,6 +168,7 @@ def lookup_invite(
     """Preview an invite before accepting (login required, no claim yet)."""
     invite = _fresh_invite(db, invite_code)
     sender = db.get(User, invite.sender_id)
+    profile = db.scalar(select(StudentProfile).where(StudentProfile.user_id == invite.sender_id))
     sender_attempt = db.execute(
         select(MockAttempt)
         .where(MockAttempt.mock_id == invite.mock_id)
@@ -185,7 +187,7 @@ def lookup_invite(
         "invite_code": invite.invite_code,
         "status": invite.status,
         "accepted_by_me": accepted_by_me,
-        "sender_name": (sender.username if sender else "") or "دانش‌آموز بوم",
+        "sender_name": public_name(sender, profile) if sender else "دانش‌آموز بوم",
         "sender_score": sender_attempt.score if sender_attempt else None,
         "mock_title": mock.title if mock else "",
         "duration_minutes": mock.duration_minutes if mock else 0,
@@ -210,21 +212,22 @@ def accept_invite(
     invite = _fresh_invite(db, invite_code)
     if invite.sender_id == current_user.id:
         raise HTTPException(status_code=400, detail="نمی‌توانی چالش خودت را بپذیری")
-    if invite.recipient_id is not None and invite.recipient_id != current_user.id:
-        raise HTTPException(status_code=409, detail="این چالش قبلاً توسط دانش‌آموز دیگری پذیرفته شده")
-    if invite.recipient_id != current_user.id:
-        invite.recipient_id = current_user.id
-        invite.status = "accepted"
-        db.commit()
-        logger.info("Challenge invite %s accepted by user %d",
-                    invite.invite_code, current_user.id)
-
     mock = db.get(GeneratedMock, invite.mock_id)
-    if not mock:
-        raise HTTPException(status_code=404, detail="دفترچه آزمون پیدا نشد")
-    # Same booklet serialization GET /api/mocks/{id} uses - the frontend
-    # mock-taking flow works on this unchanged.
     questions = _visible_questions(db, mock)
+    if not questions:
+        raise HTTPException(status_code=409, detail="سؤال معتبری در این دفترچه باقی نمانده است")
+    if invite.recipient_id is None:
+        claimed = db.execute(update(ChallengeInvite).where(
+            ChallengeInvite.id == invite.id, ChallengeInvite.recipient_id.is_(None),
+            ChallengeInvite.status == "pending",
+        ).values(recipient_id=current_user.id, status="accepted").execution_options(synchronize_session=False))
+        db.commit()
+        db.refresh(invite)
+        if claimed.rowcount == 1:
+            logger.info("Challenge accepted by user %d", current_user.id)
+    if invite.recipient_id != current_user.id:
+        raise HTTPException(status_code=409, detail="این چالش قبلاً توسط دانش‌آموز دیگری پذیرفته شده")
+
     return {
         "mock_id": mock.id,
         "title": mock.title,
@@ -264,10 +267,10 @@ def complete_invite(
             )
         invite.status = "completed"
         db.commit()
-        logger.info("Challenge invite %s completed (users %d vs %d)",
-                    invite.invite_code, invite.sender_id, current_user.id)
+        logger.info("Challenge completed (users %d vs %d)", invite.sender_id, current_user.id)
 
     sender = db.get(User, invite.sender_id)
+    profile = db.scalar(select(StudentProfile).where(StudentProfile.user_id == invite.sender_id))
     sender_attempt = db.execute(
         select(MockAttempt)
         .where(MockAttempt.mock_id == invite.mock_id)
@@ -288,7 +291,7 @@ def complete_invite(
         "invite_code": invite.invite_code,
         "mock_id": invite.mock_id,
         "status": invite.status,
-        "sender_name": (sender.username if sender else "") or "دانش‌آموز بوم",
+        "sender_name": public_name(sender, profile) if sender else "دانش‌آموز بوم",
         "sender_score": sender_score,
         "your_score": recipient_score,
         "won": (
