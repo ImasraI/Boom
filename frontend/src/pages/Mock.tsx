@@ -102,16 +102,22 @@ function BackButton({ onClick }: { onClick: () => void }) {
 
 /* ---------------- Config screen ---------------- */
 
-export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE }: {
+export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE, major, grade }: {
   onStart: (cfg: Record<string, unknown>) => void
   onBack: () => void
   error: string
   debugMode?: boolean
+  major?: string
+  grade?: string
 }) {
   const [difficulty, setDifficulty] = useState("konkur")
   const [count, setCount] = useState(0) // Full mock by default; short counts remain for practice.
   const [topics, setTopics] = useState("")
   const [mode, setMode] = useState("general")
+  const [starterMajor, setStarterMajor] = useState("")
+  const [starterGrade, setStarterGrade] = useState("")
+  const short = mode === "ready_10"
+  const scope = { major: major || starterMajor, grade: grade || starterGrade }
   const practice = mode === "practice" || mode === "practice_weak_areas"
 
   return (
@@ -142,7 +148,23 @@ export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE }: {
           </label>
           <p className="text-[11px] text-[var(--muted-2)] mt-2">آزمون کامل، همه درس‌های دفترچه رشته‌ات را پوشش می‌دهد. برای ریاضی‌فیزیک: ۴۰ ریاضی، ۳۵ فیزیک و ۳۰ شیمی. تمرین، سوال‌های قبلی را در اولویت می‌گذارد.</p>
         </div>
-        {mode !== "ready_10" && <div className="study-section p-4">
+        {short && (!major || !grade) && <div className="study-section p-4 flex flex-wrap gap-3">
+          {!major && <label className="text-sm">رشته
+            <select value={starterMajor} onChange={e => setStarterMajor(e.target.value)}
+              className="block mt-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2">
+              <option value="">انتخاب رشته</option>
+              {["ریاضی فیزیک", "علوم تجربی"].map(item => <option key={item}>{item}</option>)}
+            </select>
+          </label>}
+          {!grade && <label className="text-sm">پایه
+            <select value={starterGrade} onChange={e => setStarterGrade(e.target.value)}
+              className="block mt-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2">
+              <option value="">انتخاب پایه</option>
+              {["دهم", "یازدهم", "دوازدهم"].map(item => <option key={item}>{item}</option>)}
+            </select>
+          </label>}
+        </div>}
+        {!short && <div className="study-section p-4">
           <p className="text-[12px] font-bold text-[var(--muted)] mb-2.5">سطح دشواری</p>
           <div className="grid grid-cols-2 gap-2">
             {DIFFICULTIES.map(d => (
@@ -182,8 +204,16 @@ export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE }: {
           <p className="text-[10px] text-[var(--muted-2)] mt-1.5">خالی بگذاری، سوالات از کل مباحث کنکوری می‌آید. برای تمرکز بر آزمون پیش رو، مباحث آن را وارد کن.</p>
         </div>}
 
-        <button onClick={() => onStart({ mode: mode === "debug_10" ? "practice" : mode, difficulty, stock_only: true, total_questions: mode === "debug_10" ? 10 : mode === "general" ? undefined : count || undefined, topics: practice && topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [] })}
-          className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all">
+        <button disabled={short && (!scope.major || !scope.grade)}
+          onClick={() => onStart({
+            mode: mode === "debug_10" ? "practice" : mode,
+            difficulty,
+            stock_only: true,
+            student: short ? scope : undefined,
+            total_questions: mode === "debug_10" ? 10 : practice ? count || undefined : undefined,
+            topics: practice && topics.trim() ? topics.split("\n").map(t => t.trim()).filter(Boolean) : [],
+          })}
+          className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50">
           ساخت دفترچه آزمون
         </button>
         <p className="text-[11px] text-[var(--muted-2)] text-center leading-relaxed">
@@ -563,7 +593,7 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
       const student = { major: userData?.major, grade: userData?.grade }
       const data = previous
         ? await openPreviousMaze<MockInfo>(previous, student, controller.signal)
-        : await requestMockGeneration<MockInfo>({ ...cfg, student }, controller.signal)
+        : await requestMockGeneration<MockInfo>({ ...cfg, student: cfg.student ?? student }, controller.signal)
       const qData = await apiJson<{ questions: MockQuestion[] }>(`/api/mocks/${data.mock_id}`, { signal: controller.signal })
       if (!Array.isArray(qData.questions) || !qData.questions.length) throw new Error("سوال معتبری در این دفترچه باقی نمانده است؛ دفترچه دیگری انتخاب کن.")
       setInfo(data)
@@ -624,7 +654,8 @@ export default function Mock({ nav, userData }: { nav: NavFn; userData?: SignupD
         </section>
         {previousMaze !== null && <PreviousMazeOptions items={previousMaze} loading={previousLoading}
           error={previousError} onSelect={item => start({}, item)} onRetry={() => { void loadPreviousMaze() }} />}
-        <ConfigView onStart={cfg => { setPreviousMaze(null); void start(cfg) }} onBack={() => nav("home")} error={error} />
+        <ConfigView onStart={cfg => { setPreviousMaze(null); void start(cfg) }} onBack={() => nav("home")} error={error}
+          major={userData?.major} grade={userData?.grade} />
       </div>
       {phase === "loading" && (
       <div className="min-h-screen bg-[var(--surface)] flex flex-col items-center justify-center gap-4">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { apiJson } from "../api"
+import { apiJson, ApiError } from "../api"
 import type { MockQuestion } from "../pages/Mock"
 
 type Preview = {
@@ -14,6 +14,18 @@ type Comparison = { opponent_name: string; opponent_score: number; your_score: n
 const action = "px-4 py-2 rounded-xl border border-[var(--border-strong)] font-bold text-sm disabled:opacity-50"
 const route = (code: string) => "/api/challenges/" + encodeURIComponent(code)
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : "ارتباط با سرور برقرار نشد."
+
+async function readComparison(code: string, recipient: boolean, signal?: AbortSignal) {
+  try { return await apiJson<Comparison>(route(code) + "/result", { signal }) }
+  catch (error) {
+    // The earlier endpoint supports recipients while separate builds roll out.
+    if (!recipient || !(error instanceof ApiError) || error.status !== 404) throw error
+    const value = await apiJson<{ sender_name: string; sender_score: number; your_score: number; won: boolean; tied: boolean }>(
+      route(code) + "/complete", { method: "POST", signal })
+    return { opponent_name: value.sender_name, opponent_score: value.sender_score,
+      your_score: value.your_score, won: value.won, tied: value.tied }
+  }
+}
 
 export function FriendChallengeEntry({ onOpen }: { onOpen: (booklet: ChallengeBooklet) => void }) {
   const [input, setInput] = useState("")
@@ -32,7 +44,7 @@ export function FriendChallengeEntry({ onOpen }: { onOpen: (booklet: ChallengeBo
       const data = await apiJson<Preview>(route(code))
       setPreview(data)
       if (data.status === "completed" && (data.accepted_by_me || data.created_by_me)) {
-        setFinished(await apiJson<Comparison>(route(code) + "/result"))
+        setFinished(await readComparison(code, data.accepted_by_me))
       }
     } catch (e) { setError(errorMessage(e)) }
     finally { setBusy(false) }
@@ -94,7 +106,7 @@ export function FriendChallengeResult({ mockId, code }: { mockId: number; code: 
     if (!code) return
     const controller = new AbortController()
     setBusy(true); setError("")
-    apiJson<Comparison>(route(code) + "/result", { signal: controller.signal })
+    readComparison(code, true, controller.signal)
       .then(value => { if (!controller.signal.aborted) setResult(value) })
       .catch(e => { if (!controller.signal.aborted) setError(errorMessage(e)) })
       .finally(() => { if (!controller.signal.aborted) setBusy(false) })
