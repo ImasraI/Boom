@@ -30,7 +30,7 @@ export default function Landing({ nav }: { nav: NavFn }) {
         <span className="desk-eyebrow">مطالعه، با نگاه یک حل‌کننده</span>
         <h1>فقط بیشتر نخوان.<br /><em>عمیق‌تر</em> یاد بگیر.</h1>
         <p>برنامه‌ات، کتاب‌هایت و نتیجهٔ تمرین‌هایت،<br />کنار هم؛ برای فهمیدن قدم بعدی.</p>
-        <div className="desk-hero-actions"><button className="desk-primary" onClick={() => nav("signup")}>ایجاد حساب کاربری <span aria-hidden="true">←</span></button><button className="desk-text-link" onClick={() => nav("login")}>ادامهٔ مسیر من</button></div>
+        <div className="desk-hero-actions"><button className="desk-primary" onClick={() => nav("signup")}>ایجاد حساب کاربری <span aria-hidden="true">←</span></button><button className="desk-text-link" onClick={() => nav("login")}>ادامهٔ مسیر من</button><button className="desk-text-link" onClick={() => nav("tournament")}>مشاهدهٔ تورنومنت</button></div>
         <div className="landing-note"><span />برنامه‌ای که با مسیر یادگیری تو تغییر می‌کند.</div>
       </div>
       <LearningSketch />

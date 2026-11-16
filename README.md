@@ -139,6 +139,7 @@ the handoff for checkpoint status, provider pauses and safe resume commands.
   inferred design and separate review status.
 - [Question quality](docs/question-quality.md): generation and publication gates.
 - [Weekly ranked](docs/weekly-ranked.md): rolling Maze scope and event preparation.
+- [Tournaments](docs/TOURNAMENTS.md): public league/bracket, personal matches, scoring and administrator setup; registration remains closed.
 - [Homework planning](docs/HOMEWORK_PLANNING.md): confirmed work and calendar sync.
 - [Book knowledge graph](docs/BOOK_KNOWLEDGE_GRAPH.md): promoted curriculum evidence.
 - [Provider failover](docs/pool-provider-failover.md): quota handling and worker roles.

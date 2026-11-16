@@ -30,6 +30,7 @@ from ..rag import pool_queue
 from ..rag.provider_quota import pool_quota_status, require_pool_available
 from ..utils.logger import get_logger
 from ..utils.metrics import snapshot
+from ..tournaments.service import anonymize_participant
 
 logger = get_logger(__name__)
 
@@ -448,6 +449,7 @@ def _wipe_user_data(user_id: int, phone: str | None, db: Session) -> dict:
     )
 
     counts: dict[str, int] = {}
+    counts["tournament_entries"] = anonymize_participant(db, user_id)
 
     # ---- Vector stores: all three collections, scoped by user_id --------
     for name, store in (

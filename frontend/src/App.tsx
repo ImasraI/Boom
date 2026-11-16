@@ -23,6 +23,7 @@ const Chat = lazy(() => import("./pages/Chat"));
 const Schedule = lazy(() => import("./pages/Schedule"));
 const Mock = lazy(() => import("./pages/Mock"));
 const Arena = lazy(() => import("./pages/Arena"));
+const Tournament = lazy(() => import("./pages/Tournament"));
 const Admin = lazy(() => import("./pages/Admin"));
 
 const USER_KEY = "boom-user-data";
@@ -45,6 +46,7 @@ const ICONS: Record<string, React.ReactNode> = {
   plan: <StudySymbol kind="plan" size={18} />,
   exams: <StudySymbol kind="document" size={18} />,
   leaderboard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/></svg>,
+  tournament: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4h5v5H3zM3 15h5v5H3zM16 9h5v6h-5zM8 6.5h4v11H8M12 12h4" /></svg>,
   admin: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
 };
 
@@ -191,7 +193,8 @@ function MobileTabBar({ screen, nav }: { screen: Screen; nav: (s: Screen) => voi
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("landing");
+  const [screen, setScreen] = useState<Screen>(() => typeof window !== "undefined" && window.location.hash === "#tournament" ? "tournament" : "landing");
+  const [loginDestination, setLoginDestination] = useState<Screen>("home");
   const [dark, setDark] = useState(() => { const stored = localStorage.getItem("boom-theme"); return stored ? stored === "dark" : true; });
   const [userData, setUserData] = useState<SignupData | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -214,7 +217,7 @@ export default function App() {
           accountStorage.removeItem(USER_KEY);
           setUserData(null);
           setIsAdmin(false);
-          setScreen("login");
+          setScreen(window.location.hash === "#tournament" ? "tournament" : "login");
           return null;
         }
         return res.ok ? res.json() : null;
@@ -234,7 +237,7 @@ export default function App() {
     try {
       const profile = savedUser ? normalizeSignupData(JSON.parse(savedUser)) : emptySignupData();
       setUserData(profile);
-      setScreen(consumeResumePage() ?? "home");
+      setScreen(consumeResumePage() ?? (window.location.hash === "#tournament" ? "tournament" : "home"));
       // Growth-readiness project 1: refresh the cache from the server so a
       // second device (or a cleared storage) converges on the same state.
       hydrateServerProfile(profile).then(server => {
@@ -257,6 +260,13 @@ export default function App() {
 
   function nav(s: Screen) {
     setSettingsRequest(0);
+    if (s === "login" && screen === "tournament") setLoginDestination("tournament");
+    if (!["landing", "login", "signup", "tournament"].includes(s) && !accountId()) {
+      setLoginDestination(s);
+      s = "login";
+    }
+    const nextHash = s === "tournament" ? "#tournament" : "";
+    if (window.location.hash !== nextHash) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
     setScreen(s);
     window.scrollTo(0, 0);
   }
@@ -266,7 +276,7 @@ export default function App() {
     const profile = normalizeSignupData(data);
     persistUser(profile);
     setUserData(profile);
-    nav("home");
+    nav(loginDestination);
     void flushCalendar(token).then(ok => ok && pullCalendar(token));
     hydrateServerProfile(profile).then(server => {
       if (server && localStorage.getItem(TOKEN_KEY) === token) {
@@ -323,6 +333,7 @@ export default function App() {
       {screen === "chat" && <Chat {...p} userData={userData} />}
       {screen === "mock" && <Mock {...p} userData={userData} />}
       {screen === "arena" && <Arena {...p} userData={userData} />}
+      {screen === "tournament" && <Tournament {...p} userData={userData} isAdmin={isAdmin} />}
       {screen === "leaderboard" && <Arena {...p} userData={userData} initialPhase="board" />}
       {screen === "admin" && <Admin {...p} />}
       {screen === "profile" && userData && <Profile {...p} userData={userData} {...settingsProps} settingsRequest={settingsRequest} />}

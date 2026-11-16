@@ -22,6 +22,7 @@ export const PANELS: Record<PanelKey, PanelDef> = {
     label: "کولوسئوم",
     items: [
       { screen: "arena", label: "کولوسئوم" },
+      { screen: "tournament", label: "تورنومنت" },
       { screen: "mock", label: "آزمون هوشمند" },
       { screen: "leaderboard", label: "جدول امتیازات" },
     ],
