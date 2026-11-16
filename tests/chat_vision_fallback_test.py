@@ -186,3 +186,30 @@ def test_changed_or_unbound_image_bytes_are_never_sent_to_vision(monkeypatch):
     monkeypatch.setattr("app.utils.storage.get_object",lambda key:b"changed")
     assert pipeline._load_page_images([HIT])==([],[])
     assert pipeline._load_page_images([{k:v for k,v in HIT.items() if k!="image_sha256"}])==([],[])
+
+
+
+@pytest.mark.parametrize("have_text", [True, False])
+def test_vision_quota_falls_back_only_to_available_text(monkeypatch, have_text):
+    _patch_nothing_available(monkeypatch)
+    chapter = dict(document_name="Textbook", chunk_index=4, content="Grounded excerpt", score=0.8)
+    monkeypatch.setattr(pipeline, "_assemble_retrieval",
+                        lambda *args, **kw: ([chapter] if have_text else [], [HIT], "test", {}))
+    monkeypatch.setattr(pipeline, "_load_page_images", lambda hits: (hits, [b"page"]))
+    monkeypatch.setattr(pipeline, "get_vision_llm_client", lambda: SimpleNamespace(
+        last_error_code="provider_daily_quota", generate=lambda messages, images: ""))
+    prompts = []
+
+    def answer(messages):
+        prompts.append(messages)
+        return "پاسخ با منبع متنی"
+
+    monkeypatch.setattr(pipeline, "get_llm_client", lambda: SimpleNamespace(generate=answer))
+    result = pipeline.answer_question(BOOK_Q, user_id=1)
+    if have_text:
+        assert result["answer"] == "پاسخ با منبع متنی"
+        assert [source.document_name for source in result["sources"]] == ["Textbook"]
+        assert "تصاویر صفحه در دسترس نیستند" in prompts[0][0]["content"]
+    else:
+        assert result == {"answer": "", "sources": [], "provider_error_code": "provider_daily_quota"}
+        assert prompts == []

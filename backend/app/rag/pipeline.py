@@ -1135,53 +1135,53 @@ def _answer_question(
             client=vision_llm, images=image_paths,
         )
 
-        sources = [
-            SourceChunk(
-                document_name=hit["document_name"],
-                chunk_index=hit["chunk_index"],
-                content=f"صفحه {hit['chunk_index'] + 1}",
-                score=hit["score"],
-            )
-            for hit in image_hits
-        ] + [
-            SourceChunk(
-                document_name=c["document_name"],
-                chunk_index=c["chunk_index"],
-                content=c["content"],
-                score=_retrieval_score(c),
-            )
-            for c in retrieved_chunks
-        ]
-        confidence = _answer_confidence(retrieved_chunks, image_hits)
-        return _chat_result(answer_text, sources, confidence, vision_llm)
+        if (answer_text or "").strip():
+            sources = [
+                SourceChunk(
+                    document_name=hit["document_name"],
+                    chunk_index=hit["chunk_index"],
+                    content=f"صفحه {hit['chunk_index'] + 1}",
+                    score=hit["score"],
+                )
+                for hit in image_hits
+            ] + [
+                SourceChunk(
+                    document_name=c["document_name"],
+                    chunk_index=c["chunk_index"],
+                    content=c["content"],
+                    score=_retrieval_score(c),
+                )
+                for c in retrieved_chunks
+            ]
+            confidence = _answer_confidence(retrieved_chunks, image_hits)
+            return _chat_result(answer_text, sources, confidence, vision_llm)
+        if not retrieved_chunks:
+            return _chat_result(answer_text, [], _answer_confidence([]), vision_llm)
+        note(vision_fallback="text_sources", vision_error_code=getattr(vision_llm, "last_error_code", ""))
 
 
     llm_client = get_llm_client()
     messages = _build_messages(question, retrieved_chunks, history, student, schedule)
+    if use_vision:
+        messages[0]["content"] += (
+            "\nتصاویر صفحه در دسترس نیستند. فقط از متن‌های ارائه‌شده استفاده کن. "
+            "اگر پاسخ دقیق به شکل یا جزئیات تصویری وابسته است، بگو برای آن بخش به تصویر نیاز داری."
+        )
     answer_text = _generate_traced(
         messages, user_id=user_id, stage_name="llm_generate",
-        stage_label="فراخوانی مدل زبانی با منابع", client=llm_client,
+        stage_label="فراخوانی مدل زبانی با منابع متنی", client=llm_client,
     )
     sources = [
         SourceChunk(
-            document_name=hit["document_name"],
-            chunk_index=hit["chunk_index"],
-            content=f"صفحه {hit['chunk_index'] + 1}",
-            score=hit["score"],
+            document_name=chunk["document_name"],
+            chunk_index=chunk["chunk_index"],
+            content=chunk["content"],
+            score=_retrieval_score(chunk),
         )
-        for hit in image_hits
-    ] + [
-        SourceChunk(
-            document_name=c["document_name"],
-            chunk_index=c["chunk_index"],
-            content=c["content"],
-            score=_retrieval_score(c),
-        )
-        for c in retrieved_chunks
+        for chunk in retrieved_chunks
     ]
 
-    confidence = _answer_confidence(retrieved_chunks, image_hits)
-    return _chat_result(answer_text, sources, confidence, llm_client)
+    return _chat_result(answer_text, sources, _answer_confidence(retrieved_chunks), llm_client)
 
 
 class RetrievalRunError(RuntimeError):
