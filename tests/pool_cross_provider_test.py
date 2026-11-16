@@ -309,3 +309,45 @@ def test_explicit_chat_keys_are_reserved_from_both_pool_stages(isolated_settings
     s.POOL_GROQ_API_KEYS = "chat-backup"
     assert quota.pool_generation_status(s)["code"] == "provider_not_configured"
     assert isinstance(llm.get_pool_llm_client(), llm.MockLLMClient)
+
+
+
+def test_chat_model_fallback_respects_saved_quota_and_stays_out_of_pool(isolated_settings):
+    import httpx
+    s = isolated_settings
+    s.LLM_MODEL_NAME = "openai/gpt-oss-120b"
+    s.LLM_GROQ_FALLBACK_MODEL = "openai/gpt-oss-20b"
+    s.POOL_RESERVE_GROQ_CHAT_KEYS = True
+    identity = lambda model: quota.quota_identity("https://api.groq.com/openai/v1", model, s.LLM_API_KEY)
+    quota.block_daily_quota(identity(s.LLM_MODEL_NAME), "daily test blockage", retry_seconds=1800)
+    assert not quota.chat_quota_status(s)["blocked"]
+
+    client = llm.get_llm_client()
+    calls = []
+    def reply(request):
+        calls.append(json.loads(request.content)["model"])
+        return httpx.Response(200, json={"choices": [{"message": {"content": "reply"}}]})
+
+    try:
+        assert [child.model for child in client._clients] == [s.LLM_MODEL_NAME, s.LLM_GROQ_FALLBACK_MODEL]
+        for child in client._clients:
+            child.client.close()
+            child.client = httpx.Client(transport=httpx.MockTransport(reply))
+        assert client.generate([{"role": "user", "content": "test"}]) == "reply"
+        assert calls == [s.LLM_GROQ_FALLBACK_MODEL]
+    finally:
+        for child in client._clients:
+            child.client.close()
+
+    quota.block_daily_quota(identity(s.LLM_GROQ_FALLBACK_MODEL), "daily test blockage", retry_seconds=600)
+    assert quota.chat_quota_status(s)["code"] == "provider_daily_quota"
+    assert quota.chat_quota_status(s)["retry_after"] <= 600
+    drafter = llm.get_pool_llm_client()
+    verifier = llm.get_pool_verifier_client()
+    try:
+        assert drafter.model == s.POOL_LLM_MODEL_NAME
+        assert all(child.model == s.POOL_VERIFY_LLM_MODEL_NAME for child in verifier._clients)
+    finally:
+        drafter.client.close()
+        for child in verifier._clients:
+            child.client.close()

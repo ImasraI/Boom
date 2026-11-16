@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "groq"  # Options: "groq", "openai", "omniroute", "ollama", "mock"
     LLM_API_KEY: str = ""
     LLM_GROQ_API_KEYS: str = ""  # Explicit chat backups; comma-separated.
+    LLM_GROQ_FALLBACK_MODEL: str = ""  # Optional student-facing Groq model backup.
     LLM_BASE_URL: str = "https://api.groq.com/openai/v1"
     LLM_MODEL_NAME: str = "llama-3.1-8b-instant"
     HOMEWORK_LLM_MODEL_NAME: str = ""  # Optional small model on the chat provider; empty inherits chat.

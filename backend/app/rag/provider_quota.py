@@ -268,15 +268,31 @@ def pool_quota_status(settings=None) -> dict:
     return generation if generation.get('fallback') else {'blocked':False}
 
 
+def chat_groq_models(settings) -> list[str]:
+    primary = (settings.LLM_MODEL_NAME or "").strip()
+    backup = (getattr(settings, "LLM_GROQ_FALLBACK_MODEL", "") or "").strip()
+    return list(dict.fromkeys(model for model in (primary, backup) if model))
+
+
 def chat_quota_status(settings) -> dict:
     if (getattr(settings, "LLM_PROVIDER", "") or "").strip().lower() != "groq":
         return {"blocked": False}
-    return _stage_quota_status(settings, chat=True)
+    states = []
+    for model in chat_groq_models(settings):
+        status = _stage_quota_status(settings, chat_model=model)
+        if not status["blocked"]:
+            return status
+        states.append(status)
+    retryable = [state for state in states if state.get("retry_after")]
+    if retryable:
+        return min(retryable, key=lambda state: state["retry_after"])
+    return states[0] if states else {"blocked": False}
 
 
-def _stage_quota_status(settings, *, verification: bool = False, provider_override=None, chat=False) -> dict:
+def _stage_quota_status(settings, *, verification: bool = False, provider_override=None, chat_model=None) -> dict:
+    chat = chat_model is not None
     if chat:
-        provider, override_model = "groq", settings.LLM_MODEL_NAME
+        provider, override_model = "groq", chat_model
     elif verification:
         provider = provider_override or settings.POOL_VERIFY_LLM_PROVIDER.strip().lower()
         override_model = getattr(settings, "POOL_VERIFY_LLM_MODEL_NAME", "")

@@ -1157,15 +1157,19 @@ def get_llm_client(
     own key instead of competing with the chatbot for the same rate limits.
     """
     settings = get_settings()
+    default_route = provider is None and api_key is None and model is None
     provider = (provider or settings.LLM_PROVIDER or "").strip().lower()
 
     if provider == "groq":
-        if api_key is None and getattr(settings, "LLM_GROQ_API_KEYS", ""):
-            keys = groq_keys(settings)
-            clients = [get_llm_client(provider="groq", api_key=key, model=model) for key in keys]
+        from app.rag.provider_quota import chat_groq_models
+        models = chat_groq_models(settings) if default_route else [model or settings.LLM_MODEL_NAME]
+        if api_key is None and (len(models) > 1 or getattr(settings, "LLM_GROQ_API_KEYS", "")):
+            clients = [get_llm_client(provider="groq", api_key=key, model=choice)
+                       for choice in models for key in groq_keys(settings)]
             if len(clients) > 1:
-                return FallbackLLMClient(clients, ["groq chat"] +
-                    [f"groq chat backup {i}" for i in range(1, len(clients))], switch_on_rate_limit=True)
+                labels = [f"groq chat {client.model} slot {index}"
+                          for index, client in enumerate(clients, 1)]
+                return FallbackLLMClient(clients, labels, switch_on_rate_limit=True)
             if clients:
                 return clients[0]
         key = api_key if api_key is not None else settings.LLM_API_KEY
@@ -1366,7 +1370,7 @@ def get_pool_llm_client() -> BaseLLMClient:
             primary = get_llm_client(provider=pool_provider or None,
                                      api_key=pool_key or None, model=pool_model)
         else:
-            primary = get_llm_client()
+            primary = get_llm_client(provider=primary_label or None)
         clients: List[BaseLLMClient] = [primary]
         labels: List[str] = [primary_label or "default"]
 
