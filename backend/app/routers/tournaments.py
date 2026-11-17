@@ -1,4 +1,4 @@
-"""Public tournament boards and authenticated, server-scored tournament play."""
+"""Tournament boards and server-scored play for signed-in users."""
 import json
 from datetime import datetime
 
@@ -71,13 +71,12 @@ class TiebreakConfig(BaseModel):
 
 
 def _no_store(response):
-    # Standings are public, but short no-store responses also prevent mixing
-    # different users' /me or start responses in intermediary caches.
+    # Keep browsers and intermediaries from caching account-specific responses.
     response.headers["Cache-Control"] = "no-store"
 
 
 @router.get("")
-def list_events(response: Response, db: Session = Depends(get_db)):
+def list_events(response: Response, db: Session = Depends(get_db), _user=Depends(get_current_user)):
     _no_store(response)
     items = []
     for event_id in db.scalars(select(TournamentEvent.id).order_by(TournamentEvent.id.desc()).limit(50)):
@@ -134,7 +133,7 @@ def prepare_tiebreak(event_id: int, body: TiebreakConfig, response: Response, ad
 
 
 @router.get("/{event_id:int}")
-def event_detail(event_id: int, response: Response, db: Session = Depends(get_db)):
+def event_detail(event_id: int, response: Response, db: Session = Depends(get_db), _user=Depends(get_current_user)):
     _no_store(response)
     state, _ = service.mutate(db, event_id, lambda *_: None)
     return service.public_event(event_id, state)

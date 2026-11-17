@@ -193,8 +193,9 @@ function MobileTabBar({ screen, nav }: { screen: Screen; nav: (s: Screen) => voi
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>(() => typeof window !== "undefined" && window.location.hash === "#tournament" ? "tournament" : "landing");
-  const [loginDestination, setLoginDestination] = useState<Screen>("home");
+  const tournamentLink = typeof window !== "undefined" && window.location.hash === "#tournament";
+  const [screen, setScreen] = useState<Screen>(() => tournamentLink ? "login" : "landing");
+  const [loginDestination, setLoginDestination] = useState<Screen>(() => tournamentLink ? "tournament" : "home");
   const [dark, setDark] = useState(() => { const stored = localStorage.getItem("boom-theme"); return stored ? stored === "dark" : true; });
   const [userData, setUserData] = useState<SignupData | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -217,7 +218,7 @@ export default function App() {
           accountStorage.removeItem(USER_KEY);
           setUserData(null);
           setIsAdmin(false);
-          setScreen(window.location.hash === "#tournament" ? "tournament" : "login");
+          setScreen("login");
           return null;
         }
         return res.ok ? res.json() : null;
@@ -260,8 +261,8 @@ export default function App() {
 
   function nav(s: Screen) {
     setSettingsRequest(0);
-    if (s === "login" && screen === "tournament") setLoginDestination("tournament");
-    if (!["landing", "login", "signup", "tournament"].includes(s) && !accountId()) {
+    if (s === "landing") setLoginDestination("home");
+    if (!["landing", "login", "signup"].includes(s) && !accountId()) {
       setLoginDestination(s);
       s = "login";
     }
@@ -295,7 +296,7 @@ export default function App() {
     const profile = normalizeSignupData(data);
     persistUser(profile);
     setUserData(profile);
-    nav("home");
+    nav(loginDestination);
     const token = localStorage.getItem(TOKEN_KEY);
     hydrateServerProfile(profile).then(server => {
       if (server && token && localStorage.getItem(TOKEN_KEY) === token) {

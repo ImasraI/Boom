@@ -112,8 +112,9 @@ def finish_league(state):
         service.reconcile(state, when)
 
 
-def test_empty_public_list_does_not_create_demo_players_or_event(client, db):
-    assert client.get("/api/tournaments").json() == {"items": []}
+def test_signed_in_event_list_does_not_create_demo_players_or_event(client, db):
+    assert client.get("/api/tournaments").status_code == 401
+    assert client.get("/api/tournaments", headers={"X-Test-User": "1"}).json() == {"items": []}
     assert db.query(TournamentEvent).count() == 0
 
 
@@ -129,7 +130,8 @@ def test_admin_configuration_is_not_student_registration(client, db):
 
 def test_public_boards_contain_no_packets_attempts_or_phone_names(client, db):
     event_id = store(db, active(db))
-    body = client.get(f"/api/tournaments/{event_id}").json()
+    assert client.get(f"/api/tournaments/{event_id}").status_code == 401
+    body = client.get(f"/api/tournaments/{event_id}", headers={"X-Test-User": "20"}).json()
     raw = json.dumps(body)
     assert "answer" not in raw and "questions" not in raw and "0912" not in raw and "PRIVATE" not in raw
     assert body["standings"][0]["name"] == "بازیکن 1"

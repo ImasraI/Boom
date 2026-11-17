@@ -1,42 +1,35 @@
-from types import SimpleNamespace
-import pytest
-from fastapi import HTTPException
-from app.auth import router
+"""Guest creation is retired and existing guest tokens cannot authorize requests."""
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+
+from app.auth import router as auth
 from app.auth.database import SessionLocal, User
-from app.auth.deps import require_admin
-from app.auth.security import decode_token
+from app.auth.security import create_access_token, get_password_hash
 
 
-def test_disabled_guest_never_creates_user(monkeypatch):
-    monkeypatch.setattr(router,"get_settings",lambda:SimpleNamespace(PUBLIC_GUEST_ACCESS=False))
-    with SessionLocal() as db:
-        before=db.query(User).count()
-        with pytest.raises(HTTPException) as e:router.guest_login(None,db)
-        assert e.value.status_code==404
-        assert db.query(User).count()==before
+def test_guest_routes_cannot_create_accounts():
+    app = FastAPI()
+    app.include_router(auth.router)
+    with SessionLocal() as db, TestClient(app) as client:
+        before = db.scalar(select(func.count(User.id)))
+        assert client.get("/api/auth/guest-status").status_code == 404
+        assert client.post("/api/auth/guest").status_code == 404
+        assert db.scalar(select(func.count(User.id))) == before
 
 
-def test_guests_are_distinct_unverified_nonadmin(monkeypatch):
-    monkeypatch.setattr(router,"get_settings",lambda:SimpleNamespace(PUBLIC_GUEST_ACCESS=True))
-    calls=[];monkeypatch.setattr(router,"rate_limit",lambda *a,**k:calls.append(k))
-    with SessionLocal() as db:
-        first=router.guest_login(None,db);second=router.guest_login(None,db)
-        ids=[int(decode_token(r["access_token"])["sub"]) for r in [first,second]]
-        assert ids[0]!=ids[1]
-        for id in ids:
-            user=db.get(User,id)
-            assert user.phone is None and not user.phone_verified and not user.is_admin
-            assert user.username.startswith("guest_")
-            with pytest.raises(HTTPException) as e:require_admin(user)
-            assert e.value.status_code==403
-        assert all(c["limit"]==5 and c["window_s"]==3600 for c in calls)
-
-
-def test_rate_limit_stops_creation(monkeypatch):
-    monkeypatch.setattr(router,"get_settings",lambda:SimpleNamespace(PUBLIC_GUEST_ACCESS=True))
-    def refuse(*a,**k):raise HTTPException(status_code=429)
-    monkeypatch.setattr(router,"rate_limit",refuse)
-    with SessionLocal() as db:
-        before=db.query(User).count()
-        with pytest.raises(HTTPException):router.guest_login(None,db)
-        assert db.query(User).count()==before
+def test_existing_guest_token_and_password_are_rejected(monkeypatch):
+    app = FastAPI()
+    app.include_router(auth.router)
+    monkeypatch.setattr(auth, "rate_limit", lambda *args, **kwargs: None)
+    password = "synthetic-guest-password"
+    with SessionLocal() as db, TestClient(app) as client:
+        guest = User(username="guest_" + "0" * 32, hashed_password=get_password_hash(password))
+        db.add(guest)
+        db.commit()
+        token = create_access_token({"sub": str(guest.id)})
+        assert client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"}).status_code == 401
+        assert client.post("/api/auth/login", data={
+            "username": guest.username, "password": password,
+        }).status_code == 401
+        assert db.get(User, guest.id) is not None

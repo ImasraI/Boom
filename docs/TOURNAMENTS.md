@@ -1,6 +1,6 @@
 # Tournaments
 
-The public tournament page is available at `/#tournament`, from the landing page,
+The tournament page is available after sign-in at `/#tournament`, from the landing page,
 and in the Colosseum navigation. Registration is deliberately closed: the visible
 button is a placeholder, and there are no enrollment or payment endpoints.
 
@@ -15,8 +15,8 @@ button is a placeholder, and there are no enrollment or payment endpoints.
 - The knockout tree has connecting paths, seeded quarterfinals, semifinals,
   final and a third-place match. Four-player playoffs are also supported.
 - Signed-in entrants see their assigned matches and official Tehran-local start
-  and deadline. Start/resume is enabled only by server eligibility. The public
-  page, diagrams and standings do not require sign-in.
+  and deadline. Start/resume is enabled only by server eligibility. Signed-in
+  students can also view the boards without being entrants.
 - Play uses a fixed, pre-reviewed packet, a shared server deadline and existing
   math/diagram rendering. Answers autosave with revisions. A resumed match keeps
   its deadline and saved answers; it does not receive another time allowance.

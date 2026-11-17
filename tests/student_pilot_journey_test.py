@@ -53,7 +53,13 @@ def test_signup_login_answer_feedback_journey(monkeypatch, tmp_path):
     assert client.post('/api/student-pilot/feedback', headers=headers, json=feedback).status_code == 200
     assert client.get('/api/student-pilot', headers=headers).json()['feedback'] == feedback['comments']
     # Another real JWT/account must not see the first participant's answers.
-    monkeypatch.setattr(auth, 'get_settings', lambda: SimpleNamespace(PUBLIC_GUEST_ACCESS=True))
-    guest = client.post('/api/auth/guest').json()['access_token']
-    other = client.get('/api/student-pilot', headers={**headers, 'Authorization':'Bearer '+guest})
+    other_phone = '9125550199'
+    assert client.post('/api/auth/request-code', json={'phone': other_phone}).status_code == 200
+    assert client.post('/api/auth/register/complete', json={
+        **body, 'phone': other_phone, 'code': sent[-1][1],
+    }).status_code == 200
+    other_login = client.post('/api/auth/login', data={'username': other_phone, 'password': body['password']})
+    assert other_login.status_code == 200
+    other_token = other_login.json()['access_token']
+    other = client.get('/api/student-pilot', headers={'Authorization': 'Bearer ' + other_token})
     assert other.status_code == 200 and other.json()['answers'] is None

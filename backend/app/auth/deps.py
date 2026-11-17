@@ -15,6 +15,11 @@ def get_db():
     finally:
         db.close()
 
+def is_legacy_guest(user: User) -> bool:
+    # Guest preview rows had a generated username and no login phone.
+    return user.phone is None and user.username.startswith("guest_")
+
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     payload = decode_token(token)
     if not payload:
@@ -32,6 +37,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if is_legacy_guest(user):
+        raise HTTPException(status_code=401, detail="برای ادامه وارد حساب شوید یا ثبت‌نام کنید.")
     return user
 
 def require_admin(current_user: User = Depends(get_current_user)):
