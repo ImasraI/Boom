@@ -9,7 +9,14 @@ import { RankSymbol, StudySymbol } from "../components/StudySymbols"
 import QuestionFigure from "../components/QuestionFigure"
 import type { QuestionFigureData } from "../questionFigures"
 
-type Phase = "lobby" | "queued" | "playing" | "finished" | "board" | "scheduled"
+import DuelCalendar, { validDuelTime } from "../components/DuelCalendar"
+import DuelRoom from "../components/DuelRoom"
+import { duelCode, forgetDuelLink } from "../duelLink"
+import { timestamp } from "../components/tournament/format"
+import "../tournament.css"
+import "../duel.css"
+
+type Phase = "lobby" | "queued" | "playing" | "finished" | "board" | "scheduled" | "room" | "waiting"
 
 interface MeInfo {
   elo: number
@@ -42,6 +49,9 @@ interface MatchInfo {
   opponent_score: number | null
   won: boolean
   mock_id: number | null
+  is_private?: boolean
+  starts_at?: string | null
+  server_now?: string
   mock: { duration_minutes: number | null } | null
   // Shared knowledge base the booklet was generated from (the INTERSECTION of
   // both players' subjects for a cross-major duel).
@@ -192,11 +202,12 @@ function EloBadge({ elo, title, color, size = "md" }: { elo: number; title?: str
 
 /* ---------------- Lobby ---------------- */
 
-function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, error }: {
+function Lobby({ me, onJoin, onBoard, onScheduled, onRoom, busy, filters, error }: {
   me: MeInfo | null
   onJoin: () => void
   onBoard: () => void
   onScheduled: () => void
+  onRoom: () => void
   busy: boolean
   filters: FilterOptions | null
   error?: string
@@ -241,6 +252,10 @@ function Lobby({ me, onJoin, onBoard, onScheduled, busy, filters, error }: {
         <button onClick={onJoin} disabled={busy}
           className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50">
           {busy ? "در حال دریافت اطلاعات کولوسئوم..." : "جستجوی حریف"}
+        </button>
+        <button onClick={onRoom}
+          className="w-full py-3.5 rounded-md border border-[var(--accent-soft-border)] bg-[var(--accent-soft)] text-[var(--accent)] text-[13px] font-bold">
+          ساخت اتاق دوستانه
         </button>
         <button onClick={onScheduled}
           className="w-full py-3.5 rounded-2xl border border-[var(--border-strong)] text-[13px] font-bold text-[var(--text)] flex items-center justify-center gap-2">
@@ -300,7 +315,7 @@ function Queue({ waited, onCancel, wanted, grade }: {
 
 function DuelRunner({ match, onDone, onExit }: {
   match: MatchInfo
-  onDone: (answers: Record<string, number | "">, seconds: number) => void
+  onDone: (answers: Record<string, number | "">, seconds: number) => Promise<void>
   onExit: () => void
 }) {
   const [questions, setQuestions] = useState<AQ[]>([])
@@ -310,6 +325,10 @@ function DuelRunner({ match, onDone, onExit }: {
   const [bookletError, setBookletError] = useState("")
   const totalSec = (match.mock?.duration_minutes ?? 10) * 60
   const submittedRef = useRef(false)
+  const autoSubmitted = useRef(false)
+  const [submissionError, setSubmissionError] = useState("")
+  const roomClock = useRef(match.is_private && match.starts_at && match.server_now
+    ? performance.now() - (timestamp(match.server_now) - timestamp(match.starts_at)) : null)
   const answersRef = useRef(answers)
   answersRef.current = answers
 
@@ -338,18 +357,30 @@ function DuelRunner({ match, onDone, onExit }: {
 
   useEffect(() => {
     if (!questions.length) return
-    const t = setInterval(() => setElapsed(e => e + 1), 1000)
+    const tick = () => {
+      const start = roomClock.current
+      setElapsed(previous => start === null ? previous + 1 : Math.max(0, Math.floor((performance.now() - start) / 1000)))
+    }
+    if (roomClock.current !== null) tick()
+    const t = setInterval(tick, 1000)
     return () => clearInterval(t)
   }, [questions.length])
 
   const submit = useCallback(() => {
     if (submittedRef.current) return
     submittedRef.current = true
-    onDone(answersRef.current, elapsed)
+    setSubmissionError("")
+    void onDone(answersRef.current, elapsed).catch(failure => {
+      submittedRef.current = false
+      setSubmissionError(failure instanceof Error ? failure.message : "ثبت پاسخ‌ها انجام نشد. دوباره تلاش کن.")
+    })
   }, [elapsed, onDone])
 
   useEffect(() => {
-    if (elapsed >= totalSec) submit()
+    if (elapsed >= totalSec && !autoSubmitted.current) {
+      autoSubmitted.current = true
+      submit()
+    }
   }, [elapsed, totalSec, submit])
 
   const q = questions[Math.min(current, questions.length - 1)]
@@ -358,7 +389,7 @@ function DuelRunner({ match, onDone, onExit }: {
     return (
       <div className="min-h-screen bg-[var(--surface)] flex flex-col gap-4 items-center justify-center px-5">
         <div className="w-9 h-9 border-3 border-[var(--accent)] border-t-transparent rounded-full animate-spin" style={{ borderWidth: 3 }} />
-        <p className="text-sm text-[var(--muted)]">در حال دریافت دفترچه مسابقه… زمان آزمون پس از دریافت سوال‌ها شروع می‌شود.</p>
+        <p className="text-sm text-[var(--muted)]">در حال دریافت دفترچهٔ مسابقه…</p>
         {bookletError && <p role="alert" className="text-sm text-red-500">{bookletError}</p>}
         <button onClick={onExit} className="text-sm text-[var(--accent)]">بازگشت به کولوسئوم</button>
       </div>
@@ -421,6 +452,7 @@ function DuelRunner({ match, onDone, onExit }: {
               className="px-6 h-10 rounded-xl bg-[var(--accent)] text-white text-[13px] font-bold">پایان دوئل</button>
           )}
         </div>
+          {submissionError && <p role="alert" className="text-sm text-red-500">{submissionError}</p>}
       </div>
     </div>
   )
@@ -455,12 +487,12 @@ function MatchResult({ match, onHome, onBoard }: { match: MatchInfo; onHome: () 
           </div>
         </div>
 
-        <div className="flex items-center justify-center gap-3">
+        {!match.is_private && <div className="flex items-center justify-center gap-3">
           <EloBadge elo={match.your_elo} size="lg" />
           <span className={`text-[18px] font-bold tabular-nums ${delta >= 0 ? "text-green-500" : "text-red-500"}`} dir="ltr">
             {delta >= 0 ? "+" : ""}{delta}
           </span>
-        </div>
+        </div>}
       </div>
 
       <div className="px-4 max-w-[430px] mx-auto w-full space-y-3">
@@ -532,7 +564,7 @@ function ScheduledView({ me, open, mine, quota, busyId, error, onCreate, onAccep
   // Which quick-slot is highlighted; null = custom time typed by hand.
   // "tomorrow-am" matches the Page's defaultWhen (tomorrow 10:00).
   const [activeChip, setActiveChip] = useState<string | null>("tomorrow-am")
-  const whenValid = !Number.isNaN(new Date(when).getTime())
+  const whenValid = validDuelTime(when)
   return (
     <div className="min-h-screen bg-[var(--surface)]">
       <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-12 pb-4 flex items-center gap-3">
@@ -643,9 +675,8 @@ function ScheduledView({ me, open, mine, quota, busyId, error, onCreate, onAccep
           )}
         </section>
 
-        {/* Create an offer */}
-        <section className="study-section p-4">
-          <p className="text-[13px] font-bold text-[var(--text)] mb-1">پیشنهاد دوئل بده</p>
+        <section className="duel-schedule-card tournament-page">
+          <div className="tn-section-heading"><h2>زمان دوئل را انتخاب کن</h2></div>
           <p className="text-[11px] text-[var(--muted-2)] leading-relaxed mb-3">
             فقط یک زمان را بزن؛ پیشنهادت در فهرست بالا می‌آید تا حریفی هم‌سطح آن را رزرو کند. در زمان مقرر دوئل برای هر دو شروع می‌شود.
           </p>
@@ -666,16 +697,14 @@ function ScheduledView({ me, open, mine, quota, busyId, error, onCreate, onAccep
               شروع دوئل: {fmtWhen(new Date(when).toISOString())}
             </p>
           )}
-          <details className="mb-3">
-            <summary className="text-[11px] text-[var(--muted-2)] cursor-pointer select-none">
-              زمان دقیق دیگر…
-            </summary>
-            <input type="datetime-local" value={when} onChange={e => { setWhen(e.target.value); setActiveChip(null) }}
-              className="mt-2 w-full px-3 py-2.5 rounded-xl border border-[var(--border-strong)] bg-[var(--surface)] text-[13px] text-[var(--text)] tabular-nums" />
+          <details className="duel-custom-time">
+            <summary>انتخاب تاریخ و ساعت دلخواه</summary>
+            <DuelCalendar value={when} onChange={value => { setWhen(value); setActiveChip(null) }} />
           </details>
+          {!whenValid && <p className="duel-time-hint">زمان باید بین ۵ دقیقه تا ۱۴ روز دیگر باشد.</p>}
           <button onClick={() => onCreate(when)} disabled={busyId === "create" || !whenValid}
-            className="w-full py-3 rounded-xl bg-[var(--accent)] text-white text-[13px] font-bold disabled:opacity-50">
-            {busyId === "create" ? "..." : "ثبت پیشنهاد"}
+            className="tn-button tn-button-primary w-full">
+            {busyId === "create" ? "در حال ثبت…" : "ثبت پیشنهاد"}
           </button>
         </section>
       </div>
@@ -691,7 +720,8 @@ export default function Arena({ nav, userData, initialPhase }: {
   /** Sub-panel entry: the جدول امتیازات tab opens the board directly. */
   initialPhase?: Phase
 }) {
-  const [phase, setPhase] = useState<Phase>(initialPhase ?? "lobby")
+  const [roomInvite, setRoomInvite] = useState(duelCode)
+  const [phase, setPhase] = useState<Phase>(initialPhase ?? (roomInvite ? "room" : "lobby"))
   const [me, setMe] = useState<MeInfo | null>(null)
   const [waited, setWaited] = useState(0)
   const [match, setMatch] = useState<MatchInfo | null>(null)
@@ -824,20 +854,41 @@ export default function Arena({ nav, userData, initialPhase }: {
 
   async function submitDuel(answers: Record<string, number | "">, seconds: number) {
     if (!match) return
-    try {
-      await authFetch(`/api/arena/${match.match_id}/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, duration_seconds: seconds }),
-      })
-    } catch { /* ignore; results loaded below */ }
+    const response = await authFetch("/api/arena/" + match.match_id + "/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers, duration_seconds: seconds }),
+    })
     const m = await loadMatch(match.match_id)
-    if (m) {
-      setMatch(m)
-      if (m.status === "cancelled") {
-        stopPoll(); setPhase("lobby"); setError("سوال مسابقه گزارش شد؛ مسابقه بدون تغییر رتبه لغو شد.");
-      } else setPhase("finished")
+    if (!response.ok && m.status !== "cancelled") {
+      throw new Error(await readApiError(response, "ثبت پاسخ‌ها انجام نشد."))
     }
+    setMatch(m)
+    if (m.status === "cancelled") {
+      stopPoll()
+      setPhase("lobby")
+      setError(m.generation_error || "سوال مسابقه گزارش شد؛ مسابقه بدون تغییر رتبه لغو شد.")
+    } else if (m.is_private && m.status !== "finished") setPhase("waiting")
+    else setPhase("finished")
+  }
+
+  const enterRoomMatch = useCallback(async (matchId: number) => {
+    const m = await loadMatch(matchId)
+    if (m.status === "scheduled") throw new Error("شمارش معکوس هنوز تمام نشده است.")
+    if (m.status === "cancelled") throw new Error(m.generation_error || "مسابقه لغو شده است.")
+    setMatch(m)
+    if (m.status === "finished") setPhase("finished")
+    else {
+      setPhase(m.your_score !== null ? "waiting" : "playing")
+      startPolling(matchId)
+    }
+  }, [loadMatch, startPolling])
+
+  function roomHome() {
+    stopPoll()
+    forgetDuelLink()
+    setRoomInvite(null)
+    setPhase("lobby")
   }
 
   /* ---------------- scheduled duels ---------------- */
@@ -948,8 +999,14 @@ export default function Arena({ nav, userData, initialPhase }: {
 
   if (phase === "queued") return <Queue waited={waited} onCancel={cancelQueue}
     wanted={wanted} grade={filters?.grade} />
-  if (phase === "playing" && match) return <DuelRunner match={match} onDone={submitDuel} onExit={cancelQueue} />
-  if (phase === "finished" && match) return <MatchResult match={match} onHome={() => setPhase("lobby")} onBoard={openBoard} />
+  if (phase === "room") return <DuelRoom invite={roomInvite} onBack={roomHome} onStart={enterRoomMatch} />
+  if (phase === "waiting") return <section className="tournament-page duel-room" dir="rtl">
+    <div className="tn-hero-title"><h1>پاسخ‌ها ثبت شد</h1></div>
+    <p className="tn-hero-description" role="status">منتظر پاسخ‌های دوستت هستیم. بعد از پایان دوئل، نتیجه نمایش داده می‌شود.</p>
+    <button className="tn-button tn-button-secondary" onClick={roomHome}>بازگشت به کولوسئوم</button>
+  </section>
+  if (phase === "playing" && match) return <DuelRunner match={match} onDone={submitDuel} onExit={match.is_private ? roomHome : cancelQueue} />
+  if (phase === "finished" && match) return <MatchResult match={match} onHome={roomHome} onBoard={openBoard} />
   if (phase === "board") return <Board rows={board}
     onBack={() => { if (initialPhase === "board") nav("arena"); else setPhase("lobby") }} />
   if (phase === "scheduled") return <ScheduledView me={me} open={schedOpen} mine={schedMine}
@@ -963,6 +1020,6 @@ export default function Arena({ nav, userData, initialPhase }: {
     </button>
   </div><Lobby me={me} onJoin={join} onBoard={openBoard} busy={loadingLobby || !!lobbyError}
     filters={filters}
-    error={lobbyError || error} onScheduled={openScheduled} />
+    error={lobbyError || error} onScheduled={openScheduled} onRoom={() => setPhase("room")} />
     {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت کولوسئوم</button></div>}</>
 }

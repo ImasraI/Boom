@@ -2,6 +2,7 @@ import { accountStorage, accountId } from "./accountStorage";
 import { pullCalendar, flushCalendar } from "./calendarSync";
 import { Component, lazy, Suspense, useEffect, useState } from "react";
 import { authFetch, authHeaders, SESSION_EXPIRED, SESSION_EXPIRED_MESSAGE } from "./api";
+import { duelCode, forgetDuelLink } from "./duelLink";
 import { consumeResumePage, isPageDownloadError, recoverPageDownload } from "./pageRecovery";
 import { hydrateServerProfile, toSignupData } from "./profileSync";
 import { Screen, SignupData, NavFn, normalizeSignupData, emptySignupData } from "./types";
@@ -194,8 +195,9 @@ function MobileTabBar({ screen, nav }: { screen: Screen; nav: (s: Screen) => voi
 
 export default function App() {
   const tournamentLink = typeof window !== "undefined" && window.location.hash === "#tournament";
-  const [screen, setScreen] = useState<Screen>(() => tournamentLink ? "login" : "landing");
-  const [loginDestination, setLoginDestination] = useState<Screen>(() => tournamentLink ? "tournament" : "home");
+  const invite = duelCode();
+  const [screen, setScreen] = useState<Screen>(() => invite || tournamentLink ? "login" : "landing");
+  const [loginDestination, setLoginDestination] = useState<Screen>(() => invite ? "arena" : tournamentLink ? "tournament" : "home");
   const [dark, setDark] = useState(() => { const stored = localStorage.getItem("boom-theme"); return stored ? stored === "dark" : true; });
   const [userData, setUserData] = useState<SignupData | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -240,7 +242,7 @@ export default function App() {
     try {
       const profile = savedUser ? normalizeSignupData(JSON.parse(savedUser)) : emptySignupData();
       setUserData(profile);
-      setScreen(consumeResumePage() ?? (window.location.hash === "#tournament" ? "tournament" : "home"));
+      setScreen(duelCode() ? "arena" : consumeResumePage() ?? (window.location.hash === "#tournament" ? "tournament" : "home"));
       // Growth-readiness project 1: refresh the cache from the server so a
       // second device (or a cleared storage) converges on the same state.
       hydrateServerProfile(profile).then(server => {
@@ -271,6 +273,7 @@ export default function App() {
       setLoginDestination(s);
       s = "login";
     }
+    if (!["arena", "login", "signup"].includes(s)) forgetDuelLink();
     const nextHash = s === "tournament" ? "#tournament" : "";
     if (window.location.hash !== nextHash) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${nextHash}`);
     setScreen(s);

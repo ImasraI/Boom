@@ -408,6 +408,7 @@ class ArenaMatch(Base):
     # per-question answers live in ai_answers so scoring runs identically.
     is_ai_opponent = Column(Boolean, nullable=False, default=False,
                             server_default="0")
+    is_private = Column(Boolean, nullable=False, default=False, server_default="0")
     # Key into arena._AI_RIVAL_LEVELS (named difficulty, not raw probability).
     ai_rival = Column(String, nullable=True)
     # JSON {question_id: chosen option index} sampled at the level's accuracy.
@@ -422,6 +423,18 @@ class ArenaMatch(Base):
     # cancel-authorization rule: only the host or the acceptor may cancel.
     # For instant modes this is Null (= not a scheduled match).
     booked_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
+class ArenaRoom(Base):
+    """An invitation to a single private duel."""
+    __tablename__ = "arena_rooms"
+    code = Column(String, primary_key=True)
+    host_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    guest_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    host_ready = Column(Boolean, nullable=False, default=False)
+    guest_ready = Column(Boolean, nullable=False, default=False)
+    match_id = Column(Integer, ForeignKey("arena_matches.id"), nullable=True)
+    expires_at = Column(DateTime, nullable=False)
 
 
 class ArenaScheduledInvite(Base):
@@ -605,6 +618,7 @@ def ensure_schema() -> None:
     # AI-rival exhibition columns on arena_matches (existing DBs backfill;
     # is_ai_opponent defaults to 0 = a real ranked match).
     _ensure_column("arena_matches", "is_ai_opponent", "BOOLEAN DEFAULT 0")
+    _ensure_column("arena_matches", "is_private", "BOOLEAN NOT NULL DEFAULT 0")
     # Scheduled duels (arena scheduling option): kickoff timestamp + who
     # booked the match. Null on every classic row.
     _ensure_column("arena_matches", "starts_at", "TIMESTAMP")
@@ -677,7 +691,7 @@ def latest_arena_match(db, student_id: int):
         select(ArenaMatch)
         .where((ArenaMatch.student_a_id == student_id)
                | (ArenaMatch.student_b_id == student_id))
-        .where(ArenaMatch.is_ai_opponent.is_(False))
+        .where(ArenaMatch.is_ai_opponent.is_(False), ArenaMatch.is_private.is_(False))
         .where(ArenaMatch.status == "finished")
         .order_by(ArenaMatch.created_at.desc())
         .limit(1)
@@ -704,8 +718,8 @@ def record_match_rating(match: ArenaMatch, db=None) -> None:
     arena submit endpoint additionally skips calling this for such matches;
     the guard makes the exclusion hold even if a future caller forgets.
     """
-    if getattr(match, "is_ai_opponent", False):
-        # Exhibition vs the simulated rival: zero deltas, ratings untouched.
+    if getattr(match, "is_ai_opponent", False) or getattr(match, "is_private", False):
+        # Exhibition and private matches have zero rating deltas.
         match.delta_a = 0
         match.delta_b = 0
         return
@@ -721,6 +735,7 @@ def record_match_rating(match: ArenaMatch, db=None) -> None:
                     # AI-rival exhibitions never consume placement
                     # acceleration - only real matches count toward the 10.
                     ArenaMatch.is_ai_opponent.is_(False),
+                    ArenaMatch.is_private.is_(False),
                     (ArenaMatch.student_a_id == student_id)
                     | (ArenaMatch.student_b_id == student_id),
                 )

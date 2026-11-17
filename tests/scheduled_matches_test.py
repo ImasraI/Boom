@@ -358,3 +358,92 @@ def test_scheduled_list_reports_remaining_quota(db):
     listing = arena.list_scheduled(current_user=_ctx(rival), db=db)
     assert listing["quota"]["used"] == 1
     assert listing["quota"]["remaining"] == listing["quota"]["limit"] - 1
+
+
+def test_private_room_shares_kickoff_and_booklet_without_ranked_rating(db, monkeypatch):
+    import json
+    from datetime import timezone
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.auth.database import BankQuestion, StudentProfile, MockAttempt
+    from app.auth.security import create_access_token
+    from app.routers import mocks
+
+    host = _mk_user(db, "private-host", 1150)
+    friend = _mk_user(db, "private-friend", 900)
+    stranger = _mk_user(db, "private-stranger")
+    grades = ("دوازدهم", "دهم", "دهم")
+    major = "علوم تجربی"
+    for user, grade in zip((host, friend, stranger), grades):
+        db.add(StudentProfile(user_id=user.id, major=major, grade=grade))
+    plan = arena._pair_plan(major, major, grade=grades[1])["plan"]
+    for row in plan:
+        for i in range(row["questions"]):
+            ident = f"private-{row['name']}-{i}"
+            db.add(BankQuestion(fingerprint=ident, major=major, grade=grades[1], grade_level=10,
+                subject=row["name"], content=json.dumps({
+                    "text": ident, "options": ["A", "B", "C", "D"], "answer": 1,
+                    "verification_status": "verified", "subject": row["name"],
+                }), verified=True))
+    db.commit()
+    actor_ids = tuple(user.id for user in (host, friend, stranger))
+    actors = [{"Authorization": "Bearer " + create_access_token({"sub": str(uid)})} for uid in actor_ids]
+
+    class Clock(datetime):
+        instant = datetime(2030, 1, 1, 15, 0)
+        @classmethod
+        def utcnow(cls):
+            return cls.instant
+        @classmethod
+        def now(cls, tz=None):
+            return cls.instant.replace(tzinfo=timezone.utc).astimezone(tz) if tz else cls.instant
+
+    monkeypatch.setattr(arena, "datetime", Clock)
+    monkeypatch.setattr(mocks, "datetime", Clock)
+    app = FastAPI()
+    app.include_router(arena.router)
+    app.include_router(mocks.router)
+    for dependency in (arena.get_db, mocks.get_db):
+        app.dependency_overrides[dependency] = lambda: db
+    with TestClient(app) as client:
+        assert client.post("/api/arena/rooms").status_code == 401
+        created = client.post("/api/arena/rooms", headers=actors[0])
+        assert created.status_code == 201
+        url = "/api/arena/rooms/" + created.json()["code"]
+        assert client.get(url, headers=actors[2]).status_code == 403
+        assert client.post(url + "/ready", headers=actors[0]).status_code == 409
+        assert client.post(url + "/join", headers=actors[1]).status_code == 200
+        assert client.post(url + "/join", headers=actors[2]).status_code == 409
+
+        first = client.post(url + "/ready", headers=actors[0]).json()
+        assert first["host_ready"] and first["match_id"] is None
+        second = client.post(url + "/ready", headers=actors[1]).json()
+        assert second["guest_ready"]
+        kickoff = datetime.fromisoformat(second["starts_at"])
+        assert kickoff - datetime.fromisoformat(second["server_now"]) == timedelta(seconds=3)
+        match_id = second["match_id"]
+        assert client.get(url, headers=actors[0]).json()["starts_at"] == second["starts_at"]
+        assert client.post(url + "/ready", headers=actors[0]).json()["match_id"] == match_id
+        match_url = "/api/arena/" + str(match_id)
+        detail = client.get(match_url, headers=actors[0]).json()
+        mock_url = "/api/mocks/" + str(detail["mock_id"])
+        assert detail["status"] == "scheduled"
+        assert client.get(mock_url, headers=actors[0]).status_code == 409
+        assert client.get(mock_url, headers=actors[1]).status_code == 409
+
+        Clock.instant += timedelta(seconds=3)
+        assert client.get(match_url, headers=actors[0]).json()["status"] == "pending"
+        assert client.get(mock_url, headers=actors[2]).status_code == 404
+        questions = client.get(mock_url, headers=actors[0]).json()["questions"]
+        assert len(questions) == 10 and all("answer" not in item for item in questions)
+        assert client.get(mock_url, headers=actors[1]).json()["questions"] == questions
+        assert not client.post(match_url + "/submit", headers=actors[0], json={"answers":{"1":1}}).json()["finished"]
+        assert client.get(match_url, headers=actors[1]).json()["opponent_score"] is None
+        assert not client.post(match_url + "/submit", headers=actors[0], json={"answers":{}}).json()["finished"]
+        assert client.post(match_url + "/submit", headers=actors[1], json={"answers":{}}).json()["finished"]
+        result = client.get(match_url, headers=actors[0]).json()
+        assert result["won"] and not result["ranked"] and result["your_score"] == 10
+        assert result["your_delta"] == result["opponent_delta"] == 0
+        assert db.query(MockAttempt).count() == 2
+        assert [db.get(User, uid).rating for uid in actor_ids[:2]] == [1150, 900]
+        assert client.get("/api/arena/me", headers=actors[0]).json()["matches"] == 0

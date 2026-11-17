@@ -18,6 +18,7 @@ after 30 minutes so matchmaking never pairs with a ghost.
 """
 
 import json
+import secrets
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -31,6 +32,7 @@ from app.auth.database import (
     ArenaMatch,
     ArenaQueueEntry,
     ArenaScheduledInvite,
+    ArenaRoom,
     BankQuestion,
     GeneratedMock,
     MockAttempt,
@@ -568,7 +570,7 @@ def status(
             select(ArenaMatch)
             .where((ArenaMatch.student_a_id == current_user.id)
                    | (ArenaMatch.student_b_id == current_user.id))
-            .where(ArenaMatch.status == "pending")
+            .where(ArenaMatch.status == "pending", ArenaMatch.is_private.is_(False))
             .order_by(ArenaMatch.created_at.desc())
             .limit(1)
         ).scalar_one_or_none()
@@ -803,6 +805,135 @@ def _activate_due_matches(db: Session, user_id: int) -> None:
                         match.id)
     if due:
         db.flush()
+
+
+def _room_scope(db, user_id):
+    profile = _profile_of(db, user_id)
+    major = _major_key_of(profile.major or "") if profile else ""
+    grade = (profile.grade or "").strip() if profile else ""
+    if major not in pool_core.STARTER_MAJORS or grade not in pool_core.STARTER_GRADES:
+        raise HTTPException(409, "برای دوئل دوستانه، پایه و رشتهٔ ریاضی یا تجربی را در حسابت ثبت کن.")
+    return major, grade
+
+
+def _find_room(db, code):
+    room = db.get(ArenaRoom, code) if len(code) == 24 else None
+    if room is None:
+        raise HTTPException(404, "اتاق پیدا نشد.")
+    if room.match_id is None and room.expires_at <= datetime.utcnow():
+        raise HTTPException(410, "مهلت این لینک گذشته است. یک اتاق تازه بساز.")
+    return room
+
+
+def _room_view(db, room, user_id):
+    if user_id not in (room.host_id, room.guest_id):
+        raise HTTPException(403, "برای دیدن اتاق از لینک دعوت وارد شو.")
+    match = db.get(ArenaMatch, room.match_id) if room.match_id else None
+    return {
+        "code": room.code,
+        "host": _arena_name(db, db.get(User, room.host_id)),
+        "guest": _arena_name(db, db.get(User, room.guest_id)) if room.guest_id else None,
+        "is_host": user_id == room.host_id,
+        "host_ready": room.host_ready,
+        "guest_ready": room.guest_ready,
+        "match_id": room.match_id,
+        "starts_at": match.starts_at.replace(tzinfo=timezone.utc).isoformat() if match else None,
+        "server_now": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.post("/rooms", status_code=201)
+def create_room(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    with _LOCK:
+        _room_scope(db, current_user.id)
+        now = datetime.utcnow()
+        # Reopen the host's unfinished invitation when the page or request is retried.
+        room = db.scalar(select(ArenaRoom).where(
+            ArenaRoom.host_id == current_user.id, ArenaRoom.match_id.is_(None),
+            ArenaRoom.expires_at > now,
+        ).limit(1))
+        if room is None:
+            room = ArenaRoom(code=secrets.token_urlsafe(18), host_id=current_user.id,
+                             expires_at=now + timedelta(hours=2))
+            db.add(room)
+            db.commit()
+        return _room_view(db, room, current_user.id)
+
+
+@router.get("/rooms/{code}")
+def room_status(code: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _room_view(db, _find_room(db, code), current_user.id)
+
+
+@router.post("/rooms/{code}/join")
+def join_room(code: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    with _LOCK:
+        room = _find_room(db, code)
+        if current_user.id not in (room.host_id, room.guest_id):
+            if room.guest_id is not None:
+                raise HTTPException(409, "این اتاق پر است.")
+            major, _ = _room_scope(db, current_user.id)
+            host_major, _ = _room_scope(db, room.host_id)
+            if host_major != major:
+                raise HTTPException(409, "این اتاق برای دانش‌آموزان هم‌رشته است.")
+            room.guest_id = current_user.id
+            db.commit()
+        return _room_view(db, room, current_user.id)
+
+
+@router.post("/rooms/{code}/ready")
+def ready_room(code: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    with _LOCK:
+        room = _find_room(db, code)
+        if current_user.id not in (room.host_id, room.guest_id):
+            raise HTTPException(403, "ابتدا از لینک دعوت وارد اتاق شو.")
+        if room.match_id is not None:
+            return _room_view(db, room, current_user.id)
+        if room.guest_id is None:
+            raise HTTPException(409, "منتظر ورود دوستت بمان.")
+        if current_user.id == room.host_id:
+            room.host_ready = True
+        else:
+            room.guest_ready = True
+        if room.host_ready and room.guest_ready:
+            major, host_grade = _room_scope(db, room.host_id)
+            guest_major, guest_grade = _room_scope(db, room.guest_id)
+            if major != guest_major:
+                raise HTTPException(409, "این اتاق برای دانش‌آموزان هم‌رشته است.")
+            label = pool_core.CANONICAL_MAJOR[major]
+            grade = kb.grade_scope(host_grade, guest_grade)
+            pair = _pair_plan(label, label, grade=grade, db=db, user_id=room.host_id)
+            _ensure_pair(pair)
+            mock = pool_core.reused_duel(db, room.host_id, major, grade=grade,
+                                         plan=pair["plan"], topics=pair.get("topics"))
+            if mock is None:
+                raise HTTPException(409, "برای پایه و رشتهٔ مشترک هنوز دفترچهٔ آماده وجود ندارد.")
+            match = ArenaMatch(student_a_id=room.host_id, student_b_id=room.guest_id,
+                               mock_id=mock.id, status="scheduled", is_private=True,
+                               elo_a=user_elo(db, room.host_id), elo_b=user_elo(db, room.guest_id),
+                               starts_at=datetime.utcnow() + timedelta(seconds=3))
+            db.add(match)
+            db.flush()
+            room.match_id = match.id
+        db.commit()
+        return _room_view(db, room, current_user.id)
+
+
+@router.delete("/rooms/{code}")
+def close_room(code: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    with _LOCK:
+        room = _find_room(db, code)
+        if current_user.id not in (room.host_id, room.guest_id):
+            raise HTTPException(403, "این اتاق متعلق به تو نیست.")
+        if room.match_id is not None:
+            raise HTTPException(409, "مسابقه آغاز شده است.")
+        if current_user.id == room.host_id:
+            room.expires_at = datetime.utcnow()
+        else:
+            room.guest_id = None
+            room.host_ready = room.guest_ready = False
+        db.commit()
+        return {"closed": True}
 
 
 def _upcoming_scheduled(db: Session, user_id: int):
@@ -1101,6 +1232,29 @@ def leave_queue(
     return {"left": True}
 
 
+def _finish_match(match, db):
+    record_match_rating(match, db)
+    match.status = "finished"
+    match.finished_at = datetime.utcnow()
+    if match.score_a > match.score_b:
+        match.winner_id = match.student_a_id or None
+    elif match.score_b > match.score_a:
+        match.winner_id = match.student_b_id or None
+
+
+def _settle_private_deadline(match, db):
+    if not match.is_private or match.status != "pending":
+        return
+    mock = db.get(GeneratedMock, match.mock_id)
+    if mock and datetime.utcnow() >= match.starts_at + timedelta(minutes=mock.duration_minutes, seconds=10):
+        if match.score_a is None:
+            match.score_a = 0
+        if match.score_b is None:
+            match.score_b = 0
+        _finish_match(match, db)
+        db.commit()
+
+
 @router.post("/{match_id}/submit")
 def submit(
     match_id: int,
@@ -1108,11 +1262,17 @@ def submit(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    with _LOCK:
+        return _submit_match(match_id, payload, current_user, db)
+
+
+def _submit_match(match_id, payload, current_user, db):
     match = db.get(ArenaMatch, match_id)
     if not match:
         raise HTTPException(status_code=404, detail="مسابقه پیدا نشد")
     if current_user.id not in (match.student_a_id, match.student_b_id):
         raise HTTPException(status_code=403, detail="این مسابقه مال تو نیست")
+    _settle_private_deadline(match, db)
     if match.status == "finished":
         return {"already_finished": True}
     if match.status == "cancelled":
@@ -1136,8 +1296,11 @@ def submit(
         match.finished_at = datetime.utcnow()
         db.commit()
         raise HTTPException(409, detail="سوالی از این مسابقه گزارش شده است؛ مسابقه بدون تغییر رتبه لغو شد")
-    result = _score(questions, payload.answers)
     is_a = match.student_a_id == current_user.id
+    previous = match.score_a if is_a else match.score_b
+    if match.is_private and previous is not None:
+        return {"finished": False, "your_score": previous}
+    result = _score(questions, payload.answers)
     if is_a:
         match.score_a = result["percent"]
     else:
@@ -1189,13 +1352,7 @@ def submit(
     if match.score_a is not None and match.score_b is not None:
         # Placement K-factor is computed BEFORE the row is marked finished so
         # the current match is not counted in either player's history.
-        record_match_rating(match, db)
-        match.status = "finished"
-        match.finished_at = datetime.utcnow()
-        if match.score_a > match.score_b:
-            match.winner_id = match.student_a_id or None
-        elif match.score_b > match.score_a:
-            match.winner_id = match.student_b_id or None
+        _finish_match(match, db)
         db.commit()
         return {**result, "finished": True, "your_score": result["percent"]}
 
@@ -1214,7 +1371,7 @@ def me(
         .where((ArenaMatch.student_a_id == current_user.id)
                | (ArenaMatch.student_b_id == current_user.id))
         # AI-rival exhibitions are not part of a player's ranked record.
-        .where(ArenaMatch.is_ai_opponent.is_(False))
+        .where(ArenaMatch.is_ai_opponent.is_(False), ArenaMatch.is_private.is_(False))
         .where(ArenaMatch.status == "finished")
         .order_by(ArenaMatch.created_at.desc())
     ).scalars().all()
@@ -1292,11 +1449,12 @@ def get_match(
     with _LOCK:
         _activate_due_matches(db, current_user.id)
         db.commit()
-    match = db.get(ArenaMatch, match_id)
-    if not match:
-        raise HTTPException(status_code=404, detail="مسابقه پیدا نشد")
-    if current_user.id not in (match.student_a_id, match.student_b_id):
-        raise HTTPException(status_code=403, detail="این مسابقه مال تو نیست")
+        match = db.get(ArenaMatch, match_id)
+        if not match:
+            raise HTTPException(status_code=404, detail="مسابقه پیدا نشد")
+        if current_user.id not in (match.student_a_id, match.student_b_id):
+            raise HTTPException(status_code=403, detail="این مسابقه مال تو نیست")
+        _settle_private_deadline(match, db)
 
     you_are_a = match.student_a_id == current_user.id
     opp_id = match.student_b_id if you_are_a else match.student_a_id
@@ -1345,11 +1503,13 @@ def get_match(
         "your_elo": your_elo,
         "your_delta": your_delta,
         "your_score": your_score,
-        "opponent_score": opp_score,
+        "opponent_score": opp_score if not match.is_private or match.status == "finished" else None,
+        "server_now": datetime.now(timezone.utc).isoformat(),
         "won": match.status == "finished" and match.winner_id == current_user.id,
         "mock_id": match.mock_id,
         "is_ai_opponent": match.is_ai_opponent,
-        "ranked": not match.is_ai_opponent,
+        "ranked": not (match.is_ai_opponent or match.is_private),
+        "is_private": match.is_private,
         "subjects": subjects,
         "mock": {
             "duration_minutes": (book.duration_minutes

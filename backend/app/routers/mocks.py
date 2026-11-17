@@ -592,6 +592,9 @@ def get_mock(
             ).scalar_one_or_none() is not None
             if not is_challenge_recipient:
                 raise HTTPException(status_code=404, detail="آزمون پیدا نشد")
+    if db.scalar(select(ArenaMatch.id).where(ArenaMatch.mock_id == mock_id,
+            ArenaMatch.is_private.is_(True), ArenaMatch.starts_at > datetime.utcnow()).limit(1)):
+        raise HTTPException(409, "شمارش معکوس هنوز تمام نشده است.")
     questions = question_bank.active_questions(db, mock)
     db.commit()
     # Duel booklets are filled asynchronously after match reservation: hide
@@ -672,6 +675,9 @@ def submit_mock(
         ).scalar_one_or_none()
         if challenge_invite is None:
             raise HTTPException(status_code=404, detail="آزمون پیدا نشد")
+    if db.scalar(select(ArenaMatch.id).where(
+            ArenaMatch.mock_id == mock_id, ArenaMatch.is_private.is_(True)).limit(1)):
+        raise HTTPException(409, "پاسخ‌های دوئل را در اتاق مسابقه ثبت کن.")
     # A database write lock serializes submissions for this student across processes.
     # This preserves historical rows while making retries return the first result.
     db.execute(update(User).where(User.id == current_user.id).values(rating=User.rating))

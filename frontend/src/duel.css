@@ -1,0 +1,36 @@
+.duel-room { max-width: 760px; }
+.duel-room > .tn-button { margin-top: 24px; }
+.duel-room .tn-hero-title { margin-bottom: 9px; }
+.duel-seats { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin-block: 26px 18px; }
+.duel-seats > div { display: grid; gap: 9px; align-content: start; padding: 17px; border: 1px solid var(--border-strong); background: var(--card); overflow-wrap: anywhere; }
+.duel-seats > div:first-child { border-block-start: 2px solid var(--tn-gold); }
+.duel-seats small, .duel-seats span { color: var(--muted); font-size: 12px; }
+.duel-seats span[data-ready="true"] { color: var(--accent); }
+.duel-invite { display: flex; align-items: end; gap: 10px; padding: 14px; border: 1px solid var(--border); }
+.duel-invite label { display: grid; gap: 6px; flex: 1; min-width: 0; font-size: 12px; }
+.duel-invite input, .duel-calendar-time input { padding: 9px; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 4px; }
+.duel-invite input { width: 100%; }
+.duel-room-actions { display: flex; gap: 10px; margin-top: 18px; }
+.duel-countdown { display: grid; gap: 10px; justify-items: center; padding: 24px; margin-top: 16px; border-block: 1px solid var(--border-strong); }
+.duel-countdown strong { font-size: clamp(48px,14vw,90px); line-height: 1.1; color: var(--accent); font-variant-numeric: tabular-nums; }
+.tournament-page.duel-schedule-card { padding: clamp(14px,4vw,24px); border: 1px solid var(--border-strong); border-inline-start: 2px solid var(--desk-gold,#bb9462); background: var(--card); }
+.duel-schedule-card .tn-section-heading { margin-bottom: 4px; }
+.duel-custom-time { margin-block: 12px; border-top: 1px solid var(--border); }
+.duel-custom-time summary { cursor: pointer; padding-block: 12px; font-size: 13px; color: var(--text); }
+.duel-calendar { background: var(--surface); border: 1px solid var(--border); padding: 10px; }
+.duel-calendar-head, .duel-calendar-time { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.duel-calendar-head > button { min-width: 40px; padding: 3px 8px; }
+.duel-calendar-grid { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 3px; margin-block: 8px; text-align: center; }
+.duel-calendar-grid .duel-weekday { color: var(--muted); font-size: 11px; padding: 7px 0; }
+.duel-calendar-grid button { min-height: 38px; color: var(--text); border: 1px solid var(--border); background: var(--card); font-size: 13px; }
+.duel-calendar-grid button[aria-pressed="true"] { color: var(--surface); border-color: var(--accent); background: var(--accent); font-weight: 700; }
+.duel-calendar-grid button:disabled { opacity: .35; }
+.duel-calendar-grid button:not(:disabled):hover { border-color: var(--accent); }
+.duel-calendar-time { flex-wrap: wrap; padding-block-start: 7px; font-size: 12px; color: var(--muted); }
+.duel-calendar-time input { margin-inline-start: 8px; }
+.duel-time-hint { color: var(--muted); font-size: 12px; margin-block: 8px; }
+@media (max-width: 400px) {
+  .duel-seats { gap: 8px; }
+  .duel-seats > div { padding: 11px; }
+  .duel-invite { display: grid; }
+}

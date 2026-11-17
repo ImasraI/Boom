@@ -439,7 +439,7 @@ def _wipe_user_data(user_id: int, phone: str | None, db: Session) -> dict:
     from sqlalchemy import or_
 
     from ..auth.database import (
-        ArenaMatch, ArenaQueueEntry, Assessment, Conversation, DailyTask,
+        ArenaMatch, ArenaQueueEntry, ArenaRoom, Assessment, Conversation, DailyTask,
         GeneratedMock, MockAttempt, PhoneCode, StudySession, Task,
         WrongAnswer, TaskProgress, StudentProfile, BankQuestion, QuestionReport,
     )
@@ -498,6 +498,7 @@ def _wipe_user_data(user_id: int, phone: str | None, db: Session) -> dict:
             key="mock_attempts")
     _delete(GeneratedMock, GeneratedMock.student_id == user_id,
             key="generated_mocks")
+    _delete(ArenaRoom, or_(ArenaRoom.host_id == user_id, ArenaRoom.guest_id == user_id), key="arena_rooms")
     _delete(ArenaMatch,
             or_(ArenaMatch.student_a_id == user_id,
                 ArenaMatch.student_b_id == user_id,
