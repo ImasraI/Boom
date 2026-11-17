@@ -17,7 +17,7 @@ function profileForPhone(phone: string): SignupData {
   return normalizeSignupData({ phone, name: phone }, phone);
 }
 
-export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: string, data: SignupData) => void }) {
+export default function Login({ nav, onLogin, notice }: { nav: NavFn; onLogin: (token: string, data: SignupData) => void; notice?: string }) {
   const [phone, setPhone] = useState(() => localStorage.getItem("boom-login-phone") || "");
   // One-shot prefill from the signup intercept - don't keep it around.
   useEffect(() => { localStorage.removeItem("boom-login-phone"); }, []);
@@ -87,7 +87,7 @@ export default function Login({ nav, onLogin }: { nav: NavFn; onLogin: (token: s
               <PasswordInput value={password} onChange={setPassword} placeholder="رمز عبور" onEnter={handleSubmit} />
             </div>
 
-            <ErrorBanner message={error} />
+            <ErrorBanner message={error || notice || ""} />
             <button type="button" onClick={() => { localStorage.setItem("boom-reset-phone", phone); nav("signup"); }}
               className="mt-4 text-sm text-[var(--accent)] underline underline-offset-4">رمز عبورم را فراموش کرده‌ام</button>
 

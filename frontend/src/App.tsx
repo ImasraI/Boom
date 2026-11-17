@@ -1,7 +1,7 @@
 import { accountStorage, accountId } from "./accountStorage";
 import { pullCalendar, flushCalendar } from "./calendarSync";
 import { Component, lazy, Suspense, useEffect, useState } from "react";
-import { apiUrl, authHeaders } from "./api";
+import { authFetch, authHeaders, SESSION_EXPIRED, SESSION_EXPIRED_MESSAGE } from "./api";
 import { consumeResumePage, isPageDownloadError, recoverPageDownload } from "./pageRecovery";
 import { hydrateServerProfile, toSignupData } from "./profileSync";
 import { Screen, SignupData, NavFn, normalizeSignupData, emptySignupData } from "./types";
@@ -200,29 +200,31 @@ export default function App() {
   const [userData, setUserData] = useState<SignupData | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [settingsRequest, setSettingsRequest] = useState(0);
+  const [loginNotice, setLoginNotice] = useState("");
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
+
+  useEffect(() => {
+    const expired = () => {
+      if (!["landing", "login", "signup"].includes(screen)) setLoginDestination(screen);
+      setUserData(null);
+      setIsAdmin(false);
+      setLoginNotice(SESSION_EXPIRED_MESSAGE);
+      setScreen("login");
+    };
+    window.addEventListener(SESSION_EXPIRED, expired);
+    return () => window.removeEventListener(SESSION_EXPIRED, expired);
+  }, [screen]);
 
   // Ask the server who we are (is_admin lives server-side; the sidebar
   // entry is only cosmetic - /api/admin/* enforces it for real).
   useEffect(() => {
     const token = localStorage.getItem(TOKEN_KEY);
     if (!token) return;
-    fetch(apiUrl("/api/auth/me"), { headers: authHeaders(token) })
-      .then(res => {
-        if (localStorage.getItem(TOKEN_KEY) !== token) return null;
-        if (res.status === 401) {
-          localStorage.removeItem(TOKEN_KEY);
-          accountStorage.removeItem(USER_KEY);
-          setUserData(null);
-          setIsAdmin(false);
-          setScreen("login");
-          return null;
-        }
-        return res.ok ? res.json() : null;
-      })
+    authFetch("/api/auth/me", { headers: authHeaders(token) })
+      .then(res => res.ok ? res.json() : null)
       .then(me => { if (localStorage.getItem(TOKEN_KEY) === token) setIsAdmin(Boolean(me?.is_admin)); })
       .catch(() => {});
   }, []);
@@ -261,7 +263,10 @@ export default function App() {
 
   function nav(s: Screen) {
     setSettingsRequest(0);
-    if (s === "landing") setLoginDestination("home");
+    if (s === "landing") {
+      setLoginDestination("home");
+      setLoginNotice("");
+    }
     if (!["landing", "login", "signup"].includes(s) && !accountId()) {
       setLoginDestination(s);
       s = "login";
@@ -273,6 +278,7 @@ export default function App() {
   }
 
   function handleLogin(token: string, data: SignupData) {
+    setLoginNotice("");
     localStorage.setItem(TOKEN_KEY, token);
     const profile = normalizeSignupData(data);
     persistUser(profile);
@@ -286,7 +292,7 @@ export default function App() {
         setUserData(refreshed);
       }
     });
-    fetch(apiUrl("/api/auth/me"), { headers: authHeaders(token) })
+    authFetch("/api/auth/me", { headers: authHeaders(token) })
       .then(res => res.ok ? res.json() : null)
       .then(me => { if (localStorage.getItem(TOKEN_KEY) === token) setIsAdmin(Boolean(me?.is_admin)); })
       .catch(() => {});
@@ -325,7 +331,7 @@ export default function App() {
   return (
     <Shell key={accountId() || "anonymous"} screen={screen} nav={nav} isAdmin={isAdmin} onSettings={() => { setSettingsRequest(value => value + 1); setScreen("profile"); window.scrollTo(0, 0); }}>
       {screen === "landing" && <Landing {...p} />}
-      {screen === "login" && <Login {...p} onLogin={handleLogin} />}
+      {screen === "login" && <Login {...p} onLogin={handleLogin} notice={loginNotice} />}
       {screen === "signup" && <Signup {...p} onComplete={handleSignupComplete} />}
       {screen === "home" && userData && <Home {...p} userData={userData} logout={logout} />}
       {screen === "exams" && <Exams {...p} />}

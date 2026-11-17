@@ -11,6 +11,24 @@ export function authHeaders(token?: string | null): HeadersInit {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+export const SESSION_EXPIRED = "boom:session-expired";
+export const SESSION_EXPIRED_MESSAGE = "نشست ورود پایان یافته است. دوباره وارد حسابت شو.";
+
+export async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(authHeaders());
+  new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+  const authorization = headers.get("Authorization");
+  const response = await fetch(apiUrl(path), { ...init, headers });
+
+  const current = localStorage.getItem("boom-token");
+  // A late response for an old account cannot invalidate a newer sign-in.
+  if (response.status === 401 && current && authorization === "Bearer " + current) {
+    localStorage.removeItem("boom-token");
+    window.dispatchEvent(new Event(SESSION_EXPIRED));
+  }
+  return response;
+}
+
 /** FastAPI may return detail as string or validation error array. */
 export function formatApiDetail(detail: unknown, fallback: string): string {
   if (typeof detail === "string" && detail.trim()) return detail;
@@ -63,13 +81,9 @@ export async function apiJson<T>(path: string, init: RequestInit = {}, timeoutMs
   init.signal?.addEventListener("abort", cancel, { once: true });
   if (init.signal?.aborted) controller.abort();
   try {
-    const headers = new Headers(authHeaders());
-    new Headers(init.headers).forEach((value, key) => headers.set(key, value));
-    const response = await fetch(apiUrl(path), { ...init, headers, signal: controller.signal });
-    if (!response.ok) {
-      const fallback = response.status === 401 ? "نشست ورود منقضی شده است؛ دوباره وارد حساب شو." : "دریافت اطلاعات ناموفق بود؛ دوباره تلاش کن.";
-      throw await apiFailure(response, fallback);
-    }
+    const response = await authFetch(path, { ...init, signal: controller.signal });
+    if (response.status === 401) throw new ApiError(SESSION_EXPIRED_MESSAGE, 401);
+    if (!response.ok) throw await apiFailure(response, "دریافت اطلاعات ناموفق بود؛ دوباره تلاش کن.");
     return await response.json() as T;
   } catch (error) {
     if (timedOut) throw new Error("پاسخ سرور دیر رسید؛ اتصال را بررسی کن و دوباره تلاش کن.");

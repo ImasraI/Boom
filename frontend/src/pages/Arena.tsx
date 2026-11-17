@@ -1,7 +1,7 @@
 import StudentPilot from "../components/StudentPilot"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
-import { apiUrl, apiJson, authHeaders, readApiError } from "../api"
+import { apiJson, authFetch, readApiError } from "../api"
 import { RichText } from "../richText"
 import ReportQuestion from "../components/ReportQuestion"
 import ColosseumIcon from "../components/ColosseumIcon"
@@ -754,7 +754,7 @@ export default function Arena({ nav, userData, initialPhase }: {
       if (m.status === "finished") {
         stopPoll()
         setPhase("finished")
-        fetch(apiUrl("/api/arena/me"), { headers: authHeaders() })
+        authFetch("/api/arena/me")
           .then(r => (r.ok ? r.json() : null))
           .then(setMe)
           .catch(() => {})
@@ -767,9 +767,9 @@ export default function Arena({ nav, userData, initialPhase }: {
     setWaited(0)
     setError("")
     try {
-      const res = await fetch(apiUrl("/api/arena/join"), {
+      const res = await authFetch("/api/arena/join", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(authHeaders() as Record<string, string>) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           // The server prefers its own profile row; this is the offline-cache
           // fallback (the arena used to send nothing, so every duel booklet
@@ -797,7 +797,7 @@ export default function Arena({ nav, userData, initialPhase }: {
     pollRef.current = setInterval(async () => {
       setWaited(w => w + 2)
       try {
-        const res = await fetch(apiUrl("/api/arena/status"), { headers: authHeaders() })
+        const res = await authFetch("/api/arena/status")
         if (!res.ok) throw new Error(await readApiError(res, "دریافت وضعیت صف ناموفق بود."))
         const s = await res.json()
         if (s.state === "matched" && s.match_id) {
@@ -818,16 +818,16 @@ export default function Arena({ nav, userData, initialPhase }: {
 
   async function cancelQueue() {
     stopPoll()
-    await fetch(apiUrl("/api/arena/leave"), { method: "POST", headers: authHeaders() }).catch(() => {})
+    await authFetch("/api/arena/leave", { method: "POST" }).catch(() => {})
     setPhase("lobby")
   }
 
   async function submitDuel(answers: Record<string, number | "">, seconds: number) {
     if (!match) return
     try {
-      await fetch(apiUrl(`/api/arena/${match.match_id}/submit`), {
+      await authFetch(`/api/arena/${match.match_id}/submit`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(authHeaders() as Record<string, string>) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers, duration_seconds: seconds }),
       })
     } catch { /* ignore; results loaded below */ }
@@ -844,7 +844,7 @@ export default function Arena({ nav, userData, initialPhase }: {
 
   const loadScheduled = useCallback(async () => {
     try {
-      const res = await fetch(apiUrl("/api/arena/scheduled"), { headers: authHeaders() })
+      const res = await authFetch("/api/arena/scheduled")
       if (!res.ok) return
       const data = await res.json()
       setSchedOpen(data.open ?? [])
@@ -875,9 +875,9 @@ export default function Arena({ nav, userData, initialPhase }: {
       // datetime-local is wall-clock LOCAL; send an explicit offset so the
       // server can normalize to UTC regardless of the VM's zone.
       const startsISO = new Date(localValue).toISOString()
-      const res = await fetch(apiUrl("/api/arena/scheduled"), {
+      const res = await authFetch("/api/arena/scheduled", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(authHeaders() as Record<string, string>) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ starts_at: startsISO, wanted, student: userData ? { major: userData.major, grade: userData.grade } : undefined }),
       })
       if (!res.ok) throw new Error(await readApiError(res, "ثبت پیشنهاد ناموفق بود"))
@@ -893,9 +893,9 @@ export default function Arena({ nav, userData, initialPhase }: {
     setSchedBusy(`accept-${id}`)
     setSchedError("")
     try {
-      const res = await fetch(apiUrl(`/api/arena/scheduled/${id}/accept`), {
+      const res = await authFetch(`/api/arena/scheduled/${id}/accept`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...(authHeaders() as Record<string, string>) },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ student: userData ? { major: userData.major, grade: userData.grade } : undefined, wanted }),
       })
       if (!res.ok) throw new Error(await readApiError(res, "رزرو ناموفق بود"))
@@ -911,7 +911,7 @@ export default function Arena({ nav, userData, initialPhase }: {
     setSchedBusy(`cancel-${id}`)
     setSchedError("")
     try {
-      const res = await fetch(apiUrl(`/api/arena/scheduled/${id}`), { method: "DELETE", headers: authHeaders() })
+      const res = await authFetch(`/api/arena/scheduled/${id}`, { method: "DELETE" })
       if (!res.ok) throw new Error(await readApiError(res, "لغو ناموفق بود"))
       await loadScheduled()
     } catch (e) {
@@ -937,7 +937,7 @@ export default function Arena({ nav, userData, initialPhase }: {
 
   async function openBoard() {
     try {
-      const res = await fetch(apiUrl("/api/arena/leaderboard"), { headers: authHeaders() })
+      const res = await authFetch("/api/arena/leaderboard")
       if (res.ok) setBoard(await res.json())
     } catch { /* empty board view */ }
     setPhase("board")

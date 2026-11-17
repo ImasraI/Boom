@@ -16,6 +16,38 @@ test('login exposes a named password recovery entry',async()=>{
   assert.match(html,/رمز عبورم را فراموش کرده‌ام/);
 });
 
+test('expired Arena requests clear the active session and preserve a later sign-in', async () => {
+  const {apiJson, SESSION_EXPIRED, SESSION_EXPIRED_MESSAGE} = await vite.ssrLoadModule('/src/api.ts');
+  const previousFetch = globalThis.fetch;
+  const previousWindow = globalThis.window;
+  const target = new EventTarget();
+  let resets = 0;
+  target.addEventListener(SESSION_EXPIRED, () => resets++);
+  globalThis.window = target;
+  const rejected = () => new Response(JSON.stringify({detail:'Invalid token'}), {status:401});
+  try {
+    values.set('boom-token', 'old-session');
+    let respond;
+    globalThis.fetch = () => new Promise(resolve => { respond = resolve; });
+    const request = apiJson('/api/arena/me');
+    values.set('boom-token', 'new-session');
+    respond(rejected());
+    await assert.rejects(request, {message:SESSION_EXPIRED_MESSAGE, status:401});
+    assert.equal(values.get('boom-token'), 'new-session');
+    assert.equal(resets, 0);
+
+    globalThis.fetch = async () => rejected();
+    await assert.rejects(apiJson('/api/arena/filters'), {message:SESSION_EXPIRED_MESSAGE, status:401});
+    assert.equal(values.has('boom-token'), false);
+    assert.equal(resets, 1);
+  } finally {
+    values.delete('boom-token');
+    globalThis.fetch = previousFetch;
+    if (previousWindow === undefined) delete globalThis.window;
+    else globalThis.window = previousWindow;
+  }
+});
+
 test('explicit password recovery starts with phone, not a new onboarding profile',async()=>{
   values.set('boom-reset-phone','9121112233');
   try{
