@@ -448,3 +448,69 @@ def test_private_room_shares_kickoff_and_booklet_without_ranked_rating(db, monke
         assert db.query(MockAttempt).count() == 2
         assert [db.get(User, uid).rating for uid in actor_ids[:2]] == [1150, 900]
         assert client.get("/api/arena/me", headers=actors[0]).json()["matches"] == 0
+
+
+def test_room_creation_does_not_wait_for_ranked_or_another_room_lock(db):
+    from concurrent.futures import ThreadPoolExecutor
+    from app.auth.database import StudentProfile
+    host = _mk_user(db, 'isolated-room-host')
+    db.add(StudentProfile(user_id=host.id, major='علوم تجربی', grade='دهم'))
+    db.commit()
+    actor = _ctx(host)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with arena._LOCK, arena._room_lock(('room', 'unrelated-room')):
+            future = executor.submit(arena.create_room, current_user=actor, db=db)
+            created = future.result(timeout=2)
+    assert created['is_host'] and created['match_id'] is None
+    assert arena.create_room(current_user=actor, db=db)['code'] == created['code']
+
+
+def test_room_stock_preparation_does_not_lock_out_other_room_writes(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from app.auth.database import StudentProfile
+    engine = create_engine('sqlite:///' + (tmp_path / 'rooms.db').as_posix(),
+                           connect_args={'check_same_thread': False, 'timeout': 3})
+    sessions = sessionmaker(bind=engine)
+    Base.metadata.create_all(engine)
+    with sessions() as session:
+        users = [_mk_user(session, 'concurrent-room-' + str(i)) for i in range(3)]
+        ids = [u.id for u in users]
+        for uid in ids:
+            session.add(StudentProfile(user_id=uid, major='علوم تجربی', grade='دهم'))
+        book = GeneratedMock(student_id=ids[0],title='synthetic concurrency fixture',major='علوم تجربی',
+                             grade='دهم',duration_minutes=10,questions=BOOKLET,status='claimed')
+        session.add(book)
+        session.commit()
+        book_id = book.id
+        host, guest = [SimpleNamespace(id=uid) for uid in ids[:2]]
+        code = arena.create_room(current_user=host, db=session)['code']
+        arena.join_room(code, current_user=guest, db=session)
+        arena.ready_room(code, current_user=host, db=session)
+    preparing, resume = Event(), Event()
+    def slow_plan(*args, **kwargs):
+        # Force the query that used to autoflush readiness into a write lock.
+        kwargs['db'].query(StudentProfile).count()
+        preparing.set()
+        assert resume.wait(5)
+        return {'ok': True, 'plan': []}
+    monkeypatch.setattr(arena, '_pair_plan', slow_plan)
+    monkeypatch.setattr(arena.pool_core, 'reused_duel', lambda db, *_args, **_kwargs: db.get(GeneratedMock, book_id))
+    def ready():
+        with sessions() as session:
+            return arena.ready_room(code, current_user=guest, db=session)
+    def create_other():
+        with sessions() as session:
+            return arena.create_room(current_user=SimpleNamespace(id=ids[2]), db=session)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            pending = executor.submit(ready)
+            try:
+                assert preparing.wait(2)
+                other = executor.submit(create_other).result(timeout=2)
+                assert other['code'] != code
+            finally:
+                resume.set()
+            assert pending.result(timeout=2)['match_id']
+    finally:
+        engine.dispose()

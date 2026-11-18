@@ -120,3 +120,32 @@ test('profile sync roundtrips study edits, rejects failed writes and preserves l
     assert.equal(conflict.profile.grade,'دهم');
   } finally {globalThis.fetch=previousFetch;values.clear();}
 });
+
+test('room connection recovers one lost response and never retries a denied request', async () => {
+  const {connectRoom} = await vite.ssrLoadModule('/src/components/DuelRoom.tsx');
+  const previousFetch = globalThis.fetch;
+  const calls = [], attempts = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      calls.push({url,method:init.method});
+      if (calls.length === 1) throw new TypeError('connection lost');
+      return Response.json({code:'same-idempotent-room'});
+    };
+    const room = await connectRoom('/api/arena/rooms', new AbortController().signal, n=>attempts.push(n));
+    assert.equal(room.code,'same-idempotent-room');
+    assert.deepEqual(attempts,[1,2]);
+    assert.deepEqual(calls,[{url:'/api/arena/rooms',method:'POST'},{url:'/api/arena/rooms',method:'POST'}]);
+    let denied = 0;
+    globalThis.fetch = async () => {denied++; return Response.json({detail:'room denied'},{status:403});};
+    await assert.rejects(connectRoom('/api/arena/rooms', new AbortController().signal, ()=>{}), /room denied/);
+    assert.equal(denied,1);
+    let failed = 0;
+    globalThis.fetch = async () => {failed++; throw new TypeError('network unavailable');};
+    await assert.rejects(connectRoom('/api/arena/rooms', new AbortController().signal, ()=>{}), /network unavailable/);
+    assert.equal(failed,2);
+    const cancelled = new AbortController(); cancelled.abort();
+    failed = 0;
+    await assert.rejects(connectRoom('/api/arena/rooms', cancelled.signal, ()=>{}));
+    assert.equal(failed,1);
+  } finally {globalThis.fetch=previousFetch;}
+});

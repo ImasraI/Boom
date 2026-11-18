@@ -20,6 +20,7 @@ after 30 minutes so matchmaking never pairs with a ghost.
 import json
 import secrets
 import threading
+from weakref import WeakValueDictionary
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -62,6 +63,21 @@ _BAND_WIDEN_PER_MIN = 50  # +Elo per queued minute (see _matchmaking_band)
 _BAND_MAX = 900  # widened band never grows past this
 _STALE_QUEUE_MINUTES = 30  # purge queue entries not polled for this long
 _LOCK = threading.Lock()
+# Rooms never wait behind ranked stock selection. Live references keep a room's
+# lock alive for concurrent requests; finished invitations leave no lock cache.
+_ROOM_LOCKS = WeakValueDictionary()
+_ROOM_LOCKS_GUARD = threading.Lock()
+
+
+def _room_lock(key):
+    with _ROOM_LOCKS_GUARD:
+        lock = _ROOM_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _ROOM_LOCKS[key] = lock
+        return lock
+
+
 # How many Elo-compatible queue entries one pairing attempt inspects before
 # giving up: a player whose filter excludes the oldest candidates must still
 # find a compatible one further down the queue.
@@ -846,7 +862,7 @@ def _room_view(db, room, user_id):
 
 @router.post("/rooms", status_code=201)
 def create_room(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    with _LOCK:
+    with _room_lock(('host', current_user.id)):
         _room_scope(db, current_user.id)
         now = datetime.utcnow()
         # Reopen the host's unfinished invitation when the page or request is retried.
@@ -869,7 +885,7 @@ def room_status(code: str, current_user: User = Depends(get_current_user), db: S
 
 @router.post("/rooms/{code}/join")
 def join_room(code: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    with _LOCK:
+    with _room_lock(('room', code)):
         room = _find_room(db, code)
         if current_user.id not in (room.host_id, room.guest_id):
             if room.guest_id is not None:
@@ -885,7 +901,7 @@ def join_room(code: str, current_user: User = Depends(get_current_user), db: Ses
 
 @router.post("/rooms/{code}/ready")
 def ready_room(code: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    with _LOCK:
+    with _room_lock(('room', code)):
         room = _find_room(db, code)
         if current_user.id not in (room.host_id, room.guest_id):
             raise HTTPException(403, "ابتدا از لینک دعوت وارد اتاق شو.")
@@ -893,11 +909,11 @@ def ready_room(code: str, current_user: User = Depends(get_current_user), db: Se
             return _room_view(db, room, current_user.id)
         if room.guest_id is None:
             raise HTTPException(409, "منتظر ورود دوستت بمان.")
-        if current_user.id == room.host_id:
-            room.host_ready = True
-        else:
-            room.guest_ready = True
-        if room.host_ready and room.guest_ready:
+        host_ready = room.host_ready or current_user.id == room.host_id
+        guest_ready = room.guest_ready or current_user.id == room.guest_id
+        # Do not autoflush ready flags into a SQLite write transaction before
+        # reading/assembling stock. Other students must still be able to write.
+        if host_ready and guest_ready:
             major, host_grade = _room_scope(db, room.host_id)
             guest_major, guest_grade = _room_scope(db, room.guest_id)
             if major != guest_major:
@@ -917,13 +933,15 @@ def ready_room(code: str, current_user: User = Depends(get_current_user), db: Se
             db.add(match)
             db.flush()
             room.match_id = match.id
+        room.host_ready = host_ready
+        room.guest_ready = guest_ready
         db.commit()
         return _room_view(db, room, current_user.id)
 
 
 @router.delete("/rooms/{code}")
 def close_room(code: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    with _LOCK:
+    with _room_lock(('room', code)):
         room = _find_room(db, code)
         if current_user.id not in (room.host_id, room.guest_id):
             raise HTTPException(403, "این اتاق متعلق به تو نیست.")

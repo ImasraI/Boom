@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { apiJson } from "../api"
+import { apiJson, ApiError } from "../api"
 import { roomUrl } from "../duelLink"
 import { faNumber } from "./tournament/format"
 import { StudySymbol } from "./StudySymbols"
@@ -13,6 +13,19 @@ type Room = {
 const roomPath = (code: string, action = "") => "/api/arena/rooms/" + encodeURIComponent(code) + action
 const errorText = (error: unknown) => error instanceof Error ? error.message : "ارتباط با اتاق برقرار نشد."
 
+/** Creation/join are idempotent. Recover once if the response was lost in transit. */
+export async function connectRoom(path: string, signal: AbortSignal, onAttempt: (attempt: number) => void) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    onAttempt(attempt)
+    try {
+      return await apiJson<Room>(path, { method: "POST", signal }, 20000)
+    } catch (error) {
+      if (signal.aborted || error instanceof ApiError || attempt === 2) throw error
+    }
+  }
+  throw new Error("ارتباط با اتاق برقرار نشد؛ دوباره تلاش کن.")
+}
+
 export default function DuelRoom({ invite, onBack, onStart }: {
   invite: string | null; onBack: () => void; onStart: (id: number) => Promise<void>
 }) {
@@ -23,6 +36,7 @@ export default function DuelRoom({ invite, onBack, onStart }: {
   const [pollError, setPollError] = useState("")
   const [copied, setCopied] = useState(false)
   const [attempt, setAttempt] = useState(0)
+  const [connectionAttempt, setConnectionAttempt] = useState(1)
   const [deadline, setDeadline] = useState<number | null>(null)
   const [seconds, setSeconds] = useState(3)
   const roomLatest = useRef<Room | null>(null)
@@ -45,7 +59,7 @@ export default function DuelRoom({ invite, onBack, onStart }: {
     setBusy(true)
     setError("")
     const path = code ? roomPath(code, "/join") : "/api/arena/rooms"
-    void apiJson<Room>(path, { method: "POST", signal: controller.signal }, 10000).then(next => {
+    void connectRoom(path, controller.signal, setConnectionAttempt).then(next => {
       if (controller.signal.aborted) return
       acceptRoom(next)
       initialInvite.current = next.code
@@ -100,7 +114,7 @@ export default function DuelRoom({ invite, onBack, onStart }: {
     setBusy(true)
     setError("")
     try {
-      acceptRoom(await apiJson<Room>(roomPath(room.code, "/ready"), { method: "POST" }, 12000))
+      acceptRoom(await apiJson<Room>(roomPath(room.code, "/ready"), { method: "POST" }, 25000))
     } catch (failure) {
       setError(errorText(failure))
     } finally { setBusy(false) }
@@ -130,7 +144,7 @@ export default function DuelRoom({ invite, onBack, onStart }: {
     <div className="tn-hero-title"><StudySymbol kind="award" size={31} /><h1>اتاق دوئل دوستانه</h1></div>
     <p className="tn-hero-description">۱۰ سؤال مشترک · بدون تغییر رتبه</p>
     {(error || pollError) && <p className="tn-inline-error" role="alert">{error || pollError}</p>}
-    {!room && busy && <p role="status">در حال باز کردن اتاق…</p>}
+    {!room && busy && <p role="status">{connectionAttempt > 1 ? "در حال برقراری دوبارهٔ ارتباط با اتاق…" : "در حال باز کردن اتاق…"}</p>}
     {!room && error && <button className="tn-button tn-button-secondary" onClick={() => setAttempt(n => n + 1)}>تلاش دوباره</button>}
     {room && <>
       <div className="duel-seats">
