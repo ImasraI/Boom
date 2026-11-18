@@ -1,6 +1,7 @@
 import { accountStorage } from "../accountStorage";
 import { useEffect, useState } from "react";
 import { apiUrl, readApiError } from "../api";
+import { pullServerProfile, pushProfile, toSignupData } from "../profileSync";
 import { NavFn, SignupData, normalizeSignupData } from "../types";
 import { MAJORS, GRADES, STUDY_HOURS_OPTIONS, TEST_EXAM_OPTIONS } from "../data";
 import { GradeSymbol, SubjectSymbol } from "../components/StudySymbols";
@@ -91,8 +92,23 @@ export default function Signup({ nav, onComplete }: Props) {
     }
 
     if (step < TOTAL - 1) { setStep(s => s + 1); return; }
-    // Profile done: everything is already registered + logged in.
-    onComplete(normalizeSignupData({ name, phone, major, grade, studyHours, testExams }));
+    // Account creation precedes these steps. Finish only after the study
+    // profile is accepted, so another device can read the same information.
+    setSubmitting(true);
+    const token = localStorage.getItem("boom-token");
+    try {
+      const profile = normalizeSignupData({ name, phone, major, grade, studyHours, testExams });
+      const server = await pullServerProfile();
+      if (!server || !token || localStorage.getItem("boom-token") !== token) {
+        setError("اطلاعات تحصیلی ذخیره نشد؛ اتصال و ورود به حساب را بررسی کن و دوباره تلاش کن."); return;
+      }
+      const saved = await pushProfile(profile);
+      if (localStorage.getItem("boom-token") !== token) return;
+      if (!saved.ok) {
+        setError(saved.conflict ? "اطلاعات حساب در جای دیگری تغییر کرده است؛ دوباره تلاش کن." : "اطلاعات تحصیلی ذخیره نشد؛ دوباره تلاش کن."); return;
+      }
+      onComplete(toSignupData(saved.profile ?? null, profile));
+    } finally { setSubmitting(false); }
   }
 
   function toggleExam(e: string) {
@@ -362,7 +378,7 @@ export default function Signup({ nav, onComplete }: Props) {
   const ctaLabel =
     step === 1 ? (submitting ? "در حال ارسال کد..." : "ادامه")
     : step === 3 ? (resetMode ? (submitting ? "در حال بازنشانی..." : "بازنشانی رمز ←") : (submitting ? "در حال تایید..." : "تایید و ساخت حساب ←"))
-    : step === TOTAL - 1 ? "ثبت‌نام و ورود ←"
+    : step === TOTAL - 1 ? (submitting ? "در حال ذخیره اطلاعات…" : "ثبت‌نام و ورود ←")
     : "ادامه";
 
   return (

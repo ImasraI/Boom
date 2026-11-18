@@ -99,11 +99,13 @@ export async function hydrateServerProfile(base: SignupData): Promise<ServerProf
   const token = localStorage.getItem("boom-token");
   const server = await pullServerProfile();
   if (!token || localStorage.getItem("boom-token") !== token) return null;
-  const empty = server?.version === 0 && !server.major && !server.grade && !server.study_hours;
+  const empty = server != null && !server.major?.trim() && !server.grade?.trim() && !server.study_hours?.trim();
   if (empty && base.major?.trim() && base.grade?.trim() && base.studyHours?.trim()) {
     const saved = await pushProfile(base);
     if (localStorage.getItem("boom-token") !== token) return null;
-    return saved.profile ?? server;
+    // A failed migration must not replace the only complete browser copy
+    // with the still-empty server row; it can be retried on the next login.
+    return saved.profile ?? null;
   }
   return server;
 }

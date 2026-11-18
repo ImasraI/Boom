@@ -49,6 +49,34 @@ test('browser-only signup preferences initialize an empty server profile once', 
   assert.deepEqual(JSON.parse(calls[1].body).test_exams, ['ماز']);
 });
 
+test('a provisioned version-one profile saves signup choices and survives another browser', async () => {
+  let profile = {version:1,major:null,grade:null,study_hours:null,test_exams:[]};
+  const backend = async (_url, options = {}) => {
+    if(options.method === 'PATCH') profile = {...JSON.parse(options.body),version:profile.version+1};
+    return {ok:true,status:200,json:async()=>({profile})};
+  };
+  const first=harness(backend); first.login(19);
+  const base={name:'Example',phone:'9120000000',major:'علوم تجربی',grade:'یازدهم',studyHours:'۴ تا ۶ ساعت',testExams:['ماز']};
+  const saved=await first.load('./profileSync').hydrateServerProfile(base);
+  assert.equal(saved.grade,base.grade);
+  assert.equal(saved.version,2);
+  const second=harness(backend); second.login(19);
+  const sync=second.load('./profileSync');
+  const restored=sync.toSignupData(await sync.pullServerProfile(),{phone:base.phone});
+  assert.equal(restored.major,base.major);
+  assert.equal(restored.grade,base.grade);
+  assert.equal(restored.studyHours,base.studyHours);
+});
+
+test('failed signup migration keeps the browser copy available for retry', async () => {
+  const h=harness(async (_url, options={}) => options.method==='PATCH'
+    ? {ok:false,status:503}
+    : {ok:true,status:200,json:async()=>({profile:{version:1,major:null,grade:null,study_hours:null}})});
+  h.login(20);
+  const result=await h.load('./profileSync').hydrateServerProfile({major:'علوم تجربی',grade:'دهم',studyHours:'4',testExams:[]});
+  assert.equal(result,null);
+});
+
 test('existing server preferences win and switching accounts prevents migration', async () => {
   let writes = 0;
   const h = harness(async (url, options = {}) => {
