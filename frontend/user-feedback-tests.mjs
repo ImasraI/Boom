@@ -8,6 +8,21 @@ const values=new Map();
 const previousStorage=globalThis.localStorage;
 globalThis.localStorage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,String(value)),removeItem:key=>values.delete(key)};
 const vite=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom'});
+
+test('duel result popup reports final rating changes and isolates friendly games',async()=>{
+  const {MatchResult}=await vite.ssrLoadModule('/src/pages/Arena.tsx');
+  const base={match_id:99,status:'finished',won:true,ranked:true,is_private:false,is_ai_opponent:false,your_score:80,opponent_score:50,your_elo:1024,your_delta:24,opponent:'Example'};
+  const render=match=>renderToStaticMarkup(React.createElement(MatchResult,{match,onHome(){},onBoard(){}}));
+  const win=render(base);
+  assert.match(win,/<dialog[^>]*aria-labelledby="duel-result-title"/);
+  assert.match(win,/بردی!/);assert.match(win,/\+۲۴/);assert.match(win,/۱۰۲۴/);
+  const loss=render({...base,won:false,your_score:30,your_delta:-18,your_elo:982});
+  assert.match(loss,/باختی/);assert.match(loss,/-۱۸/);
+  assert.match(render({...base,won:false,your_score:50}),/مساوی!/);
+  const friendly=render({...base,ranked:false,is_private:true,your_delta:0});
+  assert.match(friendly,/روی امتیاز Elo اثر ندارد/);
+  assert.doesNotMatch(friendly,/تغییر امتیاز Elo/);
+});
 test.after(async()=>{await vite.close();if(previousStorage===undefined)delete globalThis.localStorage;else globalThis.localStorage=previousStorage;});
 
 test('login exposes a named password recovery entry',async()=>{

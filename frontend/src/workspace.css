@@ -1,6 +1,23 @@
 /* Tournament's ruled layout and restrained surfaces, shared by every app screen. */
 html:not(.dark) { color-scheme: light; }
 html.dark { color-scheme: dark; }
+html.dark .schedule-block-frame[data-activity='mock'] .schedule-block { color: #fff; }
+.duel-result-popup { margin: auto; width: min(420px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; padding: 0; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--card); color: var(--text); box-shadow: 0 24px 80px #0006; }
+.duel-result-popup::backdrop { background: #0009; backdrop-filter: blur(3px); }
+.duel-result-close { position:absolute; inset-inline-end:12px; top:8px; width:40px; height:40px; font-size:26px; color:inherit; }
+.duel-result-banner { display:grid; justify-items:center; gap:8px; padding:30px 24px 22px; background:var(--accent-soft); }
+.duel-result-popup[data-outcome='win'] .duel-result-banner { background:var(--success-bg); color:var(--success-text); }
+.duel-result-popup[data-outcome='loss'] .duel-result-banner { color:var(--error-text); }
+.duel-result-banner h2 { font-size:38px!important; margin:0; }
+.duel-result-banner p { font-size:13px; }
+.duel-result-content { display:grid; gap:14px; padding:22px; }
+.duel-result-scores { display:flex; justify-content:space-around; align-items:center; text-align:center; padding-bottom:16px; border-bottom:1px solid var(--border); }
+.duel-result-scores small { display:block; max-width:140px; overflow-wrap:anywhere; color:var(--muted); }
+.duel-result-scores strong { display:block; font-size:26px; }
+.duel-result-rating { text-align:center; padding-bottom:12px; }
+.duel-result-rating > strong { display:block; font-size:34px; color:var(--error-text); }
+.duel-result-rating > strong[data-positive='true'] { color:var(--success-text); }
+.duel-result-rating p { color:var(--muted); }
 :root { --ui-radius: 4px; --ui-space: clamp(18px, 3.2vw, 44px); }
 .boom-workspace { --font-heading: 'Boom Nazanin', 'Vazirmatn', serif; }
 .boom-workspace .font-display { font-family: var(--font-heading); }

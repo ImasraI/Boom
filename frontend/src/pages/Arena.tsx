@@ -53,6 +53,8 @@ interface MatchInfo {
   is_private?: boolean
   starts_at?: string | null
   server_now?: string
+  ranked?: boolean
+  is_ai_opponent?: boolean
   mock: { duration_minutes: number | null } | null
   // Shared knowledge base the booklet was generated from (the INTERSECTION of
   // both players' subjects for a cross-major duel).
@@ -433,10 +435,33 @@ function DuelRunner({ match, onDone, onExit }: {
 
 /* ---------------- Match result ---------------- */
 
-function MatchResult({ match, onHome, onBoard }: { match: MatchInfo; onHome: () => void; onBoard: () => void }) {
+export function MatchResult({ match, onHome, onBoard }: { match: MatchInfo; onHome: () => void; onBoard: () => void }) {
   const delta = match.your_delta ?? 0
+  const dialog = useRef<HTMLDialogElement>(null)
+  const ranked = match.ranked && !match.is_private && !match.is_ai_opponent
+  const tied = match.your_score === match.opponent_score
+  const outcome = match.won ? 'win' : tied ? 'draw' : 'loss'
+  useEffect(() => {
+    const node = dialog.current
+    if (match.status === 'finished') node?.showModal()
+    return () => node?.close()
+  }, [match.match_id, match.status])
   return (
     <div className="min-h-screen bg-[var(--surface)] flex flex-col">
+      <dialog ref={dialog} className="duel-result-popup" aria-labelledby="duel-result-title" data-outcome={outcome} dir="rtl">
+        <button className="duel-result-close" aria-label="بستن نتیجه" onClick={() => dialog.current?.close()}>×</button>
+        <div className="duel-result-banner"><StudySymbol kind="award" size={48} />
+          <h2 id="duel-result-title">{match.won ? 'بردی!' : tied ? 'مساوی!' : 'باختی'}</h2>
+          <p>{match.is_private ? 'دوئل دوستانه' : ranked ? 'رقابت رنک‌دار' : 'مسابقهٔ تمرینی'} · پایان مسابقه</p>
+        </div>
+        <div className="duel-result-content">
+          <div className="duel-result-scores"><div><small>تو</small><strong>{faNum(match.your_score ?? 0)}٪</strong></div><span>—</span><div><small>{match.opponent}</small><strong>{faNum(match.opponent_score ?? 0)}٪</strong></div></div>
+          {ranked ? <div className="duel-result-rating"><span>تغییر امتیاز Elo</span><strong dir="ltr" data-positive={delta >= 0}>{delta > 0 ? '+' : ''}{faNum(delta)}</strong><p>امتیاز جدید: <b dir="ltr">{faNum(match.your_elo)}</b></p></div>
+            : <p className="boom-notice">این مسابقه روی امتیاز Elo اثر ندارد.</p>}
+          <button className="boom-button boom-button-primary" onClick={onHome}>بازگشت به کولوسئوم</button>
+          <button className="boom-button boom-button-secondary" onClick={() => dialog.current?.close()}>دیدن جزئیات نتیجه</button>
+        </div>
+      </dialog>
       <div className="px-4 pt-16 pb-6 text-center">
         {match.won && <StudySymbol kind="award" size={44} className="mx-auto mb-3 text-[var(--accent)]" />}
         <p className={`font-bold text-3xl mb-2 ${match.won ? "text-green-500" : match.your_score === match.opponent_score ? "text-[var(--muted)]" : "text-red-500"}`}>
@@ -866,7 +891,7 @@ export default function Arena({ nav, userData, initialPhase }: {
       stopPoll()
       setPhase("lobby")
       setError(m.generation_error || "سوال مسابقه گزارش شد؛ مسابقه بدون تغییر رتبه لغو شد.")
-    } else if (m.is_private && m.status !== "finished") setPhase("waiting")
+    } else if (m.status !== "finished") setPhase("waiting")
     else setPhase("finished")
   }
 
@@ -1000,7 +1025,7 @@ export default function Arena({ nav, userData, initialPhase }: {
   if (phase === "room") return <DuelRoom invite={roomInvite} onBack={roomHome} onStart={enterRoomMatch} />
   if (phase === "waiting") return <section className="tournament-page duel-room" dir="rtl">
     <div className="tn-hero-title"><h1>پاسخ‌ها ثبت شد</h1></div>
-    <p className="tn-hero-description" role="status">منتظر پاسخ‌های دوستت هستیم. بعد از پایان دوئل، نتیجه نمایش داده می‌شود.</p>
+    <p className="tn-hero-description" role="status">منتظر پاسخ‌های حریفت هستیم. بعد از پایان دوئل، نتیجه نمایش داده می‌شود.</p>
     <button className="tn-button tn-button-secondary" onClick={roomHome}>بازگشت به کولوسئوم</button>
   </section>
   if (phase === "playing" && match) return <DuelRunner match={match} onDone={submitDuel} onExit={match.is_private ? roomHome : cancelQueue} />
