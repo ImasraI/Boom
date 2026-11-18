@@ -1,3 +1,4 @@
+import PageHeading from "../components/PageHeading";
 import { useEffect, useMemo, useState } from "react";
 import { apiUrl, authHeaders } from "../api";
 import type { NavFn, SignupData } from "../types";
@@ -145,15 +146,9 @@ export default function KnowledgeGraph({ nav, userData }: { nav: NavFn; userData
   return (
     <div className="min-h-screen bg-[var(--surface)] pb-12">
       <header className="sticky top-0 z-10 border-b border-[var(--border)] bg-[var(--surface)]/95 backdrop-blur-sm">
-        <div className="flex items-center gap-3 px-5 pb-3 pt-12">
-        <button type="button" onClick={() => nav("home")} aria-label="بازگشت" className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--chip)] text-[var(--muted)]">
-          <span aria-hidden="true">‹</span>
-        </button>
-        <div className="flex-1 text-right">
-          <h1 className="font-display text-xl text-[var(--text)]">نقشه مسیر یادگیری</h1>
-          <p className="text-[11px] font-medium text-[var(--muted-2)]">مباحث استخراج‌شده از کتاب‌ها، همراه با منبع هر گره</p>
-        </div>
-        </div>
+        <PageHeading className="knowledge-page-heading" eyebrow="پیوند درس‌ها" title="نقشهٔ مسیر یادگیری"
+          description="مباحث استخراج‌شده از کتاب‌ها و منبع هر گره را دنبال کن."
+          actions={<button className="boom-button boom-button-secondary" onClick={() => nav("home")}>بازگشت به خانه</button>} />
         <div className="flex gap-1 px-5" role="tablist" aria-label="دسته‌بندی درس‌ها">
           {([["main", "دروس تخصصی"], ["other", "سایر دروس"]] as const).map(([key, label]) => {
             const count = data ? data.nodes.filter(node => node.kind === "subject" && (key === "main") === isMainSubject(node.subject)).length : 0;

@@ -25,7 +25,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func, case
 from sqlalchemy.orm import Session
 
 from app.auth.database import (
@@ -811,6 +811,8 @@ def _room_scope(db, user_id):
     profile = _profile_of(db, user_id)
     major = _major_key_of(profile.major or "") if profile else ""
     grade = (profile.grade or "").strip() if profile else ""
+    if grade == "فارغ‌التحصیل":
+        grade = "دوازدهم"
     if major not in pool_core.STARTER_MAJORS or grade not in pool_core.STARTER_GRADES:
         raise HTTPException(409, "برای دوئل دوستانه، پایه و رشتهٔ ریاضی یا تجربی را در حسابت ثبت کن.")
     return major, grade
@@ -1366,23 +1368,22 @@ def me(
     db: Session = Depends(get_db),
 ):
     elo = user_elo(db, current_user.id)
-    matches = db.execute(
-        select(ArenaMatch)
+    total, wins = db.execute(
+        select(func.count(ArenaMatch.id),
+               func.coalesce(func.sum(case((ArenaMatch.winner_id == current_user.id, 1), else_=0)), 0))
         .where((ArenaMatch.student_a_id == current_user.id)
                | (ArenaMatch.student_b_id == current_user.id))
         # AI-rival exhibitions are not part of a player's ranked record.
         .where(ArenaMatch.is_ai_opponent.is_(False), ArenaMatch.is_private.is_(False))
         .where(ArenaMatch.status == "finished")
-        .order_by(ArenaMatch.created_at.desc())
-    ).scalars().all()
-    wins = sum(1 for m in matches if m.winner_id == current_user.id)
-    losses = len(matches) - wins
+    ).one()
+    losses = total - wins
     return {
         "elo": elo,
         "title": _title(elo),
         "wins": wins,
         "losses": losses,
-        "matches": len(matches),
+        "matches": total,
     }
 
 
@@ -1420,6 +1421,7 @@ def duel_filters(
     major: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    check_stock: bool = True,
 ):
     """The duel filter checkboxes for the caller's own knowledge base.
 
@@ -1432,8 +1434,10 @@ def duel_filters(
     resolved, grade = _knowledge_base(db, current_user.id, {"major": major})
     if (get_settings().ARENA_WEEKLY_MAZE_ENABLED and _major_key_of(resolved) == 'riazi'
             and grade not in ('دهم', 'یازدهم')):
-        from app.rag.weekly_ranked import available_preview
-        weekly=available_preview(db,current_user.id,grade)
+        from app.rag.weekly_ranked import available_preview, preview
+        # Opening a lobby only needs curriculum metadata. Full stock assembly
+        # remains mandatory at join/readiness, never on this lightweight path.
+        weekly = available_preview(db, current_user.id, grade) if check_stock else preview()
         return {'all':[],'mine':[],'addressable':[],'booklet_of':{},'majors_with':{},
             'major':resolved,'grade':grade,'weekly':{k:weekly.get(k) for k in
                 ('available','date','document','topics','message','code','stock_available','fallback','requested_date')}}

@@ -1,4 +1,5 @@
 import StudentPilot from "../components/StudentPilot"
+import PageHeading from "../components/PageHeading"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
 import { apiJson, authFetch, readApiError } from "../api"
@@ -202,73 +203,45 @@ function EloBadge({ elo, title, color, size = "md" }: { elo: number; title?: str
 
 /* ---------------- Lobby ---------------- */
 
-function Lobby({ me, onJoin, onBoard, onScheduled, onRoom, busy, filters, error }: {
-  me: MeInfo | null
-  onJoin: () => void
-  onBoard: () => void
-  onScheduled: () => void
-  onRoom: () => void
-  busy: boolean
-  filters: FilterOptions | null
-  error?: string
+function Lobby({ me, onJoin, onBoard, onScheduled, onRoom, onProfile, busy, loading, filters, error }: {
+  me: MeInfo | null; onJoin: () => void; onBoard: () => void; onScheduled: () => void;
+  onRoom: () => void; onProfile: () => void; busy: boolean; loading: boolean; filters: FilterOptions | null; error?: string;
 }) {
-  return (
-    <div className="min-h-screen bg-[var(--surface)]">
-      <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-12 pb-5 text-center">
-        <ColosseumIcon size={72} className="mx-auto mb-3 text-[var(--accent)]" />
-        <p className="text-[11px] font-bold text-[var(--muted-2)] mb-1">رقابت رنک‌دار بوم</p>
-        <h1 className="font-display font-bold text-xl text-[var(--text)] mb-3">کولوسئوم</h1>
-        {me && <EloBadge elo={me.elo} title={me.title.name} color={me.title.color} size="lg" />}
-        {me && (
-          <p className="text-[12px] text-[var(--muted-2)] mt-2 font-bold">
-            {me.wins} برد · {me.losses} باخت از {me.matches} مسابقه
-          </p>
-        )}
-      </div>
-
-      <div className="px-4 mt-5 max-w-[430px] mx-auto space-y-4">
-        <div className="study-section p-5 text-right">
-          <p className="text-[13px] font-bold text-[var(--text)] mb-2">چطور کار می‌کند؟</p>
-          <ul className="text-[12px] text-[var(--muted-2)] leading-relaxed space-y-1.5">
-            <li>• وارد صف شو؛ تا وقتی حریف هم‌سطح پیدا نشود در صف می‌مانی — بدون ربات.</li>
-            <li>• هر دو یک دفترچه یکسان با ۱۰ سوال می‌گیرید، با زمان واقعی.</li>
-            <li>• برای دوازدهم ریاضی‌فیزیک، اولویت با آزمون آیندهٔ ماز است؛ در نبود سؤال آماده، نسخهٔ تأییدشدهٔ آزمون قبلی استفاده می‌شود.</li>
-            <li>• پایه تحصیلی کوچک‌تر تعیین می‌شود؛ سوال از مطالبی که هنوز نخوانده‌ای پرسیده نمی‌شود.</li>
-            <li>• تصحیح با نمره منفی کنکور؛ امتیاز بیشتری بگیری، Elo بیشتری می‌گیری.</li>
-            <li>• برنده‌ها بالا می‌روند: تازه‌کار → رنک C → رنک B → حرفه‌ای → نابغه → استاد → اسطوره.</li>
-          </ul>
-        </div>
-
-        <p className="text-xs text-[var(--muted)] border-b border-[var(--border)] pb-4 leading-relaxed">
-          کولوسئوم هفتگی: ۱۰ سوال از آزمون آیندهٔ ماز؛ در نبود موجودی از نسخهٔ قبلی استفاده می‌شود. انتخاب مبحث خودکار است و فیلتر درس ندارد.
-          {filters?.major && <span className="block mt-1">{filters.major} · {filters.grade}</span>}
-          <WeeklyStockNotice weekly={filters?.weekly} />
-        </p>
-
-        {!!error && (
-          <p className="text-[12px] font-bold text-red-500 text-center leading-relaxed">{error}</p>
-        )}
-
-        <button onClick={onJoin} disabled={busy}
-          className="w-full py-4 rounded-2xl bg-[var(--accent)] text-white font-bold text-[14px] hover:brightness-110 active:scale-[0.99] transition-all disabled:opacity-50">
-          {busy ? "در حال دریافت اطلاعات کولوسئوم..." : "جستجوی حریف"}
-        </button>
-        <button onClick={onRoom}
-          className="w-full py-3.5 rounded-md border border-[var(--accent-soft-border)] bg-[var(--accent-soft)] text-[var(--accent)] text-[13px] font-bold">
-          ساخت اتاق دوستانه
-        </button>
-        <button onClick={onScheduled}
-          className="w-full py-3.5 rounded-2xl border border-[var(--border-strong)] text-[13px] font-bold text-[var(--text)] flex items-center justify-center gap-2">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          مسابقه زمان‌دار (حریف آنلاین نیست؟)
-        </button>
-        <button onClick={onBoard}
-          className="w-full py-3.5 rounded-2xl border border-[var(--border-strong)] text-[13px] font-bold text-[var(--muted)]">
-          جدول امتیازات
-        </button>
-      </div>
+  return <div className="boom-page" dir="rtl">
+    <PageHeading eyebrow="رقابت و تمرین" title="کولوسئوم" icon={<ColosseumIcon size={40} />}
+      description="یک دفترچه، دو رقیب. با حریف هم‌سطح رقابت کن یا دوستت را به یک دوئل دعوت کن."
+      actions={me ? <EloBadge elo={me.elo} title={me.title.name} color={me.title.color} size="lg" /> : undefined} />
+    <div className="boom-metric-strip" aria-label="کارنامهٔ رقابت">
+      <div><small>مسابقهٔ رنک‌دار</small><strong>{me ? faNum(me.matches) : "—"}</strong></div>
+      <div><small>برد</small><strong>{me ? faNum(me.wins) : "—"}</strong></div>
+      <div><small>باخت</small><strong>{me ? faNum(me.losses) : "—"}</strong></div>
     </div>
-  )
+    <div className="arena-layout">
+      <section className="boom-panel">
+        <h2 className="boom-section-heading">مسابقه چطور پیش می‌رود؟</h2>
+        <ol className="arena-rules">
+          <li>هر دو بازیکن یک دفترچهٔ ۱۰ سؤالی مشترک دریافت می‌کنند.</li>
+          <li>رشته و پایهٔ مشترک، محدودهٔ سؤال‌ها را مشخص می‌کند.</li>
+          <li>در رقابت رنک‌دار، حریف واقعی و نزدیک به امتیازت پیدا می‌شود؛ ربات جای بازیکن نمی‌نشیند.</li>
+          <li>پاسخ‌ها با نمرهٔ منفی کنکور تصحیح می‌شوند. نتیجهٔ رقابت رنک‌دار روی رتبه اثر می‌گذارد.</li>
+          <li>در اتاق دوستانه، هر دو «آماده‌ام» را می‌زنید و با شمارش معکوس سه‌ثانیه‌ای شروع می‌کنید. رتبه تغییر نمی‌کند.</li>
+        </ol>
+      </section>
+      <section className="boom-panel arena-actions">
+        <h2>آمادهٔ رقابت؟</h2>
+        <p>{filters?.major ? `${filters.major} · ${filters.grade}` : "سؤال‌ها با رشته و پایهٔ ذخیره‌شده در پروفایلت انتخاب می‌شوند."}</p>
+        <button onClick={onProfile} className="text-[var(--accent)] text-sm text-right underline underline-offset-4">ویرایش رشته و پایه</button>
+        <button onClick={onJoin} disabled={busy} className="boom-button boom-button-primary">جستجوی حریف رنک‌دار</button>
+        <button onClick={onRoom} className="boom-button boom-button-secondary">ساخت اتاق دوستانه</button>
+        <button onClick={onScheduled} className="boom-button boom-button-secondary">تنظیم زمان دوئل</button>
+        <button onClick={onBoard} className="boom-button boom-button-secondary">جدول امتیازات</button>
+        {loading && <p className="arena-status" role="status">در حال دریافت کارنامه و محدودهٔ درسی… می‌توانی اتاق بسازی یا وارد صف شوی.</p>}
+        <p className="text-xs">آماده‌بودن دفترچه هنگام ورود بررسی می‌شود. برای محدودهٔ هفتگی ماز، در نبود سؤال کافی از نسخهٔ تأییدشدهٔ قبلی استفاده می‌شود.</p>
+        <WeeklyStockNotice weekly={filters?.weekly} />
+        {error && <p className="boom-notice" role="alert">{error}</p>}
+      </section>
+    </div>
+  </div>;
 }
 
 /* ---------------- Queue ---------------- */
@@ -735,6 +708,7 @@ export default function Arena({ nav, userData, initialPhase }: {
   const [lobbyRetry, setLobbyRetry] = useState(0)
   const wanted: string[] = []
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollEpoch = useRef(0)
   // Scheduled-duel lobby state.
   const [schedOpen, setSchedOpen] = useState<ScheduledOpen[]>([])
   const [schedMine, setSchedMine] = useState<ScheduledMine[]>([])
@@ -751,18 +725,29 @@ export default function Arena({ nav, userData, initialPhase }: {
   }, [])
 
   useEffect(() => {
-    let alive = true
-    setLoadingLobby(true)
-    setLobbyError("")
-    const major = userData?.major ? `?major=${encodeURIComponent(userData.major)}` : ""
-    Promise.all([apiJson<MeInfo>("/api/arena/me"), apiJson<FilterOptions>(`/api/arena/filters${major}`)])
-      .then(([identity, subjects]) => { if (alive) { setMe(identity); setFilters(subjects) } })
-      .catch(e => { if (alive) setLobbyError(e instanceof Error ? e.message : "ارتباط با سرور برقرار نشد.") })
-      .finally(() => { if (alive) setLoadingLobby(false) })
-    return () => { alive = false }
-  }, [userData?.major, lobbyRetry])
+    if (phase !== "lobby") return;
+    const controller = new AbortController();
+    let pending = 2;
+    setLoadingLobby(true);
+    setLobbyError("");
+    const done = () => {
+      if (!controller.signal.aborted && --pending === 0) setLoadingLobby(false);
+    };
+    const failed = (error: unknown) => {
+      if (!controller.signal.aborted) setLobbyError(error instanceof Error ? error.message : "ارتباط با سرور برقرار نشد.");
+    };
+    // Rank and curriculum render independently; neither delays room creation.
+    void apiJson<MeInfo>("/api/arena/me", { signal: controller.signal }, 10000)
+      .then(identity => { if (!controller.signal.aborted) setMe(identity); }).catch(failed).finally(done);
+    const query = new URLSearchParams({ check_stock: "false" });
+    if (userData?.major) query.set("major", userData.major);
+    void apiJson<FilterOptions>("/api/arena/filters?" + query, { signal: controller.signal }, 10000)
+      .then(subjects => { if (!controller.signal.aborted) setFilters(subjects); }).catch(failed).finally(done);
+    return () => controller.abort();
+  }, [userData?.major, userData?.grade, lobbyRetry, phase]);
 
   const stopPoll = useCallback(() => {
+    pollEpoch.current++
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
   }, [])
 
@@ -772,10 +757,16 @@ export default function Arena({ nav, userData, initialPhase }: {
 
   const startPolling = useCallback((matchId: number) => {
     stopPoll()
+    const epoch = pollEpoch.current
+    let inFlight = false
     pollRef.current = setInterval(async () => {
+      if (inFlight) return
+      inFlight = true
       let m
       try { m = await loadMatch(matchId) }
-      catch (e) { setError(e instanceof Error ? e.message : "دریافت مسابقه ناموفق بود."); return }
+      catch (e) { if (epoch === pollEpoch.current) setError(e instanceof Error ? e.message : "دریافت مسابقه ناموفق بود."); return }
+      finally { inFlight = false }
+      if (epoch !== pollEpoch.current) return
       if (!m) return
       setMatch(m)
       if (m.status === "cancelled") {
@@ -793,11 +784,13 @@ export default function Arena({ nav, userData, initialPhase }: {
   }, [loadMatch, stopPoll])
 
   async function join() {
+    stopPoll()
+    const epoch = pollEpoch.current
     setPhase("queued")
     setWaited(0)
     setError("")
     try {
-      const res = await authFetch("/api/arena/join", {
+      const data = await apiJson<{ match_id?: number }>("/api/arena/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -807,12 +800,12 @@ export default function Arena({ nav, userData, initialPhase }: {
           student: userData ? { major: userData.major, grade: userData.grade } : undefined,
           wanted,
         }),
-      })
-      if (!res.ok) throw new Error(await readApiError(res, "ورود به صف ناموفق بود"))
-      const data = await res.json()
+      }, 15000)
+      if (epoch !== pollEpoch.current) return
       // The server may drop ticks that are not in the player's own subjects.
       if (data.match_id) {
         const m = await loadMatch(data.match_id)
+        if (epoch !== pollEpoch.current) return
         if (m.status === "cancelled") throw new Error(m.generation_error || "مسابقه بدون تغییر رتبه لغو شد.")
         setMatch(m)
         setPhase("playing")
@@ -820,19 +813,23 @@ export default function Arena({ nav, userData, initialPhase }: {
         return
       }
     } catch (e) {
+      if (epoch !== pollEpoch.current) return
       setError(e instanceof Error ? e.message : "خطا")
       setPhase("lobby")
       return
     }
+    let inFlight = false
     pollRef.current = setInterval(async () => {
+      if (inFlight) return
+      inFlight = true
       setWaited(w => w + 2)
       try {
-        const res = await authFetch("/api/arena/status")
-        if (!res.ok) throw new Error(await readApiError(res, "دریافت وضعیت صف ناموفق بود."))
-        const s = await res.json()
+        const s = await apiJson<{state:string;match_id?:number}>("/api/arena/status", {}, 10000)
+        if (epoch !== pollEpoch.current) return
         if (s.state === "matched" && s.match_id) {
-          stopPoll()
           const m = await loadMatch(s.match_id)
+          if (epoch !== pollEpoch.current) return
+          stopPoll()
           if (m.status === "cancelled") throw new Error(m.generation_error || "مسابقه بدون تغییر رتبه لغو شد.")
           setMatch(m)
           if (m?.mock?.duration_minutes) { setPhase("playing"); startPolling(s.match_id) }
@@ -841,14 +838,15 @@ export default function Arena({ nav, userData, initialPhase }: {
           setPhase("lobby")
         }
       } catch (e) {
+        if (epoch !== pollEpoch.current) return
         stopPoll(); setPhase("lobby"); setError(e instanceof Error ? e.message : "دریافت وضعیت صف ناموفق بود.")
-      }
+      } finally { inFlight = false }
     }, 2000)
   }
 
   async function cancelQueue() {
     stopPoll()
-    await authFetch("/api/arena/leave", { method: "POST" }).catch(() => {})
+    await apiJson("/api/arena/leave", { method: "POST" }, 10000).catch(() => {})
     setPhase("lobby")
   }
 
@@ -1014,12 +1012,9 @@ export default function Arena({ nav, userData, initialPhase }: {
     onCancel={cancelInvite} onEnterMatch={enterScheduledMatch} onBack={closeScheduled}
     defaultWhen={localInputValue(dayAt(1, 10))} />
 
-  return <><StudentPilot /><div className="mx-auto max-w-[560px] px-4 pt-3">
-    <button type="button" onClick={() => nav("mock")} className="text-sm font-bold text-[var(--accent)] underline underline-offset-4">
-      چالش دوستانه در آزمون هوشمند
-    </button>
-  </div><Lobby me={me} onJoin={join} onBoard={openBoard} busy={loadingLobby || !!lobbyError}
+  return <><Lobby me={me} onJoin={join} onBoard={openBoard} busy={false} loading={loadingLobby} onProfile={() => nav("profile")}
     filters={filters}
     error={lobbyError || error} onScheduled={openScheduled} onRoom={() => setPhase("room")} />
-    {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت کولوسئوم</button></div>}</>
+    {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت کولوسئوم</button></div>}
+    <StudentPilot /></>
 }

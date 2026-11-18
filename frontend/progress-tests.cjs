@@ -11,13 +11,17 @@ function harness(fetch = async () => ({ ok: true })) {
     key: i => [...values.keys()][i] ?? null, get length() { return values.size; } };
   const modules = {};
   function load(name) {
-    if (name === './api') return { apiUrl: p => p, authHeaders: token => ({ Authorization: `Bearer ${token}` }) };
+    if (name === './api') return {
+      apiUrl: p => p, authHeaders: token => ({ Authorization: `Bearer ${token}` }),
+      authFetch: fetch,
+      apiJson: async (url, options) => { const response = await fetch(url, options); if (!response.ok) throw new Error('request failed'); return response.json(); },
+    };
     if (modules[name]) return modules[name];
     const exports = {};
     modules[name] = exports;
     const source = fs.readFileSync(path.join(__dirname, 'src', name + '.ts'), 'utf8');
     const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
-    vm.runInNewContext(output, { exports, require: load, localStorage, atob, fetch, console, Map, Promise, crypto: require('node:crypto'),
+    vm.runInNewContext(output, { exports, require: load, localStorage, atob, fetch, console, Map, Promise, AbortController, setTimeout, clearTimeout, crypto: require('node:crypto'),
       window: { dispatchEvent() {} }, CustomEvent: class { constructor(type) { this.type = type; } } });
     return exports;
   }

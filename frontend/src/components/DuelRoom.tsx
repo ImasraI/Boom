@@ -45,9 +45,10 @@ export default function DuelRoom({ invite, onBack, onStart }: {
     setBusy(true)
     setError("")
     const path = code ? roomPath(code, "/join") : "/api/arena/rooms"
-    void apiJson<Room>(path, { method: "POST", signal: controller.signal }).then(next => {
+    void apiJson<Room>(path, { method: "POST", signal: controller.signal }, 10000).then(next => {
       if (controller.signal.aborted) return
       acceptRoom(next)
+      initialInvite.current = next.code
       window.history.replaceState(null, "", roomUrl(next.code))
     }).catch(failure => {
       if (!controller.signal.aborted) setError(errorText(failure))
@@ -99,7 +100,7 @@ export default function DuelRoom({ invite, onBack, onStart }: {
     setBusy(true)
     setError("")
     try {
-      acceptRoom(await apiJson<Room>(roomPath(room.code, "/ready"), { method: "POST" }))
+      acceptRoom(await apiJson<Room>(roomPath(room.code, "/ready"), { method: "POST" }, 12000))
     } catch (failure) {
       setError(errorText(failure))
     } finally { setBusy(false) }
@@ -125,7 +126,7 @@ export default function DuelRoom({ invite, onBack, onStart }: {
   const amReady = room?.is_host ? room?.host_ready : room?.guest_ready
   return <section className="tournament-page duel-room" dir="rtl">
     <div className="tn-topline"><span>کولوسئوم / دوئل دوستانه</span>
-      <button type="button" onClick={onBack}>بازگشت به کولوسئوم</button></div>
+      <button type="button" disabled={busy} onClick={() => void leave()}>بازگشت به کولوسئوم</button></div>
     <div className="tn-hero-title"><StudySymbol kind="award" size={31} /><h1>اتاق دوئل دوستانه</h1></div>
     <p className="tn-hero-description">۱۰ سؤال مشترک · بدون تغییر رتبه</p>
     {(error || pollError) && <p className="tn-inline-error" role="alert">{error || pollError}</p>}
@@ -147,7 +148,7 @@ export default function DuelRoom({ invite, onBack, onStart }: {
         }}>باز کردن مسابقه</button>}
       </div> : <div className="duel-room-actions">
         <button className="tn-button tn-button-primary" type="button" disabled={!room.guest || amReady || busy} onClick={() => void ready()}>
-          {amReady ? "آماده‌ای" : "آماده‌ام"}
+          {busy ? "در حال آماده‌سازی دفترچه…" : amReady ? "آماده‌ای؛ منتظر دوستت هستیم" : "آماده‌ام"}
         </button>
         <button className="tn-button tn-button-secondary" type="button" disabled={busy} onClick={() => void leave()}>{room.is_host ? "بستن اتاق" : "خروج از اتاق"}</button>
       </div>}

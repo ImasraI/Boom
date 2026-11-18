@@ -1,5 +1,7 @@
 @import './fonts.css';
 @import 'tailwindcss';
+/* The in-app theme switch is authoritative, including Tailwind dark: utilities. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --page-bg: #f0f0f0;

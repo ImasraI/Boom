@@ -1,3 +1,4 @@
+import PageHeading from "../components/PageHeading";
 import { useState, useEffect } from "react";
 import { NavFn } from "../types";
 import { apiUrl, authHeaders } from "../api";
@@ -76,18 +77,10 @@ export default function Exams({ nav }: { nav: NavFn }) {
   const exam = examResults.find(e => e.id === selected);
 
   return (
-    <div className="min-h-screen bg-[var(--surface)] pb-10">
-      <div className="px-5 pt-12 pb-4 flex items-center gap-4">
-        <BackButton onClick={() => selected ? setSelected(null) : nav("home")} />
-        <div className="text-right">
-          <h1 className="font-display text-xl text-[var(--text)]">
-            {selected ? exam?.provider : "آزمون‌ها"}
-          </h1>
-          <p className="text-[12px] text-[var(--muted-2)] font-medium">
-            {selected ? exam?.date : "نتایج و تحلیل عملکرد"}
-          </p>
-        </div>
-      </div>
+    <div className="boom-page">
+      <PageHeading eyebrow="کارنامهٔ من" title={selected ? exam?.provider || "نتیجهٔ آزمون" : "نتایج آزمون‌ها"}
+        description={selected ? exam?.date : "پاسخ‌ها، روند پیشرفت و درس‌هایی که به تمرین بیشتر نیاز دارند."}
+        actions={<button className="boom-button boom-button-secondary" onClick={() => selected ? setSelected(null) : nav("home")}>بازگشت</button>} />
 
       {!selected ? (
         <div className="px-5 space-y-4">

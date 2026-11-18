@@ -1,328 +1,177 @@
-import { useState, useEffect } from "react";
-import { NavFn, SignupData } from "../types";
-import { pullServerProfile, pushProfile, toSignupData as toSignupPatch } from "../profileSync";
-import { SUBJECTS_BY_MAJOR } from "../data";
-import { PREFERENCES_CHANGED_EVENT, readPreferences, playFeedback, updatePreferences, SoundIcon } from "../components/Experience";
-import { apiUrl, authHeaders } from "../api";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { NavFn, SignupData, normalizeSignupData } from "../types";
+import { pullServerProfile, pushProfile, toSignupData } from "../profileSync";
+import { MAJORS, GRADES, STUDY_HOURS_OPTIONS, TEST_EXAM_OPTIONS, SUBJECTS_BY_MAJOR } from "../data";
+import { PREFERENCES_CHANGED_EVENT, readPreferences, playFeedback, updatePreferences } from "../components/Experience";
+import { apiJson } from "../api";
+import PageHeading from "../components/PageHeading";
+import { StudySymbol } from "../components/StudySymbols";
 
-function BackButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button onClick={onClick} className="w-9 h-9 rounded-xl bg-[var(--chip)] flex items-center justify-center text-[var(--muted)] hover:bg-[var(--chip-hover)] transition-colors">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: "scaleX(-1)" }}>
-        <path d="M19 12H5M12 5l-7 7 7 7"/>
-      </svg>
-    </button>
-  );
+const SECTIONS = ["اطلاعات و تحصیل", "ارزیابی دروس", "تنظیمات"];
+function Field({ label, children, wide = false }: { label: string; children: ReactNode; wide?: boolean }) {
+  return <label className={`profile-field ${wide ? "profile-wide" : ""}`}><span>{label}</span>{children}</label>;
 }
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="study-field px-1 py-4">
-      <p className="text-[10px] font-bold text-[var(--muted-2)] mb-1.5 text-right">{label}</p>
-      {children}
-    </div>
-  );
+function Switch({ label, description, checked, onClick }: { label: string; description: string; checked: boolean; onClick: () => void }) {
+  return <div className="study-field flex items-center justify-between gap-4 py-5">
+    <div><p className="font-semibold">{label}</p><p className="text-sm text-[var(--muted)] mt-1">{description}</p></div>
+    <button type="button" className="boom-button boom-button-secondary" role="switch" aria-label={label} aria-checked={checked} onClick={onClick}>{checked ? "روشن" : "خاموش"}</button>
+  </div>;
 }
-
-const SECTIONS = ["اطلاعات عمومی", "ارزیابی دروس", "تنظیمات"];
-
 export default function Profile({ nav, userData, dark, toggleDark, onSave, logout, settingsRequest = 0 }: {
-  nav: NavFn; 
-  userData: SignupData | null; 
-  dark: boolean; 
-  toggleDark: () => void;
-  onSave: (data: SignupData) => void;
-  logout: () => void;
-  settingsRequest?: number;
+  nav: NavFn; userData: SignupData | null; dark: boolean; toggleDark: () => void;
+  onSave: (data: SignupData) => void; logout: () => void; settingsRequest?: number;
 }) {
   const [activeSection, setActiveSection] = useState(settingsRequest ? 2 : 0);
-  useEffect(() => { if (settingsRequest) setActiveSection(2); }, [settingsRequest]);
-  const subjects = SUBJECTS_BY_MAJOR[userData?.major ?? "ریاضی فیزیک"] ?? [];
-
-  // General
-  const [firstName, setFirstName] = useState(userData?.name?.split(" ")[0] ?? "");
-  const [lastName, setLastName] = useState(userData?.name?.split(" ").slice(1).join(" ") ?? "");
-  const [phone, setPhone] = useState(userData?.phone ?? "");
-  const [birthday, setBirthday] = useState(userData?.birthday ?? "");
-  const [city, setCity] = useState(userData?.city ?? "");
-  const [school, setSchool] = useState(userData?.school ?? "");
-
-  // Subjects
-  const [completion, setCompletion] = useState<Record<string, number>>(() => userData?.completion ?? Object.fromEntries(subjects.map(s => [s, 40])));
-  const [confidence, setConfidence] = useState<Record<string, number>>(() => userData?.confidence ?? Object.fromEntries(subjects.map(s => [s, 50])));
-
-  // Sound + appearance preferences live in the Experience storage; the
-  // Settings tab is now the only surface exposing them.
+  const [draft, setDraft] = useState(() => normalizeSignupData(userData));
+  const [savedData, setSavedData] = useState(() => normalizeSignupData(userData));
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [saveError, setSaveError] = useState("");
+  const [customExam, setCustomExam] = useState("");
+  const dirty = useRef(false);
   const [prefs, setPrefs] = useState(readPreferences);
+  const [analytics, setAnalytics] = useState<Array<{ subject: string; minutes: number; accuracy: number | null; confidence: number | null }>>([]);
+  const subjects = SUBJECTS_BY_MAJOR[draft.major] ?? [];
+  const isChanged = JSON.stringify(draft) !== JSON.stringify(savedData);
+  useEffect(() => { if (settingsRequest) setActiveSection(2); }, [settingsRequest]);
+  useEffect(() => {
+    if (!dirty.current) { const incoming = normalizeSignupData(userData); setDraft(incoming); setSavedData(incoming); }
+  }, [userData]);
   useEffect(() => {
     const sync = () => setPrefs(readPreferences());
     window.addEventListener(PREFERENCES_CHANGED_EVENT, sync);
     return () => window.removeEventListener(PREFERENCES_CHANGED_EVENT, sync);
   }, []);
-  function toggleSound() {
-    const next = updatePreferences({ sound: !prefs.sound });
-    setPrefs(next);
-    if (next.sound) playFeedback("success");
-  }
-  function setPalette(palette: "coral" | "mint" | "iris") {
-    setPrefs(updatePreferences({ palette }));
-  }
-  function toggleCalm() {
-    setPrefs(updatePreferences({ calm: !prefs.calm }));
-  }
-
-  const [savedData, setSavedData] = useState<SignupData | null>(userData);
-  const [saved, setSaved] = useState(false);
-  const [conflictNotice, setConflictNotice] = useState("");
-  const [analytics, setAnalytics] = useState<Array<{ subject: string; minutes: number; accuracy: number | null; confidence: number | null }>>([]);
   useEffect(() => {
-    if (!userData || activeSection !== 1) return;
-    fetch(apiUrl("/api/profile/analytics"), { headers: authHeaders() })
-      .then(response => response.ok ? response.json() : null)
-      .then(data => { if (data) setAnalytics(data.subjects || []); })
-      .catch(() => undefined);
-  }, [activeSection, userData]);
-  
-  function getCurrentData(): SignupData {
-    return {
-      ...(userData || {} as SignupData),
-      name: `${firstName} ${lastName}`.trim(),
-      phone,
-      birthday,
-      city,
-      school,
-      completion,
-      confidence,
-    };
+    if (activeSection !== 1) return;
+    const controller = new AbortController();
+    void apiJson<{ subjects: typeof analytics }>("/api/profile/analytics", { signal: controller.signal }, 10000)
+      .then(data => setAnalytics(data.subjects || [])).catch(() => {});
+    return () => controller.abort();
+  }, [activeSection]);
+  function update<K extends keyof SignupData>(key: K, value: SignupData[K]) {
+    dirty.current = true; setDraft(old => ({ ...old, [key]: value })); setNotice(""); setSaveError("");
   }
-
-  const isChanged = JSON.stringify(getCurrentData()) !== JSON.stringify(savedData);
-
-  function save() {
-    if (!userData) return;
-    setConflictNotice("");
-    const current = getCurrentData();
-    onSave(current);
-    setSavedData(current);
-    setSaved(true);
-    // Growth-readiness project 1: the server row is authoritative; local
-    // save stays instant (offline-friendly), server sync follows.
-    pushProfile(current).then(async res => {
-      if (res.conflict) {
-        // Another device won: adopt the server profile explicitly.
-        const server = res.profile ?? (await pullServerProfile());
-        if (server) {
-          const merged = toSignupPatch(server, current);
-          onSave(merged);
-          setSavedData(merged);
-          setSaved(false);
-          setConflictNotice("این پروفایل روی دستگاه دیگری تغییر کرده بود؛ نسخه جدید دریافت شد.");
-        }
-      }
-    });
+  function toggleExam(exam: string) {
+    update("testExams", draft.testExams.includes(exam) ? draft.testExams.filter(item => item !== exam) : [...draft.testExams, exam]);
   }
-
-  useEffect(() => {
-    if (isChanged) {
-      setSaved(false);
+  function addExam() {
+    const value = customExam.trim();
+    if (value && !draft.testExams.includes(value)) update("testExams", [...draft.testExams, value]);
+    setCustomExam("");
+  }
+  async function save() {
+    if (!userData || saving) return;
+    if (!draft.name.trim() || !MAJORS.includes(draft.major) || !GRADES.includes(draft.grade) || !draft.studyHours) {
+      setSaveError("نام، رشته، پایه و زمان مطالعه را تکمیل کن."); return;
     }
-  }, [isChanged]);
-
-  const sections = [
-    // اطلاعات عمومی
-    <div className="space-y-3" key="general">
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="نام">
-          <input value={firstName} onChange={e => setFirstName(e.target.value)} placeholder="پریسا"
-            className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] text-right" />
-        </Field>
-        <Field label="نام خانوادگی">
-          <input value={lastName} onChange={e => setLastName(e.target.value)} placeholder="احمدی"
-            className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] text-right" />
-        </Field>
+    const token = localStorage.getItem("boom-token");
+    const current = { ...draft, name: draft.name.trim(), phone: userData.phone };
+    setSaving(true); setNotice(""); setSaveError("");
+    try {
+      const result = await pushProfile(current);
+      if (localStorage.getItem("boom-token") !== token) return;
+      if (result.conflict) {
+        const server = result.profile ?? await pullServerProfile();
+        if (localStorage.getItem("boom-token") !== token) return;
+        if (server) {
+          const fresh = toSignupData(server, savedData);
+          dirty.current = false; setDraft(fresh); setSavedData(fresh); onSave(fresh);
+        }
+        setSaveError("اطلاعات روی دستگاه دیگری تغییر کرده بود؛ نسخهٔ جدید نمایش داده شد. تغییراتت را بررسی و دوباره ذخیره کن.");
+        return;
+      }
+      if (!result.ok) {
+        setSaveError("تغییرات روی سرور ذخیره نشد. اطلاعات این فرم حفظ شده؛ اتصال را بررسی کن و دوباره ذخیره کن."); return;
+      }
+      const accepted = toSignupData(result.profile ?? null, current);
+      dirty.current = false; setDraft(accepted); setSavedData(accepted); onSave(accepted);
+      setNotice("تغییرات در حساب ذخیره شد. آزمون‌ها و برنامه‌های بعدی از اطلاعات جدید استفاده می‌کنند.");
+    } finally { setSaving(false); }
+  }
+  const form = <fieldset disabled={saving} className="profile-fields">
+    <Field label="نام و نام خانوادگی" wide><input className="boom-field" autoComplete="name" value={draft.name} onChange={e => update("name", e.target.value)} /></Field>
+    <Field label="رشتهٔ تحصیلی"><select className="boom-field" value={draft.major} onChange={e => update("major", e.target.value)}>
+      <option value="" disabled>انتخاب رشته</option>{MAJORS.map(value => <option key={value}>{value}</option>)}
+    </select></Field>
+    <Field label="پایهٔ تحصیلی"><select className="boom-field" value={draft.grade} onChange={e => update("grade", e.target.value)}>
+      <option value="" disabled>انتخاب پایه</option>{GRADES.map(value => <option key={value}>{value}</option>)}
+    </select></Field>
+    <Field label="زمان مطالعه در یک روز معمولی" wide><select className="boom-field" value={draft.studyHours} onChange={e => update("studyHours", e.target.value)}>
+      <option value="" disabled>انتخاب زمان مطالعه</option>
+      {draft.studyHours && !STUDY_HOURS_OPTIONS.includes(draft.studyHours) && <option>{draft.studyHours}</option>}
+      {STUDY_HOURS_OPTIONS.map(value => <option key={value}>{value}</option>)}
+    </select></Field>
+    <div className="profile-field profile-wide"><span id="profile-exams-label">آزمون‌هایی که در آن‌ها شرکت می‌کنی</span>
+      <div className="profile-options" role="group" aria-labelledby="profile-exams-label">
+        {[...new Set([...TEST_EXAM_OPTIONS, ...draft.testExams])].map(exam => <button type="button" key={exam} aria-pressed={draft.testExams.includes(exam)} onClick={() => toggleExam(exam)}>
+          {exam}{draft.testExams.includes(exam) && <span className="sr-only"> · انتخاب‌شده</span>}</button>)}
       </div>
-      <Field label="شماره موبایل">
-        <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="۰۹۱۲۳۴۵۶۷۸۹" dir="ltr"
-          className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] text-left" />
-      </Field>
-      <Field label="تاریخ تولد">
-        <input type="date" value={birthday} onChange={e => setBirthday(e.target.value)} dir="ltr"
-          className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)] text-left" />
-      </Field>
-      <Field label="شهر">
-        <input value={city} onChange={e => setCity(e.target.value)} placeholder="تهران، اصفهان، شیراز..."
-          className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] text-right" />
-      </Field>
-      <Field label="نام مدرسه">
-        <input value={school} onChange={e => setSchool(e.target.value)} placeholder="نام کامل مدرسهات"
-          className="w-full bg-transparent outline-none text-[14px] font-semibold text-[var(--text)] placeholder:text-[var(--placeholder)] text-right" />
-      </Field>
-    </div>,
-
-    // ارزیابی دروس
-    <div className="space-y-3" key="subjects">
-      <p className="text-[12px] text-[var(--muted)] leading-relaxed text-right">
-        صادقانه ارزیابی کن. هوش مصنوعی از این اطلاعات برای اولویتبندی ضعیفترین درساتت استفاده میکنه.
-      </p>
-      {subjects.map(s => (
-        <div key={s} className="bg-[var(--field)] rounded-2xl p-4">
-          <p className="text-[13px] font-bold text-[var(--text)] mb-3 text-right">{s}</p>
-          <div className="space-y-3">
-            <div>
-              <div className="flex justify-between mb-1">
-                <span className="text-[11px] font-bold text-[var(--accent)]">{completion[s]}%</span>
-                <span className="text-[11px] font-bold text-[var(--muted-2)]">میزان پیشرفت در کتاب</span>
-              </div>
-              <input type="range" min={0} max={100} step={5} value={completion[s]}
-                onChange={e => setCompletion(c => ({ ...c, [s]: Number(e.target.value) }))} className="w-full" />
-            </div>
-            <div>
-              <div className="flex justify-between mb-1">
-                <span className="text-[11px] font-bold text-[var(--syntax-blue)]">{confidence[s]}%</span>
-                <span className="text-[11px] font-bold text-[var(--muted-2)]">سطح اعتماد به نفس</span>
-              </div>
-              <input type="range" min={0} max={100} step={5} value={confidence[s]}
-                onChange={e => setConfidence(c => ({ ...c, [s]: Number(e.target.value) }))}
-                className="w-full" style={{ accentColor: "var(--syntax-blue)" }} />
-            </div>
-          </div>
-        </div>
-      ))}
-      {analytics.length > 0 && (
-        <div className="space-y-2 pt-2">
-          <p className="text-right text-[12px] font-bold text-[var(--text)]">شواهد ثبت‌شده در ۳۰ روز اخیر</p>
-          {analytics.map(item => (
-            <div key={item.subject} className="flex items-center gap-3 rounded-xl bg-[var(--field)] px-4 py-3">
-              <span className="text-[11px] font-bold text-[var(--accent)]">{item.confidence == null ? "بدون داده" : `${item.confidence}%`}</span>
-              <div className="min-w-0 flex-1 text-right">
-                <p className="text-[12px] font-bold text-[var(--text)]">{item.subject}</p>
-                <p className="text-[10px] text-[var(--muted-2)]">{item.minutes} دقیقه مطالعه · {item.accuracy == null ? "دقت ثبت نشده" : `${Math.round(item.accuracy * 100)}٪ دقت`}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>,
-
-    // تنظیمات — theme and sound first so they're the top controls.
-    <div className="space-y-3" key="settings">
-      <div className="study-field px-1 py-4 flex items-center justify-between">
-        <button onClick={toggleDark} role="switch" aria-label="حالت تاریک" aria-checked={dark}
-          className={`w-11 h-6 rounded-full transition-all relative flex-shrink-0 ${dark ? "bg-[var(--accent)]" : "bg-[var(--toggle-off)]"}`}
-        >
-          <div className="bg-[var(--card)] rounded-full absolute top-0.5 transition-all"
-            style={{ width: "18px", height: "18px", right: dark ? "4px" : "20px" }} />
-        </button>
-        <div className="text-right">
-          <p className="text-[13px] font-semibold text-[var(--text)]">حالت تاریک</p>
-          <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">تغییر تم برنامه به حالت شب</p>
-        </div>
-      </div>
-      <div className="study-field px-1 py-4 flex items-center justify-between">
-        <button onClick={toggleSound} role="switch" aria-label="صدا" aria-checked={prefs.sound}
-          className={`w-11 h-6 rounded-full transition-all relative flex-shrink-0 ${prefs.sound ? "bg-[var(--accent)]" : "bg-[var(--toggle-off)]"}`}
-        >
-          <div className="bg-[var(--card)] rounded-full absolute top-0.5 transition-all"
-            style={{ width: "18px", height: "18px", right: prefs.sound ? "4px" : "20px" }} />
-        </button>
-        <div className="text-right flex items-center gap-2">
-          <SoundIcon muted={!prefs.sound} />
-          <div>
-            <p className="text-[13px] font-semibold text-[var(--text)]">صداهای برنامه</p>
-            <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">افکت لمسی هنگام کار با برنامه</p>
-          </div>
-        </div>
-      </div>
-      <div className="study-field px-1 py-4">
-        <p className="text-[13px] font-semibold text-[var(--text)] text-right">رنگ اصلی</p>
-        <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5 text-right">حال‌وهوای رنگی برنامه</p>
-        <div className="flex gap-2 mt-3">
-          {(["coral", "mint", "iris"] as const).map(id => {
-            const color = id === "coral" ? "var(--accent)" : id === "mint" ? "#278575" : "#8060c6";
-            const label = id === "coral" ? "غروب" : id === "mint" ? "جنگل" : "یاس";
-            return (
-              <button key={id} onClick={() => setPalette(id)} aria-pressed={prefs.palette === id}
-                className={`flex-1 py-2 rounded-xl text-[12px] font-bold transition-all flex items-center justify-center gap-1.5 ${
-                  prefs.palette === id ? "ring-2 ring-[var(--accent)]" : "opacity-70 hover:opacity-100"
-                }`}
-                style={{ backgroundColor: "var(--chip)", color: "var(--text)" }}
-              >
-                <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: color }} />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="study-field px-1 py-4 flex items-center justify-between">
-        <button onClick={toggleCalm} role="switch" aria-label="حرکت کمتر" aria-checked={prefs.calm}
-          className={`w-11 h-6 rounded-full transition-all relative flex-shrink-0 ${prefs.calm ? "bg-[var(--accent)]" : "bg-[var(--toggle-off)]"}`}
-        >
-          <div className="bg-[var(--card)] rounded-full absolute top-0.5 transition-all"
-            style={{ width: "18px", height: "18px", right: prefs.calm ? "4px" : "20px" }} />
-        </button>
-        <div className="text-right">
-          <p className="text-[13px] font-semibold text-[var(--text)]">حرکت کمتر</p>
-          <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">فضایی آرام‌تر برای تمرکز</p>
-        </div>
-      </div>
-      <div className="study-field px-1 py-4 flex items-center justify-between">
-        <button onClick={logout} aria-label="خروج از حساب"
-          className="w-11 h-6 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-600 dark:text-red-400">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-          </svg>
-        </button>
-        <div className="text-right">
-          <p className="text-[13px] font-semibold text-[var(--text)]">خروج از حساب</p>
-          <p className="text-[11px] text-[var(--muted-2)] font-medium mt-0.5">خروج و حفظ اطلاعات همین حساب</p>
-        </div>
-      </div>
-    </div>,
-  ];
-
-  return (
-    <div className="min-h-screen bg-[var(--surface)] pb-10">
-      <div className="px-5 pt-12 pb-4 flex items-center gap-4 sticky top-0 bg-[var(--surface)]/95 backdrop-blur-sm z-10 border-b border-[var(--border)]">
-        <BackButton onClick={() => nav("home")} />
-        <div className="text-right">
-          <h1 className="font-display text-xl text-[var(--text)]">تکمیل پروفایل</h1>
-          <p className="text-[12px] text-[var(--muted-2)] font-medium">اطلاعات حساب، وضعیت درس‌ها و ظاهر برنامه را تنظیم کن.</p>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex overflow-x-auto px-5 py-3 gap-2 border-b border-[var(--border)]" style={{ scrollbarWidth: "none" }}>
-        {SECTIONS.map((s, i) => (
-          <button key={s} onClick={() => setActiveSection(i)}
-            className={`flex-shrink-0 py-2 px-4 rounded-xl text-[12px] font-bold transition-all ${
-              activeSection === i ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--chip)] text-[var(--muted)] hover:bg-[var(--chip-hover)]"
-            }`}
-          >{s}</button>
-        ))}
-      </div>
-
-      <div className="px-5 pt-5 pb-6">{sections[activeSection]}</div>
-
-      <div className="px-5">
-        {conflictNotice && (
-          <p role="status" className="mb-3 rounded-xl bg-[var(--accent-soft)] px-4 py-3 text-right text-[12px] font-semibold text-[var(--accent)]">
-            {conflictNotice}
-          </p>
-        )}
-        {(isChanged || saved) && (
-        <button onClick={save}
-          className={`w-full py-4 rounded-2xl font-bold text-[14px] transition-all active:scale-95 ${
-            saved ? "bg-[var(--success-bg)] text-[var(--success-text)]" : "bg-[var(--accent)] text-[var(--surface)] hover:opacity-90"
-          }`}
-          style={{ display: (isChanged || saved) ? 'block' : 'none' }}
-        >
-          {saved ? "ذخیره شد — هوش مصنوعی برنامهات رو آپدیت میکنه" : "ذخیره تغییرات"}
-        </button>
-
-        )}
-      </div>
+      <div className="flex gap-2"><input aria-label="نام آزمون دیگر" maxLength={80} className="boom-field" value={customExam} onChange={e => setCustomExam(e.target.value)}
+        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addExam(); } }} placeholder="نام آزمون دیگر" />
+        <button type="button" className="boom-button boom-button-secondary" disabled={!customExam.trim()} onClick={addExam}>افزودن</button></div>
+      <small className="text-[var(--muted)]">اگر در آزمونی شرکت نمی‌کنی، همهٔ گزینه‌ها را غیرفعال بگذار.</small>
     </div>
-  );
+    <Field label="سال کنکور (اختیاری)"><input className="boom-field" inputMode="numeric" value={draft.examYear} onChange={e => update("examYear", e.target.value)} placeholder="مثلاً ۱۴۰۶" /></Field>
+    <Field label="رتبهٔ هدف (اختیاری)"><input className="boom-field" inputMode="numeric" value={draft.targetRank} onChange={e => update("targetRank", e.target.value)} /></Field>
+    <Field label="تاریخ تولد (اختیاری)"><input type="date" className="boom-field" value={draft.birthday || ""} onChange={e => update("birthday", e.target.value)} /></Field>
+    <Field label="شهر (اختیاری)"><input className="boom-field" value={draft.city || ""} onChange={e => update("city", e.target.value)} /></Field>
+    <Field label="مدرسه (اختیاری)" wide><input className="boom-field" value={draft.school || ""} onChange={e => update("school", e.target.value)} /></Field>
+  </fieldset>;
+  return <div className="boom-page" dir="rtl">
+    <PageHeading eyebrow="حساب من" title="پروفایل و مسیر تحصیل" icon={<StudySymbol kind="plan" size={32} />}
+      description="رشته، پایه و زمان مطالعه‌ات را به‌روز نگه دار تا پیشنهادهای بوم با شرایط تو هماهنگ باشند."
+      actions={<button className="boom-button boom-button-secondary" onClick={() => nav("home")}>بازگشت به خانه</button>} />
+    <div className="profile-sections" role="tablist" aria-label="بخش‌های پروفایل">
+      {SECTIONS.map((section, index) => <button key={section} id={`profile-tab-${index}`} type="button" role="tab" aria-selected={activeSection === index}
+        aria-controls="profile-panel" onClick={() => setActiveSection(index)}>{section}</button>)}
+    </div>
+    <div className="profile-layout">
+      <section id="profile-panel" role="tabpanel" aria-labelledby={`profile-tab-${activeSection}`} className="boom-panel">
+        {activeSection === 0 && form}
+        {activeSection === 1 && <>
+          <p className="boom-page-description mb-5">ارزیابی شخصی تو از درس‌هاست؛ نتیجهٔ آزمون‌ها جداگانه ثبت می‌شود. تغییر رشته، ارزیابی قبلی درس‌ها را پاک نمی‌کند.</p>
+          {!subjects.length && <p className="boom-notice">ابتدا رشتهٔ تحصیلی را در بخش اطلاعات انتخاب کن.</p>}
+          {subjects.map(subject => <fieldset key={subject} disabled={saving} className="study-field py-5">
+            <legend className="font-semibold">{subject}</legend>
+            {(["completion", "confidence"] as const).map(key => <label className="profile-field mt-4" key={key}>
+              <span>{key === "completion" ? "پیشرفت در کتاب" : "اعتماد به پاسخ‌گویی"} · {(draft[key]?.[subject] ?? 0).toLocaleString("fa-IR")}٪</span>
+              <input aria-label={`${subject} ${key === "completion" ? "پیشرفت در کتاب" : "اعتماد به پاسخ‌گویی"}`} type="range" min={0} max={100} step={5}
+                value={draft[key]?.[subject] ?? 0} onChange={e => update(key, { ...draft[key], [subject]: Number(e.target.value) })} />
+            </label>)}
+          </fieldset>)}
+          {analytics.length > 0 && <section className="mt-6"><h2>عملکرد ثبت‌شده در ۳۰ روز اخیر</h2>
+            {analytics.map(item => <p className="study-field py-3 text-sm" key={item.subject}>{item.subject} · {item.minutes} دقیقه مطالعه · {item.accuracy == null ? "هنوز نتیجهٔ آزمون ندارد" : `دقت ${item.accuracy}٪`}</p>)}
+          </section>}
+        </>}
+        {activeSection === 2 && <>
+          <Switch label="حالت تاریک" description="ظاهر روشن یا تاریک در همهٔ صفحه‌ها" checked={dark} onClick={toggleDark} />
+          <Switch label="صدا" description="بازخورد کوتاه هنگام کار با برنامه" checked={prefs.sound} onClick={() => {
+            const next = updatePreferences({ sound: !prefs.sound }); setPrefs(next); if (next.sound) playFeedback("success");
+          }} />
+          <Switch label="حرکت کمتر" description="کاهش پویانمایی برای تمرکز بیشتر" checked={prefs.calm} onClick={() => setPrefs(updatePreferences({ calm: !prefs.calm }))} />
+          <div className="study-field py-5"><p className="mb-3 font-semibold">حال‌وهوای رنگی</p><div className="profile-options">
+            {(["coral", "mint", "iris"] as const).map((palette, index) => <button type="button" key={palette} aria-pressed={prefs.palette === palette}
+              onClick={() => setPrefs(updatePreferences({ palette }))}>{["غروب", "جنگل", "یاس"][index]}</button>)}
+          </div></div>
+          <div className="flex flex-wrap gap-3 mt-6">
+            <button className="boom-button boom-button-secondary" onClick={() => { localStorage.setItem("boom-reset-phone", userData?.phone || ""); nav("signup"); }}>تغییر رمز عبور با تأیید پیامکی</button>
+            <button className="boom-button boom-button-secondary" onClick={logout}>خروج از حساب</button>
+          </div>
+        </>}
+        <div className="profile-save" aria-live="polite">
+          {(isChanged || saving) && <button type="button" className="boom-button boom-button-primary" disabled={saving} onClick={() => void save()}>{saving ? "در حال ذخیره…" : "ذخیره تغییرات"}</button>}
+          {saveError && <p role="alert" className="text-[var(--error-text)]">{saveError}</p>}
+          {notice && <p role="status" className="text-[var(--success-text)]">{notice}</p>}
+          {!isChanged && !notice && !saveError && <p className="text-[var(--muted)]">تغییر ذخیره‌نشده‌ای نداری.</p>}
+        </div>
+      </section>
+      <aside className="boom-panel profile-side"><h2>اطلاعات حساب</h2>
+        <label className="profile-field mt-4"><span>شمارهٔ موبایل تأییدشده</span><input className="boom-field" dir="ltr" readOnly value={userData?.phone || ""} /></label>
+        <p className="mt-3">شمارهٔ موبایل در این بخش قابل تغییر نیست.</p>
+        <p className="mt-4">{savedData.major || "رشته ثبت نشده"} · {savedData.grade || "پایه ثبت نشده"}</p>
+        <p className="mt-3">تغییر رشته و پایه روی آزمون‌ها و برنامه‌های بعدی اثر می‌گذارد. سوابق قبلی حساب حفظ می‌شوند.</p>
+      </aside>
+    </div>
+  </div>;
 }

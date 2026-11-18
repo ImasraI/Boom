@@ -1,3 +1,4 @@
+import PageHeading from "../components/PageHeading";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl, apiJson, authHeaders, readApiError } from "../api";
 import type { NavFn } from "../types";
@@ -302,13 +303,8 @@ export default function Admin({ nav }: { nav: NavFn }) {
   const limits = payload?.limits ?? {};
 
   return (
-    <div className="p-5 md:p-8 space-y-6 max-w-3xl">
-      <div>
-        <h1 className="font-display text-2xl text-[var(--text)]">پنل مدیریت</h1>
-        <p className="text-xs text-[var(--muted-2)] mt-1">
-          تولید آزمون، بانک سوال، کلیدهای مدل و دسترسی کاربران را از بخش مربوط مدیریت کن.
-        </p>
-      </div>
+    <div className="boom-page space-y-6">
+      <PageHeading eyebrow="مدیریت بوم" title="پنل مدیریت" description="تولید آزمون، بانک سؤال، دسترسی کاربران و وضعیت سرویس‌ها." />
 
       <nav aria-label="بخش‌های مدیریت" className="flex flex-wrap gap-x-5 gap-y-2 border-b border-[var(--border)] pb-2">
         {[["generation", "تولید آزمون"], ["bank", "بانک سوال"], ["keys", "مدل‌ها و مصرف"], ["rag", "بررسی RAG"], ["users", "کاربران"], ["sms", "ورود و پیامک"]].map(([id, label]) =>

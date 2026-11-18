@@ -1,3 +1,4 @@
+import PageHeading from "../components/PageHeading";
 import { useEffect, useState } from "react";
 import { celebrate } from "../components/Experience";
 import { apiUrl, authHeaders, readApiError } from "../api";
@@ -11,7 +12,7 @@ type Overview = {
   completed: number; recorded: number; actual_minutes: number;
 };
 const faDate = (iso: string) => new Intl.DateTimeFormat("fa-IR", { dateStyle: "full" }).format(fromISO(iso));
-const card = "study-section py-5";
+const card = "boom-panel";
 
 export default function Plan({ nav }: { nav: NavFn; userData: SignupData | null }) {
   const [data, setData] = useState<Overview | null>(null);
@@ -49,8 +50,8 @@ export default function Plan({ nav }: { nav: NavFn; userData: SignupData | null 
     } catch (e) { setError(e instanceof Error ? e.message : "خطای ارتباط"); }
     finally { setSaving(false); }
   }
-  return <div className="min-h-screen p-5 md:p-8 space-y-5 max-w-5xl mx-auto text-right">
-    <header className="plan-heading"><span className="eyebrow">مسیر کنکور تو</span><h1 className="font-display text-2xl text-[var(--text)]">از برنامهٔ این هفته تا آزمون بعدی</h1></header>
+  return <div className="boom-page space-y-5 text-right">
+    <PageHeading eyebrow="مسیر کنکور تو" title="از این هفته تا آزمون بعدی" description="برنامه، فعالیت‌های واقعی و نتیجهٔ تمرین‌هایت را کنار هم ببین." />
     {data && <div className="plan-metrics"><div><span>زمان ثبت‌شده</span><strong>{data.actual_minutes.toLocaleString("fa-IR")} <small>دقیقه</small></strong></div><div><span>قدم‌های کامل</span><strong>{data.completed.toLocaleString("fa-IR")} <small>فعالیت</small></strong></div><div><span>آزمون پیش رو</span><strong>{data.exams.length.toLocaleString("fa-IR")} <small>آزمون</small></strong></div></div>}
     {error && <div role="alert" className={card}>{error}<button className="block text-[var(--accent)] mt-2" onClick={() => setRevision(n => n + 1)}>تلاش دوباره</button></div>}
     <div className={card}>

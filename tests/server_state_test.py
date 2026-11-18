@@ -93,6 +93,29 @@ def test_profile_blind_write_allowed_when_no_version_sent(db):
     assert out["profile"]["availability"]["wake"] == "06:30"
 
 
+def test_study_profile_edits_preserve_other_settings_and_verified_phone(db):
+    u = _user(db, "09140000991")
+    u.phone = "9140000991"
+    u.phone_verified = True
+    db.commit()
+    initial = profile_router.patch_profile(profile_router.ProfileIn(
+        major="ریاضی فیزیک", grade="دهم", exam_year="۱۴۰۶",
+        availability={"wake": "06:30", "daily_hours": {"جمعه": 0},
+                      "preferences": {"confidence": {"ریاضی": 75}, "school": "old"}}),
+        current_user=_Ctx(u), db=db)["profile"]
+    result = profile_router.patch_profile(profile_router.ProfileIn(
+        version=initial["version"], major="علوم تجربی", grade="یازدهم",
+        study_hours="۴ تا ۶ ساعت", test_exams=["ماز"], exam_year="",
+        availability={"preferences": {"school": "new", "city": "test"}}),
+        current_user=_Ctx(u), db=db)["profile"]
+    assert (result["major"], result["grade"], result["test_exams"]) == ("علوم تجربی", "یازدهم", ["ماز"])
+    assert result["exam_year"] == ""
+    assert result["availability"] == {"wake": "06:30", "daily_hours": {"جمعه": 0},
+        "preferences": {"confidence": {"ریاضی": 75}, "school": "new", "city": "test"}}
+    assert db.get(User, u.id).phone == "9140000991"
+    assert db.get(User, u.id).phone_verified
+
+
 def test_quick_session_log_roundtrip(db):
     u = _user(db, "09140000005")
     out = profile_router.create_session(

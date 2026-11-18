@@ -121,6 +121,22 @@ def test_mapping_keeps_grade_branches_and_printed_before_boundaries(weekly):
     assert {r['weekly_ranked_scope'] for r in result['plan']} == {result['scope']}
 
 
+def test_lobby_scope_does_not_assemble_stock_but_default_still_checks_it(weekly, monkeypatch):
+    monkeypatch.setattr(arena, '_knowledge_base', lambda *_: ('ریاضی فیزیک', 'دوازدهم'))
+    checked = []
+    def stock(*args):
+        checked.append(args)
+        return {'available': True, 'stock_available': False}
+    monkeypatch.setattr(weekly_ranked, 'available_preview', stock)
+    metadata = arena.duel_filters(current_user=SimpleNamespace(id=7), db=object(), check_stock=False)
+    assert metadata['weekly']['available']
+    assert metadata['weekly']['stock_available'] is None
+    assert checked == []
+    authoritative = arena.duel_filters(current_user=SimpleNamespace(id=7), db=object())
+    assert authoritative['weekly']['stock_available'] is False
+    assert len(checked) == 1
+
+
 def test_number_theory_accepts_exact_book_heading_and_excludes_later_congruences():
     assert weekly_ranked.topic_matches('آشنایی با نظریه اعداد', 'نظریه اعداد')
     assert weekly_ranked.topic_matches('آشنایی با نظریه اعداد', 'بخش پذیری')

@@ -149,7 +149,17 @@ def patch_profile(payload: ProfileIn,
         p.test_exams = json.dumps(payload.test_exams, ensure_ascii=False)
         changed = True
     if payload.availability is not None:
-        p.availability = json.dumps(payload.availability, ensure_ascii=False)
+        # Profile edits are partial: saving school or subject confidence must
+        # not erase the student's existing calendar hours or sleep settings.
+        existing = json.loads(p.availability or "{}")
+        merged = {**existing, **payload.availability}
+        if isinstance(payload.availability.get("preferences"), dict):
+            preferences = existing.get("preferences")
+            merged["preferences"] = {
+                **(preferences if isinstance(preferences, dict) else {}),
+                **payload.availability["preferences"],
+            }
+        p.availability = json.dumps(merged, ensure_ascii=False)
         changed = True
     if changed:
         p.version += 1

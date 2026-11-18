@@ -1,3 +1,4 @@
+import PageHeading from "../components/PageHeading";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { NavFn, SignupData } from "../types"
 import { apiUrl, apiJson, authHeaders, readApiError, ApiError } from "../api"
@@ -35,7 +36,7 @@ export function PreviousMazeOptions({ items, loading, error, onSelect, onRetry }
   items: PreviousMazeMock[]; loading: boolean; error: string
   onSelect: (item: PreviousMazeMock) => void; onRetry: () => void
 }) {
-  return <section aria-label="آزمون‌های قبلی ماز" className="max-w-[430px] mx-auto px-4 pt-5 text-[var(--text)]">
+  return <section aria-label="آزمون‌های قبلی ماز" className="max-w-[760px] mx-auto px-4 pt-5 text-[var(--text)]">
     <h2 className="font-bold">تمرین‌های آماده از آزمون‌های قبلی ماز</h2>
     <p className="text-sm text-[var(--muted)] mt-2">یکی از تمرین‌های موجود با مباحث آزمون قبلی را انتخاب کن.</p>
     {loading && <p role="status" className="text-sm py-3">در حال دریافت آزمون‌های قبلی…</p>}
@@ -185,15 +186,11 @@ export function ConfigView({ onStart, onBack, error, debugMode = DEBUG_MODE, maj
 
   return (
     <div className="min-h-screen bg-[var(--surface)] pb-16">
-      <div className="bg-[var(--card)] border-b border-[var(--border)] px-4 pt-12 pb-4 flex items-center gap-3">
-        <BackButton onClick={onBack} />
-        <div>
-          <h1 className="font-bold text-lg text-[var(--text)]">آزمون آزمایشی هوشمند</h1>
-          <p className="text-[11px] text-[var(--muted-2)]">دفترچه استاندارد کنکور از کتاب‌های خودت</p>
-        </div>
-      </div>
+      <PageHeading className="mock-page-heading" eyebrow="تمرین و ارزیابی" title="آزمون هوشمند"
+        description="قالب آزمون، محدودهٔ درسی و دفترچه‌های آماده را انتخاب کن."
+        actions={<button className="boom-button boom-button-secondary" onClick={onBack}>بازگشت</button>} />
 
-      <div className="px-4 mt-5 space-y-4 max-w-[430px] mx-auto">
+      <div className="px-4 mt-5 space-y-4 max-w-[760px] mx-auto">
         {error && (
           <div role="alert" className="border-s-4 border-red-500 bg-red-500/10 px-4 py-3 text-[13px] text-[var(--text)] leading-relaxed">
             <p>{error}</p>
@@ -439,7 +436,7 @@ function TestRunner({ info, questions, onFinish, onExit, error }: {
       {/* answer sheet */}
       {showSheet && (
         <div className="fixed inset-0 bg-black/40 z-40 flex items-end justify-center" onClick={() => setShowSheet(false)}>
-          <div className="w-full max-w-[430px] bg-[var(--card)] rounded-t-3xl p-5 pb-10 max-h-[70vh] overflow-auto" onClick={e => e.stopPropagation()}>
+          <div className="w-full max-w-[760px] bg-[var(--card)] rounded-t-3xl p-5 pb-10 max-h-[70vh] overflow-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <button onClick={submit} disabled={submitting} className="px-4 h-9 rounded-xl bg-[var(--accent)] text-white text-[12px] font-bold">پایان آزمون</button>
               <p className="text-[13px] font-bold text-[var(--text)]">پاسخ‌برگ — {answered} از {questions.length} پر شده</p>

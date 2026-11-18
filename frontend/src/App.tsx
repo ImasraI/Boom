@@ -227,7 +227,14 @@ export default function App() {
     if (!token) return;
     authFetch("/api/auth/me", { headers: authHeaders(token) })
       .then(res => res.ok ? res.json() : null)
-      .then(me => { if (localStorage.getItem(TOKEN_KEY) === token) setIsAdmin(Boolean(me?.is_admin)); })
+      .then(me => {
+        if (localStorage.getItem(TOKEN_KEY) !== token) return;
+        setIsAdmin(Boolean(me?.is_admin));
+        if (me?.phone) setUserData(prev => {
+          if (!prev) return prev;
+          const fresh = { ...prev, phone: me.phone }; persistUser(fresh); return fresh;
+        });
+      })
       .catch(() => {});
   }, []);
 
@@ -297,7 +304,14 @@ export default function App() {
     });
     authFetch("/api/auth/me", { headers: authHeaders(token) })
       .then(res => res.ok ? res.json() : null)
-      .then(me => { if (localStorage.getItem(TOKEN_KEY) === token) setIsAdmin(Boolean(me?.is_admin)); })
+      .then(me => {
+        if (localStorage.getItem(TOKEN_KEY) !== token) return;
+        setIsAdmin(Boolean(me?.is_admin));
+        if (me?.phone) setUserData(prev => {
+          if (!prev) return prev;
+          const fresh = { ...prev, phone: me.phone }; persistUser(fresh); return fresh;
+        });
+      })
       .catch(() => {});
   }
 

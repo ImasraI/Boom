@@ -7,7 +7,7 @@ import { accountStorage, accountStorageFor } from "./accountStorage";
  * second device can never be silently overwritten (409 -> server state wins
  * locally, explicitly - never a blind clobber in either direction).
  */
-import { apiUrl, authHeaders } from "./api";
+import { authFetch, apiJson } from "./api";
 import { normalizeSignupData, type SignupData } from "./types";
 
 const VERSION_KEY = "boom-profile-version";
@@ -52,6 +52,7 @@ export function toSignupData(p: ServerProfile | null, base: SignupData): SignupD
   return normalizeSignupData({
     ...base,
     ...p.availability?.preferences,
+    phone: base.phone,
     name: p.name ?? base.name,
     major: p.major ?? base.major,
     grade: p.grade ?? base.grade,
@@ -68,12 +69,13 @@ function toPayload(d: SignupData) {
     name: d.name || null,
     major: d.major || null,
     grade: d.grade || null,
-    exam_year: d.examYear || null,
-    target_rank: d.targetRank || null,
+    exam_year: d.examYear || "",
+    target_rank: d.targetRank || "",
     study_hours: d.studyHours || null,
     test_exams: d.testExams,
     availability: {
-      preferences: { completion: d.completion, confidence: d.confidence, maxConsec: d.maxConsec },
+      preferences: { completion: d.completion, confidence: d.confidence, maxConsec: d.maxConsec,
+        birthday: d.birthday, city: d.city, school: d.school },
       daily_hours: d.dailyHours && Object.keys(d.dailyHours).length ? d.dailyHours : undefined,
     },
   };
@@ -83,9 +85,7 @@ function toPayload(d: SignupData) {
 export async function pullServerProfile(): Promise<ServerProfile | null> {
   const cache = accountStorageFor();
   try {
-    const res = await fetch(apiUrl("/api/profile"), { headers: authHeaders() });
-    if (!res.ok) return null;
-    const data = await res.json();
+    const data = await apiJson<{ profile: ServerProfile }>("/api/profile", {}, 10000);
     const p = data?.profile as ServerProfile | undefined;
     if (p?.version != null) cache.setItem(VERSION_KEY, String(p.version));
     return p ?? null;
@@ -117,10 +117,13 @@ export async function pushProfile(
   data: SignupData,
 ): Promise<{ ok: boolean; conflict?: boolean; profile?: ServerProfile }> {
   const cache = accountStorageFor();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
   try {
-    const res = await fetch(apiUrl("/api/profile"), {
+    const res = await authFetch("/api/profile", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
       body: JSON.stringify({ ...toPayload(data), version: storedVersion() }),
     });
     if (res.status === 409) {
@@ -135,6 +138,8 @@ export async function pushProfile(
     if (p?.version != null) cache.setItem(VERSION_KEY, String(p.version));
     return { ok: true, profile: p };
   } catch {
-    return { ok: false }; // offline save stays in localStorage for now
+    return { ok: false };
+  } finally {
+    clearTimeout(timer);
   }
 }

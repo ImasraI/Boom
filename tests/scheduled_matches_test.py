@@ -360,7 +360,8 @@ def test_scheduled_list_reports_remaining_quota(db):
     assert listing["quota"]["remaining"] == listing["quota"]["limit"] - 1
 
 
-def test_private_room_shares_kickoff_and_booklet_without_ranked_rating(db, monkeypatch):
+@pytest.mark.parametrize('host_grade', ['دوازدهم', 'فارغ‌التحصیل'])
+def test_private_room_shares_kickoff_and_booklet_without_ranked_rating(db, monkeypatch, host_grade):
     import json
     from datetime import timezone
     from fastapi import FastAPI
@@ -372,7 +373,7 @@ def test_private_room_shares_kickoff_and_booklet_without_ranked_rating(db, monke
     host = _mk_user(db, "private-host", 1150)
     friend = _mk_user(db, "private-friend", 900)
     stranger = _mk_user(db, "private-stranger")
-    grades = ("دوازدهم", "دهم", "دهم")
+    grades = (host_grade, "دهم", "دهم")
     major = "علوم تجربی"
     for user, grade in zip((host, friend, stranger), grades):
         db.add(StudentProfile(user_id=user.id, major=major, grade=grade))

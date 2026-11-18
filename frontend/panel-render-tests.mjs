@@ -35,8 +35,10 @@ test('Mock page and its shared math/report modules load with an empty profile', 
 test('Ranked page loads its controls before account and filter requests finish', async () => {
   const {default:Arena} = await vite.ssrLoadModule('/src/pages/Arena.tsx');
   const html = renderToStaticMarkup(React.createElement(Arena, {nav(){},userData:null}));
-  assert.match(html, /۱۰ سوال از آزمون آیندهٔ ماز/);
-  assert.match(html, /در حال دریافت اطلاعات کولوسئوم/);
+  assert.match(html, /دفترچهٔ ۱۰ سؤالی مشترک/);
+  assert.match(html, /در حال دریافت کارنامه و محدودهٔ درسی/);
+  assert.match(html, /<button class="boom-button boom-button-primary">جستجوی حریف رنک‌دار<\/button>/);
+  assert.match(html, /<button class="boom-button boom-button-secondary">ساخت اتاق دوستانه<\/button>/);
   assert.doesNotMatch(html, /فیلتر دروس|type="checkbox"/);
   assert.doesNotMatch(html, /صفحه آماده نشد/);
 });
