@@ -32,6 +32,7 @@ interface PoolProgress {
   failures: number; last_error: string;
 }
 interface PoolPayload {
+  current_maze?: {major:string;grade:string;exam_date:string|null;mapping_ready:boolean;ready_booklets:number;questions_per_booklet:number;reason:string}[];
   target: number; shelves: Shelf[]; running?: boolean;
   cancel_requested?: boolean; progress?: PoolProgress;
   provider_health?: { blocked: boolean; message?: string; retry_at?: string; stage?: string; provider?: string };
@@ -496,7 +497,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
               {generating ? (pool?.run?.status === "waiting_for_quota" ? "منتظر بازنشانی سهمیه؛ ادامه خودکار" : "راستی‌آزمایی دفترچه فعلی") : "موجودی دفترچه‌ها"}
             </span>
             <span className="font-bold text-[var(--text)]">
-              {progress?.available ?? 0} دفترچه آماده
+              {pool?.current_maze ? pool.current_maze.reduce((sum, row) => sum + row.ready_booklets, 0) : '—'} دفترچهٔ آماده برای ماز جاری
             </span>
           </div>
           <div
@@ -523,7 +524,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
               )}
             </span>
             <span>
-              دوئل آماده: {progress?.duel_available ?? 0}
+              آرشیو دوئل‌ها (شامل دوره‌های قبلی): {progress?.duel_available ?? 0}
             </span>
           </div>
           {/* Question detail for the paper being written right now. */}
@@ -556,7 +557,14 @@ export default function Admin({ nav }: { nav: NavFn }) {
       </div>
       <div id="admin-bank" hidden={section !== "bank"} className="space-y-6">
       <section className="study-section p-5">
-        <h2 className="font-bold text-sm mb-4">بانک سوال و دفترچه‌های آماده</h2>
+        <h2 className="font-bold text-sm mb-4">دفترچه‌های مازِ دورهٔ جاری</h2>
+        <p className="text-xs text-[var(--muted)] mb-4">فقط دفترچهٔ آماده و استفاده‌نشده با محدودهٔ دقیق آزمون جاری شمارش می‌شود. تاریخ ساخت به‌تنهایی کافی نیست. نبود نگاشت معتبر به معنی آماده‌بودن آزمون نیست.</p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-5">{pool?.current_maze?.map(row => <div key={row.major+row.grade} className="boom-panel">
+          <p>{row.major} · {row.grade}</p><p className="text-xs text-[var(--muted)]">{row.exam_date || 'تاریخِ محدوده هنوز متصل نشده'}</p>
+          <strong>{row.ready_booklets} دفترچهٔ {row.questions_per_booklet} سؤالی</strong>
+          {!row.mapping_ready && <p className="text-xs text-[var(--error-text)]">نگاشت محدودهٔ این آزمون آماده نیست؛ آرشیو در این عدد حساب نشده است.</p>}
+        </div>)}</div>
+        <details><summary className="cursor-pointer text-sm mb-4">آرشیو همهٔ دوره‌ها و موجودی عمومی (خارج از شمارش ماز جاری)</summary>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {pool?.shelves.map(s => {
             return (
@@ -577,6 +585,7 @@ export default function Admin({ nav }: { nav: NavFn }) {
           })}
         </div>
         <div className="mt-5 overflow-x-auto"><table className="w-full text-xs text-start"><caption className="text-start text-[var(--muted)] mb-3">موجودی سوال‌های قابل استفاده به تفکیک رشته، پایه و درس</caption><thead><tr>{["رشته / پایه", "درس / سطح", "تاییدشده", "جدید", "استفاده‌شده"].map(label => <th key={label} className="text-start border-b border-[var(--border)] py-2 px-2 font-medium">{label}</th>)}</tr></thead><tbody>{pool?.inventory?.map(row => <tr key={`${row.major}/${row.grade}/${row.difficulty}/${row.subject}`}><td className="border-b border-[var(--border)] py-2 px-2">{row.major} · {row.grade || "همه پایه‌ها"}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.subject} · {DIFFICULTY_FA[row.difficulty] ?? row.difficulty}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.verified}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.unused}</td><td className="border-b border-[var(--border)] py-2 px-2">{row.used}</td></tr>)}</tbody></table>{!stockQuestions && <p className="text-xs text-[var(--muted)] py-3">هنوز سوال مشترک تاییدشده آماده نشده است.</p>}</div>
+      </details>
       </section>
       <CorruptQuestions />
       </div>
