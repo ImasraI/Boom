@@ -1,4 +1,4 @@
-/* Tournament's ruled layout and restrained surfaces, shared by every app screen. */
+/* Tournament styling applies to other screens; Home retains the original study desk. */
 html:not(.dark) { color-scheme: light; }
 html.dark { color-scheme: dark; }
 html.dark .schedule-block-frame[data-activity='mock'] .schedule-block { color: #fff; }
@@ -19,31 +19,31 @@ html.dark .schedule-block-frame[data-activity='mock'] .schedule-block { color: #
 .duel-result-rating > strong[data-positive='true'] { color:var(--success-text); }
 .duel-result-rating p { color:var(--muted); }
 :root { --ui-radius: 4px; --ui-space: clamp(18px, 3.2vw, 44px); }
-.boom-workspace { --font-heading: 'Boom Nazanin', 'Vazirmatn', serif; }
-.boom-workspace .font-display { font-family: var(--font-heading); }
-.boom-workspace .workspace-content { max-width: none; }
-.boom-workspace .page-scene { min-width: 0; animation-duration: .2s; }
-.boom-workspace .page-scene h1 { font-family: var(--font-heading); font-size: clamp(30px, 3.2vw, 44px); line-height: 1.5; }
-.boom-workspace .page-scene h2 { font-family: var(--font-heading); font-size: clamp(23px, 2.4vw, 30px); line-height: 1.6; }
-.boom-workspace .page-scene h3 { font-size: 17px; line-height: 1.8; }
-.boom-workspace :is(.rounded-3xl, .rounded-2xl, .rounded-xl, .rounded-lg) { border-radius: var(--ui-radius); }
-.boom-workspace button:not(.rounded-full):not(.schedule-block),
-.boom-workspace :is(input:not([type='range']):not([type='checkbox']):not([type='radio']), textarea, select) { border-radius: var(--ui-radius); }
-.boom-workspace :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.boom-workspace button:disabled { cursor: not-allowed; }
-.boom-workspace :is(.shadow-soft, .shadow-lift, .shadow-sm, .shadow-md, .shadow-lg) { box-shadow: none; }
-.boom-workspace :is(.plan-card, .study-section) { border: 1px solid var(--border); background: var(--card); border-radius: var(--ui-radius); box-shadow: none; }
-.boom-workspace .study-field { border-bottom: 1px solid var(--border); }
-.boom-workspace .workbench-bar { background: var(--surface); border-bottom: 1px solid var(--border); min-height: 55px; padding-inline: var(--ui-space); }
-.boom-workspace .workbench-settings { min-height: 40px; padding-inline: 10px; }
-.boom-workspace .boom-sidebar { background: var(--surface); }
+.boom-workspace:where(:not(.home-workspace)) { --font-heading: 'Boom Nazanin', 'Vazirmatn', serif; }
+.boom-workspace:where(:not(.home-workspace)) .font-display { font-family: var(--font-heading); }
+.boom-workspace:where(:not(.home-workspace)) .workspace-content { max-width: none; }
+.boom-workspace:where(:not(.home-workspace)) .page-scene { min-width: 0; animation-duration: .2s; }
+.boom-workspace:where(:not(.home-workspace)) .page-scene h1 { font-family: var(--font-heading); font-size: clamp(30px, 3.2vw, 44px); line-height: 1.5; }
+.boom-workspace:where(:not(.home-workspace)) .page-scene h2 { font-family: var(--font-heading); font-size: clamp(23px, 2.4vw, 30px); line-height: 1.6; }
+.boom-workspace:where(:not(.home-workspace)) .page-scene h3 { font-size: 17px; line-height: 1.8; }
+.boom-workspace:where(:not(.home-workspace)) :is(.rounded-3xl, .rounded-2xl, .rounded-xl, .rounded-lg) { border-radius: var(--ui-radius); }
+.boom-workspace:where(:not(.home-workspace)) button:not(.rounded-full):not(.schedule-block),
+.boom-workspace:where(:not(.home-workspace)) :is(input:not([type='range']):not([type='checkbox']):not([type='radio']), textarea, select) { border-radius: var(--ui-radius); }
+.boom-workspace:where(:not(.home-workspace)) :is(button, input, select, textarea):focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.boom-workspace:where(:not(.home-workspace)) button:disabled { cursor: not-allowed; }
+.boom-workspace:where(:not(.home-workspace)) :is(.shadow-soft, .shadow-lift, .shadow-sm, .shadow-md, .shadow-lg) { box-shadow: none; }
+.boom-workspace:where(:not(.home-workspace)) :is(.plan-card, .study-section) { border: 1px solid var(--border); background: var(--card); border-radius: var(--ui-radius); box-shadow: none; }
+.boom-workspace:where(:not(.home-workspace)) .study-field { border-bottom: 1px solid var(--border); }
+.boom-workspace:where(:not(.home-workspace)) .workbench-bar { background: var(--surface); border-bottom: 1px solid var(--border); min-height: 55px; padding-inline: var(--ui-space); }
+.boom-workspace:where(:not(.home-workspace)) .workbench-settings { min-height: 40px; padding-inline: 10px; }
+.boom-workspace:where(:not(.home-workspace)) .boom-sidebar { background: var(--surface); }
 /* Retain the chapter colors defined in desk.css for navigation identity. */
-.boom-workspace .boom-sidebar nav > div > p { font-size: 12px; }
-.boom-workspace .boom-sidebar nav button { min-height: 44px; }
-.boom-workspace .boom-sidebar nav button > span:nth-child(2) { font-size: 13px; }
-.boom-workspace nav[role='tablist'] { padding: 0 var(--ui-space); gap: 20px; background: var(--surface); }
-.boom-workspace nav[role='tablist'] button { min-height: 48px; font-family: 'Vazirmatn', sans-serif; padding-inline: 2px; }
-.boom-workspace nav[role='tablist'] button[aria-selected='true'] { color: var(--accent); border-bottom-color: var(--accent); }
+.boom-workspace:where(:not(.home-workspace)) .boom-sidebar nav > div > p { font-size: 12px; }
+.boom-workspace:where(:not(.home-workspace)) .boom-sidebar nav button { min-height: 44px; }
+.boom-workspace:where(:not(.home-workspace)) .boom-sidebar nav button > span:nth-child(2) { font-size: 13px; }
+.boom-workspace:where(:not(.home-workspace)) nav[role='tablist'] { padding: 0 var(--ui-space); gap: 20px; background: var(--surface); }
+.boom-workspace:where(:not(.home-workspace)) nav[role='tablist'] button { min-height: 48px; font-family: 'Vazirmatn', sans-serif; padding-inline: 2px; }
+.boom-workspace:where(:not(.home-workspace)) nav[role='tablist'] button[aria-selected='true'] { color: var(--accent); border-bottom-color: var(--accent); }
 .boom-page { max-width: 1240px; margin-inline: auto; padding: 28px var(--ui-space) 64px; }
 .boom-page-heading { display: flex; justify-content: space-between; align-items: end; gap: 24px; padding-bottom: 28px; margin-bottom: 28px; border-bottom: 1px solid var(--border-strong); }
 .boom-heading-copy { min-width: 0; }
@@ -70,24 +70,24 @@ html.dark .schedule-block-frame[data-activity='mock'] .schedule-block { color: #
 .boom-metric-strip > div:first-child { border: 0; padding-inline-start: 0; }
 .boom-metric-strip small { display: block; font-size: 12px; color: var(--muted); }
 .boom-metric-strip strong { display: block; margin-top: 7px; font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.boom-workspace .page-home .task-tile { box-shadow: none; border-inline-start-width: 2px; background: var(--card); }
-.boom-workspace .page-home .task-tile:hover { transform: none; border-color: var(--accent-soft-border); }
-.boom-workspace .page-home .desk-hero h1 { font-size: clamp(38px, 4.4vw, 60px); }
-.boom-workspace .page-home .desk-shortcuts > button { border-radius: var(--ui-radius); }
-.boom-workspace .auth-pane { border-inline-start: 1px solid var(--border); }
-.boom-workspace :is(.page-login, .page-signup) button { box-shadow: none; }
-.boom-workspace :is(.page-mock, .page-exams, .page-profile, .page-knowledge, .page-admin) .sticky { border-color: var(--border); }
-.boom-workspace :is(.page-plan, .page-exams, .page-knowledge, .page-admin) { max-width: 1280px; margin-inline: auto; }
-.boom-workspace .page-chat textarea { background: var(--field); }
-.boom-workspace .page-chat h1 { font: 600 22px/1.8 'Vazirmatn', sans-serif; }
+.boom-workspace:where(:not(.home-workspace)) .page-home .task-tile { box-shadow: none; border-inline-start-width: 2px; background: var(--card); }
+.boom-workspace:where(:not(.home-workspace)) .page-home .task-tile:hover { transform: none; border-color: var(--accent-soft-border); }
+.boom-workspace:where(:not(.home-workspace)) .page-home .desk-hero h1 { font-size: clamp(38px, 4.4vw, 60px); }
+.boom-workspace:where(:not(.home-workspace)) .page-home .desk-shortcuts > button { border-radius: var(--ui-radius); }
+.boom-workspace:where(:not(.home-workspace)) .auth-pane { border-inline-start: 1px solid var(--border); }
+.boom-workspace:where(:not(.home-workspace)) :is(.page-login, .page-signup) button { box-shadow: none; }
+.boom-workspace:where(:not(.home-workspace)) :is(.page-mock, .page-exams, .page-profile, .page-knowledge, .page-admin) .sticky { border-color: var(--border); }
+.boom-workspace:where(:not(.home-workspace)) :is(.page-plan, .page-exams, .page-knowledge, .page-admin) { max-width: 1280px; margin-inline: auto; }
+.boom-workspace:where(:not(.home-workspace)) .page-chat textarea { background: var(--field); }
+.boom-workspace:where(:not(.home-workspace)) .page-chat h1 { font: 600 22px/1.8 'Vazirmatn', sans-serif; }
 .mock-page-heading, .knowledge-page-heading { padding: 26px var(--ui-space); }
-.boom-workspace .page-schedule > div > div:first-child { border-color: var(--border); }
-.boom-workspace .page-login .font-display { line-height: 1.6; }
-.boom-workspace button[class~='bg-[var(--text)]'] { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-soft-border); }
-html.dark .boom-workspace button[class~='bg-[var(--accent)]'] { color: var(--action-ink) !important; }
-.boom-workspace .tournament-page :is(.tn-button, .tn-view-tabs button) { min-height: 44px; }
-.boom-workspace .tn-hero-title h1, .boom-workspace .tn-section-heading h2 { font-family: var(--font-heading); }
-.boom-workspace .tn-button-primary { color: var(--action-ink); background: var(--action); border-color: var(--action); }
+.boom-workspace:where(:not(.home-workspace)) .page-schedule > div > div:first-child { border-color: var(--border); }
+.boom-workspace:where(:not(.home-workspace)) .page-login .font-display { line-height: 1.6; }
+.boom-workspace:where(:not(.home-workspace)) button[class~='bg-[var(--text)]'] { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-soft-border); }
+html.dark .boom-workspace:where(:not(.home-workspace)) button[class~='bg-[var(--accent)]'] { color: var(--action-ink) !important; }
+.boom-workspace:where(:not(.home-workspace)) .tournament-page :is(.tn-button, .tn-view-tabs button) { min-height: 44px; }
+.boom-workspace:where(:not(.home-workspace)) .tn-hero-title h1, .boom-workspace:where(:not(.home-workspace)) .tn-section-heading h2 { font-family: var(--font-heading); }
+.boom-workspace:where(:not(.home-workspace)) .tn-button-primary { color: var(--action-ink); background: var(--action); border-color: var(--action); }
 .profile-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; align-items: start; }
 .profile-sections { display: flex; border-bottom: 1px solid var(--border-strong); gap: 22px; margin-bottom: 24px; overflow-x: auto; }
 .profile-sections button { min-height: 48px; white-space: nowrap; border-bottom: 2px solid transparent; font-size: 13px; color: var(--muted); }
@@ -110,6 +110,18 @@ html.dark .boom-workspace button[class~='bg-[var(--accent)]'] { color: var(--act
 .arena-rules li { padding-inline-start: 6px; margin-block: 10px; }
 .arena-rules li::marker { color: var(--desk-gold); }
 .arena-status { min-height: 26px; color: var(--muted); font-size: 13px; }
+.arena-discovery-wrap { padding-top: 0; }
+.arena-discovery-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.arena-discovery-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; }
+.arena-discovery-intro { color: var(--muted); font-size: 13px; line-height: 2; margin-bottom: 14px; }
+.arena-discovery-list { list-style: none; padding: 0; margin: 0 0 18px; max-height: 580px; overflow-y: auto; }
+.arena-discovery-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 18px; border-bottom: 1px solid var(--border); }
+.arena-discovery-list li > div { min-width: 0; overflow-wrap: anywhere; }
+.arena-discovery-list p, .arena-discovery-list small { color: var(--muted); font-size: 12px; line-height: 2; }
+.arena-discovery-list button { flex-shrink: 0; }
+.duel-public-choice { display: flex; gap: 12px; align-items: start; padding: 16px; border: 1px solid var(--border-strong); margin-block: 18px; cursor: pointer; }
+.duel-public-choice input { width: 20px; height: 20px; margin-top: 4px; accent-color: var(--accent); flex-shrink: 0; }
+.duel-public-choice small { display: block; color: var(--muted); line-height: 2; margin-top: 6px; }
 .pilot-entry { max-width: 1152px; margin: 20px auto 0; padding: 18px 22px; border: 1px solid var(--border); border-inline-start: 2px solid var(--accent); border-radius: var(--ui-radius); background: var(--card); }
 .pilot-entry summary { min-height: 32px; color: var(--text-strong); }
 .pilot-question { border: 1px solid var(--border); padding: 20px; margin-block: 22px; background: var(--card); }
@@ -130,7 +142,9 @@ html.dark .boom-workspace button[class~='bg-[var(--accent)]'] { color: var(--act
   .profile-save .boom-button { width: 100%; }
   .pilot-entry { margin-inline: 18px; padding: 16px; }
   .pilot-options { grid-template-columns: minmax(0, 1fr); }
-  .boom-workspace .page-home .desk-hero { padding-inline: 18px; }
+  .boom-workspace:where(:not(.home-workspace)) .page-home .desk-hero { padding-inline: 18px; }
 }
 @media (max-width: 600px) { .profile-fields { grid-template-columns: minmax(0, 1fr); } }
-@media (prefers-reduced-motion: reduce) { .boom-workspace .page-scene, .boom-button { animation: none; transition: none; } }
+@media (max-width: 900px) { .arena-discovery-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 480px) { .arena-discovery-list li { align-items: stretch; flex-direction: column; } }
+@media (prefers-reduced-motion: reduce) { .boom-workspace:where(:not(.home-workspace)) .page-scene, .boom-button { animation: none; transition: none; } }

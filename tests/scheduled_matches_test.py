@@ -80,6 +80,57 @@ def _future(hours=2):
     return (datetime.utcnow() + timedelta(hours=hours)).isoformat()
 
 
+def test_public_rooms_require_opt_in_and_hide_ineligible_or_full_rooms(db):
+    from app.auth.database import ArenaRoom, StudentProfile
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.auth.security import create_access_token
+    from sqlalchemy import select
+    host, guest, other = [_mk_user(db, name) for name in ('public-host', 'public-guest', 'public-other')]
+    for user, major in [(host, 'علوم تجربی'), (guest, 'علوم تجربی'), (other, 'ریاضی فیزیک')]:
+        db.add(StudentProfile(user_id=user.id, major=major, grade='دهم'))
+    db.commit()
+    app = FastAPI()
+    app.include_router(arena.router)
+    app.dependency_overrides[arena.get_db] = lambda: db
+    def headers(user):
+        return {'Authorization': 'Bearer ' + create_access_token({'sub': str(user.id)})}
+    with TestClient(app) as client:
+        assert client.get('/api/arena/rooms').status_code == 401
+        created = client.post('/api/arena/rooms', headers=headers(host)).json()
+        code = created['code']
+        assert created['is_public'] is False
+        listing = lambda actor: client.get('/api/arena/rooms', headers=headers(actor)).json()['rooms']
+        assert listing(guest) == []
+        visibility = '/api/arena/rooms/' + code + '/visibility'
+        assert client.patch(visibility, json={'is_public': True}, headers=headers(guest)).status_code == 403
+        assert client.patch(visibility, json={}, headers=headers(host)).status_code == 422
+        assert client.patch(visibility, json={'is_public': True}, headers=headers(host)).status_code == 200
+        assert [row['code'] for row in listing(guest)] == [code]
+        assert set(listing(guest)[0]) == {'code', 'host', 'major', 'grade', 'is_mine'}
+        assert client.get('/api/arena/rooms/' + code, headers=headers(guest)).status_code == 403
+        assert listing(other) == []
+        profile = db.scalar(select(StudentProfile).where(StudentProfile.user_id == guest.id))
+        profile.grade = 'یازدهم'; db.commit()
+        assert listing(guest) == []
+        profile.grade = 'دهم'; db.commit()
+        assert client.patch(visibility, json={'is_public': False}, headers=headers(host)).status_code == 200
+        assert listing(guest) == []
+        client.patch(visibility, json={'is_public': True}, headers=headers(host))
+        room = db.get(ArenaRoom, code)
+        room.expires_at = datetime.utcnow() - timedelta(seconds=1); db.commit()
+        assert listing(guest) == []
+        room.expires_at = datetime.utcnow() + timedelta(hours=1); db.commit()
+        assert client.post('/api/arena/rooms/' + code + '/join', headers=headers(guest)).status_code == 200
+        assert listing(host) == []
+        assert client.patch(visibility, json={'is_public': False}, headers=headers(host)).status_code == 409
+
+
+def test_public_rooms_missing_profile_is_an_explicit_empty_state(db):
+    actor = _mk_user(db, 'no-public-profile')
+    assert arena.list_public_rooms(current_user=_ctx(actor), db=db) == {'rooms': [], 'profile_required': True}
+
+
 def test_create_invite_stores_utc_kickoff_and_validates(db):
     host = _mk_user(db, "09120000001")
     view = arena.create_scheduled(

@@ -124,7 +124,7 @@ function Shell({ children, screen, nav, isAdmin, onSettings }: { children: React
   const hideSidebar = ["landing", "login", "signup"].includes(screen);
   const panelKey = hideSidebar ? null : (panelOf(screen)?.key ?? null);
   return (
-    <div dir="rtl" className="boom-workspace min-h-screen bg-[var(--page-bg)]">
+    <div dir="rtl" className={`boom-workspace ${screen === "home" ? "home-workspace" : ""} min-h-screen bg-[var(--page-bg)]`}>
       <Experience />
       {!hideSidebar && <DesktopSidebar screen={screen} nav={nav} isAdmin={isAdmin} />}
       {!hideSidebar && <MobileTabBar screen={screen} nav={nav} isAdmin={isAdmin} />}

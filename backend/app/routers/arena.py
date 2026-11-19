@@ -47,7 +47,7 @@ import random as _random
 from app.auth.deps import get_current_user, get_db
 from app.auth.limits import consume_ai_use, feature_quota, release_ai_use
 from app.rag import knowledge_base as kb, mock_generation, pool_core
-from app.rag.konkur_format import major_key
+from app.rag.konkur_format import major_key, MAJOR_ALIASES
 from app.rag.provider_quota import DAILY_QUOTA_MESSAGE, pool_quota_status, require_pool_available
 from app.rag.weekly_ranked import exam_day
 from app.config import get_settings
@@ -852,6 +852,7 @@ def _room_view(db, room, user_id):
         "host": _arena_name(db, db.get(User, room.host_id)),
         "guest": _arena_name(db, db.get(User, room.guest_id)) if room.guest_id else None,
         "is_host": user_id == room.host_id,
+        "is_public": room.is_public,
         "host_ready": room.host_ready,
         "guest_ready": room.guest_ready,
         "match_id": room.match_id,
@@ -875,6 +876,56 @@ def create_room(current_user: User = Depends(get_current_user), db: Session = De
                              expires_at=now + timedelta(hours=2))
             db.add(room)
             db.commit()
+        return _room_view(db, room, current_user.id)
+
+
+@router.get("/rooms")
+def list_public_rooms(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        major, grade = _room_scope(db, current_user.id)
+    except HTTPException as exc:
+        if exc.status_code != 409:
+            raise
+        return {"rooms": [], "profile_required": True}
+    # Filter before limiting: other majors must not crowd out eligible rooms.
+    labels = [label for label, key in MAJOR_ALIASES.items() if key == major] + [major]
+    grades = [grade, "فارغ‌التحصیل"] if grade == "دوازدهم" else [grade]
+    rows = db.execute(select(ArenaRoom, User, StudentProfile).join(
+        User, User.id == ArenaRoom.host_id).join(
+        StudentProfile, StudentProfile.user_id == ArenaRoom.host_id).where(
+        ArenaRoom.is_public.is_(True), ArenaRoom.guest_id.is_(None),
+        ArenaRoom.match_id.is_(None), ArenaRoom.expires_at > datetime.utcnow(),
+        StudentProfile.major.in_(labels), StudentProfile.grade.in_(grades),
+    ).order_by(ArenaRoom.expires_at.desc()).limit(50)).all()
+    rooms = []
+    for room, host, profile in rows:
+        host_grade = "دوازدهم" if profile.grade == "فارغ‌التحصیل" else profile.grade
+        if _major_key_of(profile.major or "") != major or host_grade != grade:
+            continue
+        rooms.append({"code": room.code, "host": _arena_name(db, host),
+                      "major": pool_core.CANONICAL_MAJOR[major], "grade": grade,
+                      "is_mine": room.host_id == current_user.id})
+        if len(rooms) == 50:
+            break
+    return {"rooms": rooms, "profile_required": False}
+
+
+class RoomVisibilityPayload(BaseModel):
+    is_public: bool
+
+
+@router.patch("/rooms/{code}/visibility")
+def set_room_visibility(code: str, payload: RoomVisibilityPayload,
+                        current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    with _room_lock(('room', code)):
+        room = _find_room(db, code)
+        if current_user.id != room.host_id:
+            raise HTTPException(403, "فقط میزبان می‌تواند اتاق را عمومی کند.")
+        if room.guest_id is not None or room.match_id is not None:
+            raise HTTPException(409, "اتاقی که بازیکن دوم دارد قابل تغییر نیست.")
+        _room_scope(db, current_user.id)
+        room.is_public = payload.is_public
+        db.commit()
         return _room_view(db, room, current_user.id)
 
 

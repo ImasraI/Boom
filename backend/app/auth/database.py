@@ -426,13 +426,14 @@ class ArenaMatch(Base):
 
 
 class ArenaRoom(Base):
-    """An invitation to a single private duel."""
+    """An unranked duel invitation; public discovery requires host opt-in."""
     __tablename__ = "arena_rooms"
     code = Column(String, primary_key=True)
     host_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     guest_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     host_ready = Column(Boolean, nullable=False, default=False)
     guest_ready = Column(Boolean, nullable=False, default=False)
+    is_public = Column(Boolean, nullable=False, default=False)
     match_id = Column(Integer, ForeignKey("arena_matches.id"), nullable=True)
     expires_at = Column(DateTime, nullable=False)
 
@@ -619,6 +620,7 @@ def ensure_schema() -> None:
     # is_ai_opponent defaults to 0 = a real ranked match).
     _ensure_column("arena_matches", "is_ai_opponent", "BOOLEAN DEFAULT 0")
     _ensure_column("arena_matches", "is_private", "BOOLEAN NOT NULL DEFAULT 0")
+    _ensure_column("arena_rooms", "is_public", "BOOLEAN NOT NULL DEFAULT 0")
     # Scheduled duels (arena scheduling option): kickoff timestamp + who
     # booked the match. Null on every classic row.
     _ensure_column("arena_matches", "starts_at", "TIMESTAMP")

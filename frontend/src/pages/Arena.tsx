@@ -12,6 +12,7 @@ import type { QuestionFigureData } from "../questionFigures"
 
 import DuelCalendar, { validDuelTime } from "../components/DuelCalendar"
 import DuelRoom from "../components/DuelRoom"
+import ArenaDiscovery from "../components/ArenaDiscovery"
 import { duelCode, forgetDuelLink } from "../duelLink"
 import { timestamp } from "../components/tournament/format"
 import "../tournament.css"
@@ -219,16 +220,6 @@ function Lobby({ me, onJoin, onBoard, onScheduled, onRoom, onProfile, busy, load
       <div><small>باخت</small><strong>{me ? faNum(me.losses) : "—"}</strong></div>
     </div>
     <div className="arena-layout">
-      <section className="boom-panel">
-        <h2 className="boom-section-heading">مسابقه چطور پیش می‌رود؟</h2>
-        <ol className="arena-rules">
-          <li>هر دو بازیکن یک دفترچهٔ ۱۰ سؤالی مشترک دریافت می‌کنند.</li>
-          <li>رشته و پایهٔ مشترک، محدودهٔ سؤال‌ها را مشخص می‌کند.</li>
-          <li>در رقابت رنک‌دار، حریف واقعی و نزدیک به امتیازت پیدا می‌شود؛ ربات جای بازیکن نمی‌نشیند.</li>
-          <li>پاسخ‌ها با نمرهٔ منفی کنکور تصحیح می‌شوند. نتیجهٔ رقابت رنک‌دار روی رتبه اثر می‌گذارد.</li>
-          <li>در اتاق دوستانه، هر دو «آماده‌ام» را می‌زنید و با شمارش معکوس سه‌ثانیه‌ای شروع می‌کنید. رتبه تغییر نمی‌کند.</li>
-        </ol>
-      </section>
       <section className="boom-panel arena-actions">
         <h2>آمادهٔ رقابت؟</h2>
         <p>{filters?.major ? `${filters.major} · ${filters.grade}` : "سؤال‌ها با رشته و پایهٔ ذخیره‌شده در پروفایلت انتخاب می‌شوند."}</p>
@@ -241,6 +232,16 @@ function Lobby({ me, onJoin, onBoard, onScheduled, onRoom, onProfile, busy, load
         <p className="text-xs">آماده‌بودن دفترچه هنگام ورود بررسی می‌شود. برای محدودهٔ هفتگی ماز، در نبود سؤال کافی از نسخهٔ تأییدشدهٔ قبلی استفاده می‌شود.</p>
         <WeeklyStockNotice weekly={filters?.weekly} />
         {error && <p className="boom-notice" role="alert">{error}</p>}
+      </section>
+      <section className="boom-panel">
+        <h2 className="boom-section-heading">مسابقه چطور پیش می‌رود؟</h2>
+        <ol className="arena-rules">
+          <li>هر دو بازیکن یک دفترچهٔ ۱۰ سؤالی مشترک دریافت می‌کنند.</li>
+          <li>رشته و پایهٔ مشترک، محدودهٔ سؤال‌ها را مشخص می‌کند.</li>
+          <li>در رقابت رنک‌دار، حریف واقعی و نزدیک به امتیازت پیدا می‌شود؛ ربات جای بازیکن نمی‌نشیند.</li>
+          <li>پاسخ‌ها با نمرهٔ منفی کنکور تصحیح می‌شوند. نتیجهٔ رقابت رنک‌دار روی رتبه اثر می‌گذارد.</li>
+          <li>در اتاق دوستانه، هر دو «آماده‌ام» را می‌زنید و با شمارش معکوس سه‌ثانیه‌ای شروع می‌کنید. رتبه تغییر نمی‌کند.</li>
+        </ol>
       </section>
     </div>
   </div>;
@@ -1040,6 +1041,7 @@ export default function Arena({ nav, userData, initialPhase }: {
   return <><Lobby me={me} onJoin={join} onBoard={openBoard} busy={false} loading={loadingLobby} onProfile={() => nav("profile")}
     filters={filters}
     error={lobbyError || error} onScheduled={openScheduled} onRoom={() => setPhase("room")} />
+    <div className="boom-page arena-discovery-wrap"><ArenaDiscovery onRoom={code => { setRoomInvite(code); setPhase("room") }} onScheduled={openScheduled} onMatch={enterScheduledMatch} /></div>
     {lobbyError && <div className="px-4 py-5 text-center"><button onClick={() => setLobbyRetry(n => n + 1)} className="text-sm text-[var(--accent)]">تلاش دوباره برای دریافت کولوسئوم</button></div>}
     <StudentPilot /></>
 }

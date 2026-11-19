@@ -8,6 +8,7 @@ type Room = {
   code: string; host: string; guest: string | null; is_host: boolean
   host_ready: boolean; guest_ready: boolean; match_id: number | null
   starts_at: string | null; server_now: string
+  is_public: boolean
 }
 
 const roomPath = (code: string, action = "") => "/api/arena/rooms/" + encodeURIComponent(code) + action
@@ -128,6 +129,18 @@ export default function DuelRoom({ invite, onBack, onStart }: {
     } catch { setCopied(false) }
   }
 
+  async function changeVisibility(is_public: boolean) {
+    if (!room || busy) return
+    setBusy(true)
+    setError("")
+    try {
+      acceptRoom(await apiJson<Room>(roomPath(room.code, "/visibility"), {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_public }),
+      }))
+    } catch (failure) { setError(errorText(failure)) }
+    finally { setBusy(false) }
+  }
+
   async function leave() {
     if (room && !room.match_id) {
       setBusy(true)
@@ -155,6 +168,10 @@ export default function DuelRoom({ invite, onBack, onStart }: {
         <label>لینک دعوت <input dir="ltr" readOnly value={roomUrl(room.code).href} onFocus={event => event.target.select()} /></label>
         <button className="tn-button tn-button-secondary" type="button" onClick={() => void copyLink()}>{copied ? "کپی شد" : "کپی لینک"}</button>
       </div>}
+      {room.is_host && !room.guest && !room.match_id && <label className="duel-public-choice">
+        <input type="checkbox" checked={room.is_public} disabled={busy} onChange={event => void changeVisibility(event.target.checked)} />
+        <span>نمایش در اتاق‌های عمومی کولوسئوم<small>دانش‌آموزان هم‌رشته و هم‌پایه می‌توانند وارد شوند. با خاموش بودن، ورود فقط با لینک دعوت است.</small></span>
+      </label>}
       {room.match_id ? <div className="duel-countdown" role="status" aria-live="polite">
         {seconds > 0 ? <><span>شروع دوئل</span><strong>{faNumber(seconds)}</strong></> : <span>در حال باز کردن دفترچه…</span>}
         {error && <button className="tn-button tn-button-secondary" type="button" onClick={() => {
